@@ -428,10 +428,10 @@ function bindExpandTimeBtn() {
 /* ─── Mobile output toggle ─── */
 
 function initMobileOutput() {
-  if (window.innerWidth <= 640) {
-    document.querySelector('.output-pane').classList.add('mobile-collapsed');
-    const btn = document.getElementById('mobile-output-toggle');
-    if (btn) btn.setAttribute('aria-expanded', 'false');
+  const btn = document.getElementById('mobile-output-toggle');
+  if (btn) {
+    btn.setAttribute('aria-expanded', 'true');
+    btn.setAttribute('aria-label', '收合程式碼');
   }
 }
 
