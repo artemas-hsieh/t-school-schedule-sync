@@ -94,8 +94,9 @@ function syncMyScheduleToCalendar_(options) {
   }
 
   const syncStartDate = getSyncStartDate_();
-  const rescheduleNotices = findNewRescheduleNotices_(sheet);
-  const events = parseMyGradeEvents_(sheet).filter(item => item.date >= syncStartDate);
+  const sheetContext = buildSheetContext_(sheet);
+  const rescheduleNotices = findNewRescheduleNotices_(sheetContext);
+  const events = parseMyGradeEvents_(sheetContext).filter(item => item.date >= syncStartDate);
   const oldState = loadState_();
   const keptState = {};
   const newState = {};
@@ -134,16 +135,31 @@ function syncMyScheduleToCalendar_(options) {
   Logger.log(\`同步完成，自 \${formatDateKey_(syncStartDate)} 起共 \${events.length} 筆事件。\`);
 }
 
-function parseMyGradeEvents_(sheet) {
+function buildSheetContext_(sheet) {
   const range = sheet.getDataRange();
   const values = range.getValues();
   const displays = range.getDisplayValues();
-
   const grade = findGradeBlock_(values, CONFIG.gradeName);
   const weekRows = findWeekRows_(values, grade.labelCol);
 
+  return {
+    sheet,
+    range,
+    values,
+    displays,
+    grade,
+    weekRows,
+    matchContext: buildMatchContext_()
+  };
+}
+
+function parseMyGradeEvents_(sheetContext) {
+  const values = sheetContext.values;
+  const displays = sheetContext.displays;
+  const grade = sheetContext.grade;
+  const weekRows = sheetContext.weekRows;
   const events = [];
-  const mergedMap = buildMergedRangeMap_(sheet);
+  const mergedMap = buildMergedRangeMap_(sheetContext.range);
   const handledMergedCells = {};
 
   weekRows.forEach((weekStartRow, index) => {
@@ -196,7 +212,7 @@ function parseMyGradeEvents_(sheet) {
           }
 
           const parsed = parseCourseCell_(rawText);
-          const matched = classifyMatchedEvent_(parsed.title);
+          const matched = classifyMatchedEvent_(parsed.title, sheetContext.matchContext);
 
           if (!matched.shouldInclude) {
             return;
@@ -262,9 +278,9 @@ function parseMyGradeEvents_(sheet) {
   return mergeContinuousEvents_(events);
 }
 
-function buildMergedRangeMap_(sheet) {
+function buildMergedRangeMap_(range) {
   const map = {};
-  const mergedRanges = sheet.getDataRange().getMergedRanges();
+  const mergedRanges = range.getMergedRanges();
 
   mergedRanges.forEach(range => {
     const startRow = range.getRow();
@@ -408,12 +424,67 @@ function buildDayGroups_(values, displays, dateRow, weekdayRow, grade) {
   return groups;
 }
 
-function classifyMatchedEvent_(title) {
+function buildMatchContext_() {
+  const gradeDictionary = COURSE_DICTIONARY[CONFIG.gradeName] || {};
+  const gradeOtherEvents = getGradeOtherEvents_();
+  const selectedCandidates = [];
+  const otherEventCandidates = [];
+  const knownCandidates = [];
+
+  SELECTED_COURSES.forEach(selectedCourse => {
+    const normalizedSelectedCourse = normalizeCourseName_(selectedCourse);
+
+    addPreparedCandidate_(selectedCandidates, selectedCourse);
+
+    for (const baseCourse in gradeDictionary) {
+      if (normalizeCourseName_(baseCourse) !== normalizedSelectedCourse) {
+        continue;
+      }
+
+      addPreparedCandidates_(selectedCandidates, gradeDictionary[baseCourse] || []);
+    }
+  });
+
+  for (const baseCourse in gradeDictionary) {
+    addPreparedCandidate_(knownCandidates, baseCourse);
+    addPreparedCandidates_(knownCandidates, gradeDictionary[baseCourse] || []);
+  }
+
+  addPreparedCandidates_(otherEventCandidates, gradeOtherEvents);
+  addPreparedCandidates_(knownCandidates, getGradeRequiredCourseEvents_());
+  addPreparedCandidates_(knownCandidates, gradeOtherEvents);
+
+  return {
+    selectedCandidates,
+    otherEventCandidates,
+    knownCandidates
+  };
+}
+
+function addPreparedCandidates_(target, candidates) {
+  (candidates || []).forEach(candidate => addPreparedCandidate_(target, candidate));
+}
+
+function addPreparedCandidate_(target, candidate) {
+  const parsed = parseCourseCell_(candidate);
+  const normalizedTitle = normalizeCourseName_(parsed.title);
+
+  if (normalizedTitle && target.indexOf(normalizedTitle) === -1) {
+    target.push(normalizedTitle);
+  }
+}
+
+function matchesPreparedCandidates_(normalizedTitle, candidates) {
+  return candidates.some(candidate => {
+    return isNormalizedCourseTitlePatternMatch_(normalizedTitle, candidate);
+  });
+}
+
+function classifyMatchedEvent_(title, matchContext) {
+  const context = matchContext || buildMatchContext_();
   const normalizedTitle = normalizeCourseName_(title);
 
-  const matchedCourse = SELECTED_COURSES.some(course => {
-    return isSelectedCourseTitle_(normalizedTitle, course);
-  });
+  const matchedCourse = matchesPreparedCandidates_(normalizedTitle, context.selectedCandidates);
 
   if (matchedCourse) {
     return {
@@ -423,9 +494,7 @@ function classifyMatchedEvent_(title) {
   }
 
   const matchedKnownOtherEvent = INCLUDE_NON_ELECTIVE_EVENTS &&
-    getGradeOtherEvents_().some(candidate => {
-      return isDictionaryCandidateTitle_(normalizedTitle, candidate);
-    });
+    matchesPreparedCandidates_(normalizedTitle, context.otherEventCandidates);
 
   if (matchedKnownOtherEvent) {
     return {
@@ -435,7 +504,7 @@ function classifyMatchedEvent_(title) {
   }
 
   const matchedNewNonCourseEvent = INCLUDE_NON_ELECTIVE_EVENTS &&
-    !isKnownGradeCourseOrEventTitle_(normalizedTitle);
+    !matchesPreparedCandidates_(normalizedTitle, context.knownCandidates);
 
   if (matchedNewNonCourseEvent) {
     return {
@@ -450,37 +519,6 @@ function classifyMatchedEvent_(title) {
   };
 }
 
-function isSelectedCourseTitle_(normalizedTitle, selectedCourse) {
-  if (isSelectedCourseDictionaryTitle_(normalizedTitle, selectedCourse)) {
-    return true;
-  }
-
-  return isCourseTitlePatternMatch_(normalizedTitle, selectedCourse);
-}
-
-function isSelectedCourseDictionaryTitle_(normalizedTitle, selectedCourse) {
-  const gradeDictionary = COURSE_DICTIONARY[CONFIG.gradeName] || {};
-  const normalizedCourse = normalizeCourseName_(selectedCourse);
-
-  for (const baseCourse in gradeDictionary) {
-    if (normalizeCourseName_(baseCourse) !== normalizedCourse) {
-      continue;
-    }
-
-    const candidates = gradeDictionary[baseCourse] || [];
-    if (candidates.some(candidate => isDictionaryCandidateTitle_(normalizedTitle, candidate))) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isDictionaryCandidateTitle_(normalizedTitle, candidate) {
-  const parsed = parseCourseCell_(candidate);
-  return isCourseTitlePatternMatch_(normalizedTitle, parsed.title);
-}
-
 function getGradeOtherEvents_() {
   const gradeEvents = NON_ELECTIVE_EVENTS[CONFIG.gradeName] || {};
   return Array.isArray(gradeEvents) ? gradeEvents : gradeEvents['其他'] || [];
@@ -491,28 +529,12 @@ function getGradeRequiredCourseEvents_() {
   return Array.isArray(gradeEvents) ? [] : gradeEvents['必修課程'] || [];
 }
 
-function isKnownGradeCourseOrEventTitle_(normalizedTitle) {
-  const candidates = getAllKnownGradeTitleCandidates_();
-  return candidates.some(candidate => isDictionaryCandidateTitle_(normalizedTitle, candidate));
-}
-
-function getAllKnownGradeTitleCandidates_() {
-  const gradeDictionary = COURSE_DICTIONARY[CONFIG.gradeName] || {};
-  const candidates = [];
-
-  for (const baseCourse in gradeDictionary) {
-    candidates.push(baseCourse);
-    candidates.push.apply(candidates, gradeDictionary[baseCourse] || []);
-  }
-
-  candidates.push.apply(candidates, getGradeRequiredCourseEvents_());
-  candidates.push.apply(candidates, getGradeOtherEvents_());
-  return candidates;
-}
-
 function isCourseTitlePatternMatch_(normalizedTitle, course) {
   const normalizedCourse = normalizeCourseName_(course);
+  return isNormalizedCourseTitlePatternMatch_(normalizedTitle, normalizedCourse);
+}
 
+function isNormalizedCourseTitlePatternMatch_(normalizedTitle, normalizedCourse) {
   if (normalizedTitle === normalizedCourse) {
     return true;
   }
@@ -603,10 +625,22 @@ function updateCalendarEvent_(calendar, calendarEventId, item, syncId) {
     return newEvent.getId();
   }
 
-  event.setTitle(item.title);
-  event.setTime(item.start, item.end);
-  event.setLocation(item.location);
-  event.setDescription(item.description);
+  if (event.getTitle() !== item.title) {
+    event.setTitle(item.title);
+  }
+
+  if (event.getStartTime().getTime() !== item.start.getTime() ||
+      event.getEndTime().getTime() !== item.end.getTime()) {
+    event.setTime(item.start, item.end);
+  }
+
+  if ((event.getLocation() || '') !== (item.location || '')) {
+    event.setLocation(item.location);
+  }
+
+  if ((event.getDescription() || '') !== (item.description || '')) {
+    event.setDescription(item.description);
+  }
 
   return event.getId();
 }
@@ -788,19 +822,18 @@ function saveState_(state) {
     .setProperty('SYNC_STATE', JSON.stringify(state));
 }
 
-function findNewRescheduleNotices_(sheet) {
-  const notices = parseRescheduleNotices_(sheet);
+function findNewRescheduleNotices_(sheetContext) {
+  const notices = parseRescheduleNotices_(sheetContext);
   const oldState = loadRescheduleNoticeState_();
 
   return notices.filter(notice => !oldState[notice.key]);
 }
 
-function parseRescheduleNotices_(sheet) {
-  const range = sheet.getDataRange();
-  const values = range.getValues();
-  const displays = range.getDisplayValues();
-  const grade = findGradeBlock_(values, CONFIG.gradeName);
-  const weekRows = findWeekRows_(values, grade.labelCol);
+function parseRescheduleNotices_(sheetContext) {
+  const values = sheetContext.values;
+  const displays = sheetContext.displays;
+  const grade = sheetContext.grade;
+  const weekRows = sheetContext.weekRows;
   const firstWeekRow = weekRows[0];
   const dateMap = buildSheetDateMap_(values);
   const seenText = {};
@@ -815,14 +848,14 @@ function parseRescheduleNotices_(sheet) {
       }
 
       seenText[text] = true;
-      notices.push.apply(notices, extractRescheduleNoticesFromText_(text, dateMap));
+      notices.push.apply(notices, extractRescheduleNoticesFromText_(text, dateMap, sheetContext.matchContext));
     }
   }
 
   return notices;
 }
 
-function extractRescheduleNoticesFromText_(text, dateMap) {
+function extractRescheduleNoticesFromText_(text, dateMap, matchContext) {
   const notices = [];
   const normalizedText = normalizeCellText_(text);
   const pattern = /(^|\\n)\\s*([^：:]+?)\\s*[：:]\\s*(\\d{1,2})\\s*\\/\\s*(\\d{1,2})\\s*第\\s*([0-9]+)\\s*節\\s*調整\\s*為\\s*(\\d{1,2})\\s*\\/\\s*(\\d{1,2})\\s*第\\s*([0-9]+)\\s*節/g;
@@ -830,7 +863,7 @@ function extractRescheduleNoticesFromText_(text, dateMap) {
 
   while ((match = pattern.exec(normalizedText)) !== null) {
     const parsed = parseCourseCell_(match[2]);
-    const matched = classifyMatchedEvent_(parsed.title);
+    const matched = classifyMatchedEvent_(parsed.title, matchContext);
 
     if (!matched.shouldInclude) {
       continue;
@@ -1099,7 +1132,12 @@ function quickDeleteSyncedCalendarEvents() {
 function previewParsedEvents() {
   const ss = SpreadsheetApp.openByUrl(CONFIG.sheetUrl);
   const sheet = ss.getSheetByName(CONFIG.sheetName);
-  const events = parseMyGradeEvents_(sheet);
+
+  if (!sheet) {
+    throw new Error(\`找不到工作表：\${CONFIG.sheetName}\`);
+  }
+
+  const events = parseMyGradeEvents_(buildSheetContext_(sheet));
 
   events.forEach(event => {
     Logger.log([
