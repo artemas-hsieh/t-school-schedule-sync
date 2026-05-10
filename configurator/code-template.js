@@ -79,6 +79,18 @@ function syncMyScheduleToCalendarWithNotification() {
   }
 }
 
+function forceFullSyncMyScheduleToCalendar() {
+  try {
+    return syncMyScheduleToCalendar_({
+      notifyOnSuccess: false,
+      forceCalendarCheck: true
+    });
+  } catch (error) {
+    sendSyncNotification_(CONFIG.notificationFailureSubject);
+    throw error;
+  }
+}
+
 function syncMyScheduleToCalendar_(options) {
   const ss = SpreadsheetApp.openByUrl(CONFIG.sheetUrl);
   const sheet = ss.getSheetByName(CONFIG.sheetName);
@@ -100,14 +112,25 @@ function syncMyScheduleToCalendar_(options) {
   const oldState = loadState_();
   const keptState = {};
   const newState = {};
+  const forceCalendarCheck = Boolean(options && options.forceCalendarCheck);
+  let skippedUnchangedCount = 0;
 
   events.forEach(item => {
     const syncId = makeSyncId_(item);
-    newState[syncId] = item;
+    const syncSignature = makeItemSyncSignature_(item);
+    newState[syncId] = Object.assign({}, item, {
+      syncSignature
+    });
 
     const previous = oldState[syncId];
 
     if (previous && previous.calendarEventId) {
+      if (!forceCalendarCheck && isUnchangedStoredItem_(previous, item, syncSignature)) {
+        newState[syncId].calendarEventId = previous.calendarEventId;
+        skippedUnchangedCount++;
+        return;
+      }
+
       const updatedId = updateCalendarEvent_(calendar, previous.calendarEventId, item, syncId);
       newState[syncId].calendarEventId = updatedId;
     } else {
@@ -132,7 +155,7 @@ function syncMyScheduleToCalendar_(options) {
   saveState_(Object.assign({}, keptState, newState));
   notifySyncSuccess_(Boolean(options && options.notifyOnSuccess), rescheduleNotices);
 
-  Logger.log(\`同步完成，自 \${formatDateKey_(syncStartDate)} 起共 \${events.length} 筆事件。\`);
+  Logger.log(\`同步完成，自 \${formatDateKey_(syncStartDate)} 起共 \${events.length} 筆事件，跳過未變更 \${skippedUnchangedCount} 筆。\`);
 }
 
 function buildSheetContext_(sheet) {
@@ -651,6 +674,75 @@ function deleteCalendarEvent_(calendar, calendarEventId) {
   if (event) {
     event.deleteEvent();
   }
+}
+
+function getStoredItemSyncSignature_(item) {
+  return item && item.syncSignature
+    ? item.syncSignature
+    : makeItemSyncSignature_(item);
+}
+
+function isUnchangedStoredItem_(storedItem, currentItem, currentSignature) {
+  const storedSignature = getStoredItemSyncSignature_(storedItem);
+
+  return storedSignature === currentSignature ||
+    storedSignature === makeItemLegacySyncSignature_(currentItem);
+}
+
+function makeItemSyncSignature_(item) {
+  return JSON.stringify([
+    item.title || '',
+    item.originalTitle || '',
+    item.type || '',
+    getDateSignatureValue_(item.date),
+    item.weekName || '',
+    item.weekday || '',
+    Number(item.periodStart) || 0,
+    Number(item.periodEnd) || 0,
+    getTimeSignatureValue_(item.start),
+    getTimeSignatureValue_(item.end),
+    item.location || '',
+    item.sourceCell || '',
+    Number(item.sourceColumn) || 0,
+    item.rawText || ''
+  ]);
+}
+
+function makeItemLegacySyncSignature_(item) {
+  return JSON.stringify([
+    item.title || '',
+    item.originalTitle || '',
+    item.type || '',
+    getDateSignatureValue_(item.date),
+    item.weekName || '',
+    item.weekday || '',
+    Number(item.periodStart) || 0,
+    Number(item.periodEnd) || 0,
+    getTimeSignatureValue_(item.start),
+    getTimeSignatureValue_(item.end),
+    item.location || '',
+    item.description || '',
+    item.sourceCell || '',
+    Number(item.sourceColumn) || 0,
+    item.rawText || ''
+  ]);
+}
+
+function getDateSignatureValue_(value) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (isNaN(date.getTime())) {
+    return '';
+  }
+
+  return formatDateKey_(date);
+}
+
+function getTimeSignatureValue_(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const time = date.getTime();
+
+  return isNaN(time) ? '' : time;
 }
 
 function makeSyncId_(item) {
