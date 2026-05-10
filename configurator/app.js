@@ -445,6 +445,7 @@ function bindMobileOutputToggle() {
 function setupValidation() {
   const sheetUrlInput = document.getElementById('sheet-url');
   const calendarIdInput = document.getElementById('calendar-id');
+  const notificationEmailInput = document.getElementById('notification-email');
 
   sheetUrlInput.addEventListener('blur', () => {
     const val = sheetUrlInput.value.trim();
@@ -469,6 +470,33 @@ function setupValidation() {
       setFieldState(fieldEl, 'invalid', '通常格式為 Gmail 或 ...@group.calendar.google.com');
     }
   });
+
+  notificationEmailInput.addEventListener('input', validateNotificationEmail);
+  notificationEmailInput.addEventListener('blur', validateNotificationEmail);
+}
+
+function validateNotificationEmail() {
+  const val = elements.notificationEmail.value.trim();
+  const fieldEl = document.getElementById('field-notification-email');
+
+  if (!val) {
+    elements.notificationEmail.setCustomValidity('');
+    setFieldState(fieldEl, null, '');
+    return;
+  }
+
+  if (isSingleNotificationEmail(val)) {
+    elements.notificationEmail.setCustomValidity('');
+    setFieldState(fieldEl, 'valid', '');
+    return;
+  }
+
+  elements.notificationEmail.setCustomValidity('請填入單一通知 Email');
+  setFieldState(fieldEl, 'invalid', '請填入單一 Email，不要使用逗號、分號、換行或顯示名稱');
+}
+
+function isSingleNotificationEmail(value) {
+  return /^[^\s@,;<>]+@[^\s@,;<>]+$/.test(String(value || ''));
 }
 
 function setFieldState(fieldEl, stateValue, hint) {

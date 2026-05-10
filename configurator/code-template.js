@@ -1,6 +1,12 @@
 (function () {
+  function escapeJsonForScript(json) {
+    return json
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029');
+  }
+
   function formatString(value) {
-    return JSON.stringify(String(value || ''));
+    return escapeJsonForScript(JSON.stringify(String(value == null ? '' : value)));
   }
 
   function formatNumberArray(values) {
@@ -16,11 +22,39 @@
   }
 
   function formatObject(value) {
-    return JSON.stringify(value || {}, null, 2);
+    return escapeJsonForScript(JSON.stringify(value || {}, null, 2));
+  }
+
+  function normalizeHour(value, fallback) {
+    const hour = Number(value);
+    return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : fallback;
+  }
+
+  function normalizeHourArray(values, fallbackHour) {
+    const result = [];
+    const source = Array.isArray(values) ? values : [];
+
+    source.forEach(value => {
+      const hour = normalizeHour(value, null);
+
+      if (hour !== null && !result.includes(hour)) {
+        result.push(hour);
+      }
+    });
+
+    if (result.length === 0) {
+      result.push(fallbackHour);
+    }
+
+    return result.sort((a, b) => a - b);
   }
 
   window.buildAppsScriptCode = function buildAppsScriptCode(settings) {
-    const notifyHour = Number(settings.notifySyncHour || settings.notifyHour || 5);
+    const rawNotifyHour = settings.notifySyncHour != null && settings.notifySyncHour !== ''
+      ? settings.notifySyncHour
+      : settings.notifyHour;
+    const notifyHour = normalizeHour(rawNotifyHour, 5);
+    const autoSyncHours = normalizeHourArray(settings.autoSyncHours, notifyHour);
     const courseDictionary = window.TSCHOOL_COURSE_DICTIONARY || {};
     const nonElectiveEvents = window.TSCHOOL_NON_ELECTIVE_EVENTS || {};
 
@@ -34,15 +68,17 @@
 
   eventTitlePrefix: '',
   syncIdPrefix: '[T-SCHOOL-SCHEDULE-SYNC]',
+  managedEventDescriptionPrefix: '[T-SCHOOL 課表同步]',
 
   syncLookbackDays: 0,
-  autoSyncHours: ${formatNumberArray(settings.autoSyncHours)},
+  autoSyncHours: ${formatNumberArray(autoSyncHours)},
   notifySyncHour: ${notifyHour},
   notificationEmail: ${formatString(settings.notificationEmail)},
   notificationSuccessSubject: '[T-SCHOOL 課表同步] 課表同步成功',
   notificationFailureSubject: '[T-SCHOOL 課表同步] ！課表同步失敗！',
   rescheduleNoticeStateProperty: 'RESCHEDULE_NOTICE_STATE',
 
+  allowQuickDeleteAllCalendarEvents: false,
   quickDeleteAllFromYear: 2000,
   quickDeleteAllToYear: 2100,
 
@@ -63,7 +99,7 @@ function syncMyScheduleToCalendar() {
       notifyOnSuccess: false
     });
   } catch (error) {
-    sendSyncNotification_(CONFIG.notificationFailureSubject);
+    notifySyncFailure_();
     throw error;
   }
 }
@@ -74,7 +110,7 @@ function syncMyScheduleToCalendarWithNotification() {
       notifyOnSuccess: true
     });
   } catch (error) {
-    sendSyncNotification_(CONFIG.notificationFailureSubject);
+    notifySyncFailure_();
     throw error;
   }
 }
@@ -86,7 +122,7 @@ function forceFullSyncMyScheduleToCalendar() {
       forceCalendarCheck: true
     });
   } catch (error) {
-    sendSyncNotification_(CONFIG.notificationFailureSubject);
+    notifySyncFailure_();
     throw error;
   }
 }
@@ -148,7 +184,7 @@ function syncMyScheduleToCalendar_(options) {
     }
 
     if (!newState[syncId] && oldItem.calendarEventId) {
-      deleteCalendarEvent_(calendar, oldItem.calendarEventId);
+      deleteCalendarEvent_(calendar, oldItem.calendarEventId, syncId);
     }
   });
 
@@ -635,13 +671,14 @@ function createCalendarEvent_(calendar, item, syncId) {
     item.end,
     {
       location: item.location,
-      description: item.description
+      description: buildManagedDescription_(item, syncId)
     }
   );
 }
 
 function updateCalendarEvent_(calendar, calendarEventId, item, syncId) {
   const event = calendar.getEventById(calendarEventId);
+  const description = buildManagedDescription_(item, syncId);
 
   if (!event) {
     const newEvent = createCalendarEvent_(calendar, item, syncId);
@@ -661,19 +698,64 @@ function updateCalendarEvent_(calendar, calendarEventId, item, syncId) {
     event.setLocation(item.location);
   }
 
-  if ((event.getDescription() || '') !== (item.description || '')) {
-    event.setDescription(item.description);
+  if ((event.getDescription() || '') !== description) {
+    event.setDescription(description);
   }
 
   return event.getId();
 }
 
-function deleteCalendarEvent_(calendar, calendarEventId) {
+function deleteCalendarEvent_(calendar, calendarEventId, syncId) {
   const event = calendar.getEventById(calendarEventId);
 
-  if (event) {
-    event.deleteEvent();
+  if (!event) {
+    return false;
   }
+
+  if (!isManagedCalendarEvent_(event, syncId)) {
+    Logger.log(\`略過刪除非本工具建立的事件：\${event.getTitle()} / \${calendarEventId}\`);
+    return false;
+  }
+
+  event.deleteEvent();
+  return true;
+}
+
+function buildManagedDescription_(item, syncId) {
+  const lines = [
+    CONFIG.syncIdPrefix,
+    item.description || CONFIG.managedEventDescriptionPrefix
+  ];
+
+  if (syncId) {
+    lines.push('', \`同步識別碼：\${syncId}\`);
+  }
+
+  return lines.join('\\n');
+}
+
+function isManagedCalendarEvent_(event, syncId) {
+  const description = String(event.getDescription() || '');
+  const hasCurrentMarker = description.indexOf(CONFIG.syncIdPrefix) !== -1;
+  const hasLegacyMarker = description.indexOf(CONFIG.managedEventDescriptionPrefix) === 0;
+
+  if (!hasCurrentMarker && !hasLegacyMarker) {
+    return false;
+  }
+
+  if (!syncId) {
+    return true;
+  }
+
+  if (description.indexOf(\`同步識別碼：\${syncId}\`) !== -1) {
+    return true;
+  }
+
+  const legacySourceCellMatch = description.match(/來源儲存格：([A-Z]+\\d+)/);
+  return hasLegacyMarker &&
+    legacySourceCellMatch !== null &&
+    description.indexOf('原始內容：') !== -1 &&
+    description.indexOf('同步識別碼：') === -1;
 }
 
 function getStoredItemSyncSignature_(item) {
@@ -766,7 +848,7 @@ function buildEventTitle_(title, type) {
 
 function buildDescription_(data) {
   return [
-    '[T-SCHOOL 課表同步] ',
+    CONFIG.managedEventDescriptionPrefix,
     '',
     \`週次：\${formatWeekName_(data.weekName)}\`,
     \`星期：\${formatWeekdayLabel_(data.weekday)}\`,
@@ -1016,8 +1098,16 @@ function resolveMonthDayDate_(dateMap, month, day) {
     return mapped;
   }
 
-  const fallbackYear = Number(Utilities.formatDate(new Date(), CONFIG.timezone, 'yyyy'));
-  return new Date(fallbackYear, month - 1, day);
+  const today = new Date();
+  const fallbackYear = Number(Utilities.formatDate(today, CONFIG.timezone, 'yyyy'));
+  const candidate = new Date(fallbackYear, month - 1, day);
+  const msPerDay = 24 * 60 * 60 * 1000;
+
+  if ((today.getTime() - candidate.getTime()) > 30 * msPerDay) {
+    return new Date(fallbackYear + 1, month - 1, day);
+  }
+
+  return candidate;
 }
 
 function parsePeriodDigits_(digits) {
@@ -1071,6 +1161,14 @@ function notifySyncSuccess_(notifyOnSuccess, rescheduleNotices) {
   }
 }
 
+function notifySyncFailure_() {
+  try {
+    sendSyncNotification_(CONFIG.notificationFailureSubject);
+  } catch (notificationError) {
+    Logger.log(\`同步失敗通知寄送失敗：\${notificationError.message || notificationError}\`);
+  }
+}
+
 function formatRescheduleNotice_(notice) {
   return [
     \`「\${notice.title}」\${formatNoticeDate_(notice.fromDate)} \${formatPeriodRange_(notice.fromPeriodStart, notice.fromPeriodEnd)} 節\`,
@@ -1109,8 +1207,11 @@ function sendSyncNotification_(subject, body) {
 }
 
 function getNotificationEmail_() {
-  if (CONFIG.notificationEmail) {
-    return CONFIG.notificationEmail;
+  const configuredEmail = String(CONFIG.notificationEmail || '').trim();
+
+  if (configuredEmail) {
+    assertSingleNotificationEmail_(configuredEmail);
+    return configuredEmail;
   }
 
   const activeUserEmail = Session.getActiveUser().getEmail();
@@ -1119,28 +1220,20 @@ function getNotificationEmail_() {
     throw new Error('找不到通知 Email，請在 CONFIG.notificationEmail 填入收件信箱。');
   }
 
+  assertSingleNotificationEmail_(activeUserEmail);
   return activeUserEmail;
+}
+
+function assertSingleNotificationEmail_(email) {
+  if (!/^[^\\s@,;<>]+@[^\\s@,;<>]+$/.test(String(email || ''))) {
+    throw new Error('通知 Email 格式不正確，請填入單一收件信箱，不要使用逗號、分號、換行或顯示名稱。');
+  }
 }
 
 function resetSyncState() {
   PropertiesService
     .getScriptProperties()
     .deleteProperty('SYNC_STATE');
-}
-
-function resetFutureSyncState_(syncStartDate) {
-  const oldState = loadState_();
-  const keptState = {};
-
-  Object.keys(oldState).forEach(syncId => {
-    const item = oldState[syncId];
-
-    if (shouldKeepOldState_(item, syncStartDate)) {
-      keptState[syncId] = item;
-    }
-  });
-
-  saveState_(keptState);
 }
 
 function setupAutoSyncTriggers() {
@@ -1180,6 +1273,8 @@ function deleteAutoSyncTriggers() {
 }
 
 function quickDeleteAllCalendarEvents() {
+  assertQuickDeleteAllIsEnabled_();
+
   const calendar = CalendarApp.getCalendarById(CONFIG.calendarId);
 
   if (!calendar) {
@@ -1200,6 +1295,17 @@ function quickDeleteAllCalendarEvents() {
   Logger.log(\`快速刪除完成，共刪除 \${deletedCount} 筆事件，並已清除同步狀態。\`);
 }
 
+function assertQuickDeleteAllIsEnabled_() {
+  if (CONFIG.allowQuickDeleteAllCalendarEvents === true) {
+    return;
+  }
+
+  throw new Error(
+    'quickDeleteAllCalendarEvents() 會刪除 CONFIG.calendarId 指定日曆中 2000-2100 年的所有事件。' +
+    '若確定要使用，請先確認這是專用日曆，再把 CONFIG.allowQuickDeleteAllCalendarEvents 改成 true。'
+  );
+}
+
 function quickDeleteSyncedCalendarEvents() {
   const calendar = CalendarApp.getCalendarById(CONFIG.calendarId);
 
@@ -1208,17 +1314,32 @@ function quickDeleteSyncedCalendarEvents() {
   }
 
   let deletedCount = 0;
+  let skippedCount = 0;
   const windowStart = getSyncStartDate_();
-  const windowEnd = new Date(CONFIG.quickDeleteAllToYear, 11, 31, 23, 59, 59);
-  const events = calendar.getEvents(windowStart, windowEnd);
+  const oldState = loadState_();
+  const keptState = {};
 
-  events.forEach(event => {
-    event.deleteEvent();
-    deletedCount++;
+  Object.keys(oldState).forEach(syncId => {
+    const item = oldState[syncId];
+
+    if (shouldKeepOldState_(item, windowStart)) {
+      keptState[syncId] = item;
+      return;
+    }
+
+    if (!item || !item.calendarEventId) {
+      return;
+    }
+
+    if (deleteCalendarEvent_(calendar, item.calendarEventId, syncId)) {
+      deletedCount++;
+    } else {
+      skippedCount++;
+    }
   });
 
-  resetFutureSyncState_(windowStart);
-  Logger.log(\`快速刪除完成，自 \${formatDateKey_(windowStart)} 起共刪除 \${deletedCount} 筆事件，並已清除未來同步狀態。\`);
+  saveState_(keptState);
+  Logger.log(\`快速刪除完成，自 \${formatDateKey_(windowStart)} 起共刪除 \${deletedCount} 筆同步事件，略過 \${skippedCount} 筆非本工具事件或不存在事件，並已清除未來同步狀態。\`);
 }
 
 function previewParsedEvents() {

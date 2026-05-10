@@ -3,8 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
   <title>T-SCHOOL 行程同步腳本產生器</title>
-  <link rel="stylesheet" href="styles.css?v=20260510-preview-height">
+  <link id="app-stylesheet" rel="stylesheet">
+  <script>
+    (function () {
+      var version = String(Date.now());
+      window.TSCHOOL_ASSET_VERSION = version;
+      document.getElementById('app-stylesheet').href = 'styles.css?v=' + encodeURIComponent(version);
+    })();
+  </script>
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="assertive"></div>
@@ -82,10 +90,14 @@
           </div>
 
           <div class="two-column">
-            <label class="field">
+            <label class="field validated-field" id="field-notification-email">
               <span>通知 Email</span>
-              <input id="notification-email" name="notificationEmail" type="email"
-                     placeholder="填寫後可設定成功通知時段">
+              <div class="input-wrap">
+                <input id="notification-email" name="notificationEmail" type="email"
+                       placeholder="填寫後可設定成功通知時段">
+                <span class="field-icon" aria-hidden="true"></span>
+              </div>
+              <span class="field-hint" aria-live="polite"></span>
             </label>
 
             <label class="field">
@@ -200,8 +212,40 @@
     </aside>
   </main>
 
-  <script src="gemini-code-1778375297203.js"></script>
-  <script src="code-template.js?v=20260510-sync-performance-quota-v2"></script>
-  <script src="app.js"></script>
+  <script>
+    (function () {
+      var version = window.TSCHOOL_ASSET_VERSION || String(Date.now());
+      var assets = [
+        'gemini-code-1778375297203.js',
+        'code-template.js',
+        'app.js'
+      ];
+
+      function loadScript(src) {
+        return new Promise(function (resolve, reject) {
+          var script = document.createElement('script');
+          script.src = src + '?v=' + encodeURIComponent(version);
+          script.onload = resolve;
+          script.onerror = function () {
+            reject(new Error('Failed to load ' + src));
+          };
+          document.body.appendChild(script);
+        });
+      }
+
+      assets.reduce(function (chain, src) {
+        return chain.then(function () {
+          return loadScript(src);
+        });
+      }, Promise.resolve()).catch(function (error) {
+        var toast = document.getElementById('toast');
+        if (toast) {
+          toast.textContent = '載入程式失敗，請重新整理頁面。';
+          toast.classList.add('visible');
+        }
+        console.error(error);
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -93,23 +93,14 @@ Preserve that compatibility unless there is a deliberate state migration.
 
 ## Deployment / Cache Notes
 
-GitHub Pages can deploy a new HTML file while browsers still reuse cached CSS or JS. When changing frontend-loaded assets, update the query string in `configurator/index.html`.
-
-Current examples:
-
-```html
-<link rel="stylesheet" href="styles.css?v=20260510-preview-height">
-<script src="code-template.js?v=20260510-sync-performance-quota-v2"></script>
-```
-
-Use a meaningful version string when changing:
+GitHub Pages can deploy a new HTML file while browsers still reuse cached CSS or JS. The configurator now avoids manual query-string maintenance by assigning `window.TSCHOOL_ASSET_VERSION = String(Date.now())` on each page load and loading these assets with that version:
 
 - `styles.css`
-- `app.js`
+- `gemini-code-1778375297203.js`
 - `code-template.js`
-- dictionary files
+- `app.js`
 
-This avoids the situation where GitHub Pages says "Last deployed" but the browser still runs an old script or stylesheet.
+This trades a little browser cache efficiency for deployment correctness: after a page refresh, users should receive the latest generator logic without needing a manually updated version string.
 
 ## Validation Commands
 
