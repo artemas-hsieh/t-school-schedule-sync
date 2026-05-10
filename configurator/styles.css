@@ -900,8 +900,9 @@ select:disabled {
 /* ─── Generated code textarea ─── */
 
 #generated-code {
-  flex: 1;
-  min-height: 420px;
+  flex: 0 0 50vh;
+  height: 50vh;
+  min-height: 320px;
   padding: 16px;
   border-color: rgba(255, 255, 255, 0.12);
   border-radius: 8px;
