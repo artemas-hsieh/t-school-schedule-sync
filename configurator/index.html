@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T-SCHOOL 課表同步設定產生器</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="assertive"></div>
+
+  <main class="app-shell">
+    <section class="config-pane" aria-labelledby="page-title">
+      <div class="title-block">
+        <p class="eyebrow">T-SCHOOL Calendar Sync</p>
+        <h1 id="page-title">課表同步設定產生器</h1>
+        <p class="intro">選好年級、課程與同步設定後，右側會產生完整可貼到 Apps Script 的 Code.gs。</p>
+      </div>
+
+      <form id="config-form" class="form-stack">
+        <section class="section-band" aria-labelledby="basic-settings-title">
+          <div class="section-heading">
+            <h2 id="basic-settings-title">基本設定</h2>
+          </div>
+
+          <label class="field validated-field" id="field-sheet-url">
+            <span>Google Sheets URL</span>
+            <div class="input-wrap">
+              <input id="sheet-url" name="sheetUrl" type="url" autocomplete="off"
+                     placeholder="https://docs.google.com/spreadsheets/d/…">
+              <span class="field-icon" aria-hidden="true"></span>
+            </div>
+            <span class="field-hint" aria-live="polite"></span>
+          </label>
+
+          <div class="two-column">
+            <label class="field">
+              <span>表格分頁名稱</span>
+              <input id="sheet-name" name="sheetName" type="text">
+            </label>
+
+            <div class="field validated-field" id="field-calendar-id">
+              <div class="label-with-info">
+                <label for="calendar-id">Calendar ID</label>
+                <span class="info-trigger">
+                  <button type="button" class="info-btn" aria-label="如何取得 Calendar ID？" aria-describedby="calendar-id-tooltip">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <circle cx="7" cy="7" r="6.5" stroke="currentColor" stroke-width="1.3"/>
+                      <line x1="7" y1="6.5" x2="7" y2="10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                      <circle cx="7" cy="4.5" r="0.8" fill="currentColor"/>
+                    </svg>
+                  </button>
+                  <span class="info-tooltip" id="calendar-id-tooltip" role="tooltip">
+                    <span class="tip-title">如何取得 Calendar ID</span>
+                    <span class="tip-body">Google 日曆 → 齒輪設定 → 找到目標日曆 →「整合日曆」→ 複製 Calendar ID</span>
+                    <span class="tip-note">請務必另建一個專用日曆供此腳本使用，以避免影響既有日曆內容。</span>
+                  </span>
+                </span>
+              </div>
+              <div class="input-wrap">
+                <input id="calendar-id" name="calendarId" type="text" autocomplete="off"
+                       placeholder="請務必另建專用日曆供此腳本使用">
+                <span class="field-icon" aria-hidden="true"></span>
+              </div>
+              <span class="field-hint" aria-live="polite"></span>
+            </div>
+          </div>
+
+          <fieldset class="segmented-field">
+            <legend>年級</legend>
+            <div class="segmented-control" role="radiogroup" aria-label="選擇年級">
+              <label><input type="radio" name="gradeName" value="高一" checked><span>高一</span></label>
+              <label><input type="radio" name="gradeName" value="高二"><span>高二</span></label>
+              <label><input type="radio" name="gradeName" value="高三"><span>高三</span></label>
+            </div>
+          </fieldset>
+        </section>
+
+        <section class="section-band" aria-labelledby="sync-settings-title">
+          <div class="section-heading">
+            <h2 id="sync-settings-title">同步與通知</h2>
+          </div>
+
+          <div class="two-column">
+            <label class="field">
+              <span>通知 Email</span>
+              <input id="notification-email" name="notificationEmail" type="email"
+                     placeholder="填寫後可設定成功通知時段">
+            </label>
+
+            <label class="field">
+              <span>成功通知時段</span>
+              <select id="notify-hour" name="notifyHour"></select>
+            </label>
+          </div>
+
+          <fieldset class="check-field">
+            <legend>每日同步時段</legend>
+            <div class="sync-presets" id="sync-presets"></div>
+            <button type="button" class="expand-time-btn" id="expand-time-btn" aria-expanded="false">
+              自訂時段
+              <svg class="chevron-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.5"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div class="time-grid-wrap" id="time-grid-wrap" hidden>
+              <div class="time-grid" id="sync-hours"></div>
+            </div>
+          </fieldset>
+
+          <label class="toggle-row">
+            <input id="include-whole-school" name="includeWholeSchool" type="checkbox" checked>
+            <span>同步全年級、全校性質活動與重要公告</span>
+          </label>
+        </section>
+
+        <section class="section-band course-section" aria-labelledby="course-settings-title">
+          <div class="section-heading with-action">
+            <div>
+              <h2 id="course-settings-title">課程選擇</h2>
+              <p id="course-count">已選 0 門課</p>
+            </div>
+            <button type="button" class="text-button" id="clear-courses">清除</button>
+          </div>
+
+          <label class="field search-field">
+            <span>搜尋課程</span>
+            <input id="course-search" type="search" placeholder="輸入課名、班別或線上">
+          </label>
+
+          <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="按分類篩選課程">
+            <button type="button" class="filter-tab active" data-filter="全部"
+                    role="tab" aria-selected="true">全部</button>
+            <button type="button" class="filter-tab" data-filter="必修"
+                    role="tab" aria-selected="false">必修</button>
+            <button type="button" class="filter-tab" data-filter="學科選修"
+                    role="tab" aria-selected="false">學科選修</button>
+            <button type="button" class="filter-tab" data-filter="校內多元選修"
+                    role="tab" aria-selected="false">校內多元</button>
+            <button type="button" class="filter-tab" data-filter="跨校多元選修"
+                    role="tab" aria-selected="false">跨校多元</button>
+          </div>
+
+          <div class="selected-summary">
+            <h3 class="selected-title">已選取課程</h3>
+            <button type="button" class="selected-toggle" id="selected-toggle" aria-expanded="false" aria-controls="selected-courses">
+              展開
+            </button>
+          </div>
+          <div class="selected-strip" id="selected-courses" aria-live="polite" hidden></div>
+          <div class="course-list" id="course-list"></div>
+        </section>
+      </form>
+    </section>
+
+    <aside class="output-pane" aria-labelledby="output-title">
+      <div class="output-header">
+        <div>
+          <p class="eyebrow">Generated Apps Script</p>
+          <h2 id="output-title">完整 Code.gs</h2>
+        </div>
+        <div class="output-actions">
+          <button type="button" class="primary-button" id="copy-code">複製</button>
+          <button type="button" class="mobile-toggle-btn" id="mobile-output-toggle"
+                  aria-expanded="false" aria-controls="output-body" aria-label="展開程式碼">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <path d="M5 7l4 4 4-4" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="output-body" id="output-body">
+        <textarea id="generated-code" spellcheck="false" aria-label="產生的 Code.gs"></textarea>
+
+        <section class="steps" aria-labelledby="steps-title">
+          <h3 id="steps-title">貼上與執行</h3>
+          <ol class="steps-list">
+            <li class="step-card">
+              <span class="step-num" aria-hidden="true">1</span>
+              <span class="step-text">建立獨立 Google Apps Script 專案，貼上右側完整程式碼。</span>
+            </li>
+            <li class="step-card">
+              <span class="step-num" aria-hidden="true">2</span>
+              <span class="step-text">先執行 <code>previewParsedEvents()</code> 檢查解析結果。</span>
+            </li>
+            <li class="step-card">
+              <span class="step-num" aria-hidden="true">3</span>
+              <span class="step-text">執行 <code>syncMyScheduleToCalendar()</code> 進行第一次同步。</span>
+            </li>
+            <li class="step-card">
+              <span class="step-num" aria-hidden="true">4</span>
+              <span class="step-text">確認無誤後執行 <code>setupAutoSyncTriggers()</code> 建立每日自動同步。</span>
+            </li>
+          </ol>
+        </section>
+      </div>
+    </aside>
+  </main>
+
+  <script src="gemini-code-1778375297203.js"></script>
+  <script src="code-template.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
