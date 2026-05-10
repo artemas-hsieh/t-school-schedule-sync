@@ -91,6 +91,46 @@ There is compatibility logic for:
 
 Preserve that compatibility unless there is a deliberate state migration.
 
+## Security / Safety Notes
+
+Generated Apps Script runs in the user's Google account, so destructive Calendar behavior must be guarded carefully.
+
+Current safety decisions:
+
+- `CONFIG.syncIdPrefix` is a real managed-event marker. New events include it in the Calendar event description.
+- Calendar deletion helpers must only delete events that can be recognized as this tool's managed events.
+- `quickDeleteSyncedCalendarEvents()` should delete by stored `SYNC_STATE` event IDs plus managed-event checks, not by scanning and deleting every future event in the target calendar.
+- Legacy synced events may not have `CONFIG.syncIdPrefix`; keep the legacy fallback strict and require a source-cell marker that looks like an A1-style cell reference.
+- `quickDeleteAllCalendarEvents()` is intentionally destructive and must remain behind an explicit config flag (`allowQuickDeleteAllCalendarEvents`).
+- User-provided strings inserted into generated Apps Script must be serialized as data, not concatenated as code. Keep `JSON.stringify`-based string/object formatting and the U+2028/U+2029 escaping.
+- Notification email is intentionally limited to a single plain address in both the frontend and generated Apps Script.
+- Failed notification sending must not mask the original sync failure.
+- The default Google Sheets URL is intentionally retained for user experience because the school Sheet is expected to be restricted to school accounts. Treat that access-control setting as an operational assumption.
+- `configurator/index.html` includes a CSP meta tag. If new external assets are added, update the CSP deliberately rather than loosening it broadly.
+- Reschedule notice date fallback handles cross-year notices by moving dates more than 30 days in the past to the next year.
+
+## Current UI / UX Notes
+
+Desktop layout intentionally uses independent panes:
+
+- The left configurator pane scrolls independently.
+- The right "Generated Apps Script / Code.gs" pane stays fixed within the desktop viewport and scrolls internally only if needed.
+- Tablet and mobile layouts return to normal document scrolling.
+
+Sync time selector behavior:
+
+- The four preset sync hours are visually styled like the full 24-hour grid, not like pill chips, because they represent the same kind of selectable time.
+- The full 24-hour selector is expanded via the small "自訂時段" control beside the "每日同步時段" label, matching the selected-courses expand/collapse pattern.
+
+Usage steps copy:
+
+- The right pane's "使用步驟" section is written for non-technical users who may not know Google Apps Script.
+- Keep the steps concise and action-oriented, using `→` to connect actions and minimizing punctuation.
+- `script.google.com` is a clickable external link that opens in a new tab.
+- The inline `Code.gs` text in step 1 is a copy button wired to the same generated-code copy behavior as the main "複製" button.
+- The primary setup flow intentionally skips `previewParsedEvents()` because checking Apps Script logs is too technical for most users. Users are guided to run `syncMyScheduleToCalendar()`, then compare the dedicated Google Calendar against the source Google Sheet.
+- The visible flow currently ends at `setupAutoSyncTriggers()` and includes checking trigger setup within that same step rather than as a separate step.
+
 ## Deployment / Cache Notes
 
 GitHub Pages can deploy a new HTML file while browsers still reuse cached CSS or JS. The configurator now avoids manual query-string maintenance by assigning `window.TSCHOOL_ASSET_VERSION = String(Date.now())` on each page load and loading these assets with that version:
@@ -127,4 +167,4 @@ When changing matching logic, compare old and new classification behavior for re
 
 ## Current Known Local State Note
 
-At the time this context file was created, `configurator/index.html` had unrelated uncommitted wording changes made outside the sync-performance work. Do not overwrite or revert those unless explicitly requested.
+The current working tree may contain uncommitted UI polish. Do not overwrite or revert user-made UI wording changes unless explicitly requested.

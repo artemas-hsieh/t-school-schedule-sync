@@ -22,7 +22,7 @@
       <div class="title-block">
         <p class="eyebrow">t-school-schedule-sync</p>
         <h1 id="page-title">行程同步腳本產生器</h1>
-        <p class="intro">選好年級、課程與同步設定後，右側會產生完整可貼到 Apps Script 的 Code.gs。</p>
+        <p class="intro">用於解決個人行事曆排程因學校調課或活動增減而變得不同步的問題，並融入調課通知等實用功能</p>
       </div>
 
       <form id="config-form" class="form-stack">
@@ -60,14 +60,14 @@
                   </button>
                   <span class="info-tooltip" id="calendar-id-tooltip" role="tooltip">
                     <span class="tip-title">如何取得 Calendar ID</span>
-                    <span class="tip-body">Google 日曆 → 齒輪設定 → 找到目標日曆 →滑到整合日曆區段→ 複製 Calendar ID</span>
+                    <span class="tip-body">Google 日曆 → 齒輪設定 → 找到目標日曆 → 滑到整合日曆區段 → 複製 Calendar ID</span>
                     <span class="tip-note">請務必另建一個專用日曆供此腳本使用，以避免影響既有日曆內容。</span>
                   </span>
                 </span>
               </div>
               <div class="input-wrap">
                 <input id="calendar-id" name="calendarId" type="text" autocomplete="off"
-                       placeholder="請務必另建專用日曆供此腳本使用">
+                       placeholder="請使用校內帳號另建專用日曆">
                 <span class="field-icon" aria-hidden="true"></span>
               </div>
               <span class="field-hint" aria-live="polite"></span>
@@ -106,16 +106,14 @@
             </label>
           </div>
 
-          <fieldset class="check-field">
-            <legend>每日同步時段</legend>
+          <fieldset class="check-field sync-time-field">
+            <legend class="sync-time-summary">
+              <span>每日同步時段</span>
+              <button type="button" class="sync-time-toggle" id="expand-time-btn" aria-expanded="false" aria-controls="time-grid-wrap">
+                自訂時段
+              </button>
+            </legend>
             <div class="sync-presets" id="sync-presets"></div>
-            <button type="button" class="expand-time-btn" id="expand-time-btn" aria-expanded="false">
-              自訂時段
-              <svg class="chevron-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                <path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.5"
-                      stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
             <div class="time-grid-wrap" id="time-grid-wrap" hidden>
               <div class="time-grid" id="sync-hours"></div>
             </div>
@@ -188,23 +186,36 @@
         <textarea id="generated-code" spellcheck="false" aria-label="產生的 Code.gs"></textarea>
 
         <section class="steps" aria-labelledby="steps-title">
-          <h3 id="steps-title">貼上與執行</h3>
+          <h3 id="steps-title">使用步驟</h3>
+          <p class="steps-intro">Apps Script 是 Google 提供的線上程式執行工具 → 貼上程式碼 → 依序執行</p>
           <ol class="steps-list">
             <li class="step-card">
               <span class="step-num" aria-hidden="true">1</span>
-              <span class="step-text">建立獨立 Google Apps Script 專案，貼上上方完整程式碼。</span>
+              <span class="step-text">
+                <strong>建立 Apps Script 專案</strong>
+                <span>前往 <a href="https://script.google.com/" target="_blank" rel="noopener noreferrer"><code>script.google.com</code></a> → 點左上角「新專案」→ 刪掉範例文字 → 貼上剛複製的 <button type="button" class="inline-code-button" id="copy-code-inline" aria-label="複製 Code.gs 內容"><code>Code.gs</code></button> → 儲存（cmd / ctrl + s）</span>
+              </span>
             </li>
             <li class="step-card">
               <span class="step-num" aria-hidden="true">2</span>
-              <span class="step-text">先執行 <code>previewParsedEvents()</code> 檢查解析結果。</span>
+              <span class="step-text">
+                <strong>執行第一次同步</strong>
+                <span>上方函式選單選 <code>syncMyScheduleToCalendar</code> → 按「執行」→ 選擇自己的校內 Google 帳號 → 允許存取試算表與日曆</span>
+              </span>
             </li>
             <li class="step-card">
               <span class="step-num" aria-hidden="true">3</span>
-              <span class="step-text">執行 <code>syncMyScheduleToCalendar()</code> 進行第一次同步。</span>
+              <span class="step-text">
+                <strong>檢查日曆內容</strong>
+                <span>打開專用 Google 日曆 → 對照原本 Google Sheet → 確認同步正確</span>
+              </span>
             </li>
             <li class="step-card">
               <span class="step-num" aria-hidden="true">4</span>
-              <span class="step-text">確認無誤後執行 <code>setupAutoSyncTriggers()</code> 建立每日自動同步。</span>
+              <span class="step-text">
+                <strong>建立每日自動同步</strong>
+                <span>函式選單選 <code>setupAutoSyncTriggers</code> → 按「執行」→ 按左側鬧鐘圖示確定觸發條件正確</span>
+              </span>
             </li>
           </ol>
         </section>

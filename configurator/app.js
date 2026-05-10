@@ -277,6 +277,7 @@ const elements = {
   courseCount: document.querySelector('#course-count'),
   generatedCode: document.querySelector('#generated-code'),
   copyCode: document.querySelector('#copy-code'),
+  copyCodeInline: document.querySelector('#copy-code-inline'),
   clearCourses: document.querySelector('#clear-courses')
 };
 
@@ -328,6 +329,10 @@ function bindEvents() {
   });
 
   elements.copyCode.addEventListener('click', copyGeneratedCode);
+  if (elements.copyCodeInline) {
+    elements.copyCodeInline.addEventListener('click', copyGeneratedCode);
+  }
+
   elements.selectedToggle.addEventListener('click', () => {
     state.selectedCoursesExpanded = !state.selectedCoursesExpanded;
     renderSelectedCourses();
@@ -407,9 +412,11 @@ function bindExpandTimeBtn() {
     if (isHidden) {
       wrap.removeAttribute('hidden');
       btn.setAttribute('aria-expanded', 'true');
+      btn.textContent = '收合';
     } else {
       wrap.setAttribute('hidden', '');
       btn.setAttribute('aria-expanded', 'false');
+      btn.textContent = '自訂時段';
     }
   });
 
