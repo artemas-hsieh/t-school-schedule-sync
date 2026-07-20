@@ -1,268 +1,51 @@
 const DEFAULTS = {
-  sheetUrl: 'https://docs.google.com/spreadsheets/d/1eigKfzCgULW1homT1l0Xxr9KLh4R2I_fOAqNuKEKhTk/edit?gid=1162754205#gid=1162754205',
-  sheetName: '114-2課程規劃',
-  calendarId: '',
   gradeName: '高一',
   notificationEmail: '',
   syncHours: [5, 12, 18, 22],
   notifyHour: 5,
-  includeWholeSchool: true
+  includeActivities: true,
+  notificationPreset: 'standard',
+  customNotification: [
+    '{type}｜{course}',
+    '原：{oldDate} {oldPeriod} {oldTime} {oldLocation}',
+    '新：{newDate} {newPeriod} {newTime} {newLocation}'
+  ].join('\n'),
+  descriptionPreset: 'standard',
+  customDescription: [
+    '第 {week} 週｜星期{weekday}｜第 {period} 節',
+    '時間：{startTime}–{endTime}',
+    '地點：{location}',
+    '課表更新：{sourceUpdatedAt}'
+  ].join('\n'),
+  reminderMode: 'none',
+  reminderMinutes: 10,
+  calendarName: 'T-SCHOOL 課表'
 };
 
 const SYNC_PRESETS = [
   { label: '05:00', hour: 5 },
   { label: '12:00', hour: 12 },
   { label: '18:00', hour: 18 },
-  { label: '22:00', hour: 22 },
+  { label: '22:00', hour: 22 }
 ];
 
-const COURSE_CATALOG = {
-  '高一': {
-    defaults: [
-      '數位公民(海風班)',
-      '數位公民(山嵐班)',
-      '學習策略(海風班)',
-      '學習策略(山嵐班)',
-      'SDGs議題探索(海風班)',
-      'SDGs議題探索(山嵐班)',
-      '客語',
-      '原住民語(雅美語)',
-      '手語',
-      '閩南語',
-      '生涯探索(一)',
-      '身體素養(二)'
-    ],
-    groups: [
-      {
-        name: '必修',
-        courses: [
-          '數位公民(海風班)',
-          '數位公民(山嵐班)',
-          'SDGs議題探索(海風班)',
-          'SDGs議題探索(山嵐班)',
-          '學習策略(海風班)',
-          '學習策略(山嵐班)',
-          '客語',
-          '原住民語(雅美語)',
-          '手語',
-          '閩南語',
-          '生涯探索(一)',
-          '身體素養(二)'
-        ]
-      },
-      {
-        name: '學科選修',
-        courses: [
-          '國語文(二)',
-          '英語文(二)海風班',
-          '英語文(二)山嵐班',
-          '數學(二)海風班',
-          '數學(二)山嵐班',
-          '歷史(二)',
-          '地理(二)',
-          '公民與社會(二)',
-          '科學探究(二)',
-          '美術(二)',
-          '音樂(二)',
-          '生活科技(二)'
-        ]
-      },
-      {
-        name: '校內多元選修',
-        courses: [
-          '認識哲學何不從教育哲學開始',
-          '從巴士底到車諾比：歷史的遊戲設計',
-          '「話」圖書寫',
-          '進階程式設計',
-          '資安競賽培訓',
-          'Gran Fondo Taiwan',
-          '藝術行政與展演',
-          '文法充電站',
-          '數學補強'
-        ]
-      },
-      {
-        name: '跨校多元選修',
-        courses: [
-          '用Python學運算思維',
-          '心理學概論',
-          '人工智慧醫療應用',
-          '數位星空的魔法碰觸',
-          '科技倫理',
-          '一起做網美!介面設計實務',
-          '系統分析專題',
-          '不只英文課:說出、寫出、認出我(們)',
-          '基本半導體概論',
-          '不一樣又怎樣－城市共生的多元面貌'
-        ]
-      }
-    ]
-  },
-  '高二': {
-    defaults: [
-      '身體素養(四)',
-      '生涯探索(二)',
-      '公民行動(二)',
-      'SDGs議題探究(二)'
-    ],
-    groups: [
-      {
-        name: '必修',
-        courses: [
-          '身體素養(四)',
-          '生涯探索(二)',
-          '公民行動(二)',
-          'SDGs議題探究(二)'
-        ]
-      },
-      {
-        name: '學科選修',
-        courses: [
-          '國語文(四)海風班',
-          '國語文(四)山嵐班',
-          '國語文進階(二)',
-          '英語文(四)海風班',
-          '英語文(四)山嵐班',
-          '數學(四)數A',
-          '數學(四)數B',
-          '社會進階(一)',
-          '自然進階(一)',
-          '藝術生活(二)',
-          '藝術生活進階(二)',
-          '科技進階(二)'
-        ]
-      },
-      {
-        name: '校內多元選修',
-        courses: [
-          '趣玩地科',
-          '做自己的生命設計師',
-          '微積分先修',
-          '英文語言與文體探究與實作'
-        ]
-      },
-      {
-        name: '跨校多元選修',
-        courses: [
-          'Java語言基本概念與程式設計實作',
-          '文法的跳躍音符與樂章',
-          '新聞讀、採、寫',
-          'App Inventor 2 手機應用程式開發',
-          'Python程式設計入門',
-          '商業模式',
-          '學好日語遊日本!',
-          '嘻哈音樂與文化',
-          '全雲端3D Onshape繪圖設計及應用',
-          '解題萬花筒—國際數學解題',
-          '前瞻實驗室:Gen AI與量子電腦的XR創作設計',
-          '跨越時空的星鮮人',
-          '聰明看棒球',
-          '表演創作',
-          '傳記閱讀與採訪寫作課程',
-          '英語詞根解密2',
-          'Python AI實作： 從生活議題到實戰應用'
-        ]
-      }
-    ]
-  },
-  '高三': {
-    defaults: [
-      '身體素養(六)',
-      '畢業專題（二）'
-    ],
-    groups: [
-      {
-        name: '必修',
-        courses: [
-          '身體素養(六)',
-          '畢業專題（二）'
-        ]
-      },
-      {
-        name: '學科選修',
-        courses: [
-          '國語文進階(四)',
-          '英語文進階(二)海風班',
-          '英語文進階(二)山嵐班',
-          '數學進階(二)數甲',
-          '數學進階(二)數乙',
-          '社會進階(三)',
-          '自然進階(三)',
-          '藝術生活進階(五)',
-          '藝術生活進階(六)',
-          '科技進階(四)'
-        ]
-      },
-      {
-        name: '校內多元選修',
-        courses: [
-          '玩遊戲學經濟：行為與決策'
-        ]
-      },
-      {
-        name: '跨校多元選修',
-        courses: [
-          '用Python學運算思維',
-          '心理學概論',
-          '人工智慧醫療應用',
-          '數位星空的魔法碰觸',
-          '科技倫理',
-          '一起做網美!介面設計實務',
-          '系統分析專題',
-          '不只英文課:說出、寫出、認出我(們)',
-          '基本半導體概論',
-          'BLENDER-3D建模的藝想世界',
-          'Java語言基本概念與程式設計實作',
-          '文法的跳躍音符與樂章',
-          '新聞讀、採、寫',
-          'App Inventor 2 手機應用程式開發',
-          'Python程式設計入門',
-          '商業模式',
-          '學好日語遊日本!',
-          '嘻哈音樂與文化',
-          '全雲端3D Onshape繪圖設計及應用',
-          '解題萬花筒—國際數學解題',
-          '前瞻實驗室:Gen AI與量子電腦的XR創作設計',
-          '跨越時空的星鮮人',
-          '聰明看棒球',
-          '表演創作',
-          '傳記閱讀與採訪寫作課程',
-          '英語詞根解密2',
-          'Python AI實作： 從生活議題到實戰應用'
-        ]
-      }
-    ]
-  }
-};
-
-const COURSE_VARIANT_OPTIONS = {
-  '自然進階(一)': [
-    { label: '物理', value: '自然進階(一)_物理' },
-    { label: '化學', value: '自然進階(一)_化學' },
-    { label: '生物', value: '自然進階(一)_生物' }
-  ],
-  '自然進階(三)': [
-    { label: '物理', value: '自然進階(三)_物理' },
-    { label: '化學', value: '自然進階(三)_化學' },
-    { label: '生物', value: '自然進階(三)_生物' }
-  ]
-};
-
 const state = {
-  selectedCourses: new Set(),
   activeFilter: '全部',
-  selectedCoursesExpanded: false
+  selectedCoursesExpanded: false,
+  selectedByGrade: new Map(),
+  sourceByGrade: new Map(),
+  sourceSummary: null,
+  sourceLoading: false,
+  sourceError: null,
+  requestId: 0
 };
 
 const elements = {
   form: document.querySelector('#config-form'),
-  sheetUrl: document.querySelector('#sheet-url'),
-  sheetName: document.querySelector('#sheet-name'),
-  calendarId: document.querySelector('#calendar-id'),
   notificationEmail: document.querySelector('#notification-email'),
   notifyHour: document.querySelector('#notify-hour'),
   syncHours: document.querySelector('#sync-hours'),
-  includeWholeSchool: document.querySelector('#include-whole-school'),
+  includeActivities: document.querySelector('#include-whole-school'),
   courseSearch: document.querySelector('#course-search'),
   courseList: document.querySelector('#course-list'),
   selectedCourses: document.querySelector('#selected-courses'),
@@ -271,16 +54,36 @@ const elements = {
   generatedCode: document.querySelector('#generated-code'),
   copyCode: document.querySelector('#copy-code'),
   copyCodeInline: document.querySelector('#copy-code-inline'),
-  clearCourses: document.querySelector('#clear-courses')
+  clearCourses: document.querySelector('#clear-courses'),
+  sourceStatus: document.querySelector('#source-status'),
+  sourceStatusTitle: document.querySelector('#source-status-title'),
+  sourceStatusDetail: document.querySelector('#source-status-detail'),
+  sourceRefresh: document.querySelector('#source-refresh'),
+  notificationPreset: document.querySelector('#notification-preset'),
+  customNotification: document.querySelector('#custom-notification'),
+  customNotificationField: document.querySelector('#custom-notification-field'),
+  descriptionPreset: document.querySelector('#description-preset'),
+  customDescription: document.querySelector('#custom-description'),
+  customTemplateField: document.querySelector('#custom-template-field'),
+  reminderMode: document.querySelector('#reminder-mode'),
+  reminderMinutes: document.querySelector('#reminder-minutes'),
+  reminderMinutesField: document.querySelector('#reminder-minutes-field')
 };
 
-function init() {
-  elements.sheetUrl.value = DEFAULTS.sheetUrl;
-  elements.sheetName.value = DEFAULTS.sheetName;
-  elements.calendarId.value = DEFAULTS.calendarId;
+async function init() {
   elements.notificationEmail.value = DEFAULTS.notificationEmail;
-  elements.includeWholeSchool.checked = DEFAULTS.includeWholeSchool;
-  const defaultGradeInput = document.querySelector(`input[name="gradeName"][value="${DEFAULTS.gradeName}"]`);
+  elements.includeActivities.checked = DEFAULTS.includeActivities;
+  elements.notificationPreset.value = DEFAULTS.notificationPreset;
+  elements.customNotification.value = DEFAULTS.customNotification;
+  elements.descriptionPreset.value = DEFAULTS.descriptionPreset;
+  elements.customDescription.value = DEFAULTS.customDescription;
+  elements.reminderMode.value = DEFAULTS.reminderMode;
+  elements.reminderMinutes.value = String(DEFAULTS.reminderMinutes);
+
+  const defaultGradeInput = document.querySelector(
+    `input[name="gradeName"][value="${DEFAULTS.gradeName}"]`
+  );
+
   if (defaultGradeInput) {
     defaultGradeInput.checked = true;
   }
@@ -289,12 +92,14 @@ function init() {
   renderSyncHours();
   renderSyncPresets();
   elements.notifyHour.value = String(DEFAULTS.notifyHour);
-  loadGradeDefaults(DEFAULTS.gradeName);
+  updateNotifyHourState();
+  updateEventOptionVisibility();
   bindEvents();
-  renderCourses();
-  updateOutput();
   initMobileOutput();
   setupValidation();
+  renderCourses();
+  updateOutput();
+  await loadGradeSchedule(DEFAULTS.gradeName);
 }
 
 function bindEvents() {
@@ -302,26 +107,37 @@ function bindEvents() {
     if (event.target.name === 'gradeName') {
       state.activeFilter = '全部';
       resetFilterTabs();
-      loadGradeDefaults(event.target.value);
-      renderCourses();
+      elements.courseSearch.value = '';
+      loadGradeSchedule(event.target.value);
+      return;
     }
 
     if (event.target === elements.notificationEmail) {
       updateNotifyHourState();
     }
 
+    if (event.target === elements.includeActivities) {
+      renderCourses();
+    }
+
+    if (event.target === elements.notificationPreset || event.target === elements.descriptionPreset || event.target === elements.reminderMode) {
+      updateEventOptionVisibility();
+    }
+
     updateOutput();
   });
 
   elements.courseSearch.addEventListener('input', renderCourses);
+  elements.courseList.addEventListener('change', handleCourseSelectionChange);
 
   elements.clearCourses.addEventListener('click', () => {
-    state.selectedCourses.clear();
+    getSelectedCourses().clear();
     renderCourses();
     updateOutput();
   });
 
   elements.copyCode.addEventListener('click', copyGeneratedCode);
+
   if (elements.copyCodeInline) {
     elements.copyCodeInline.addEventListener('click', copyGeneratedCode);
   }
@@ -331,59 +147,177 @@ function bindEvents() {
     renderSelectedCourses();
   });
 
+  elements.sourceRefresh.addEventListener('click', () => {
+    loadGradeSchedule(getCurrentGrade(), { force: true });
+  });
+
   bindFilterTabs();
   bindExpandTimeBtn();
   bindMobileOutputToggle();
 }
 
-/* ─── Filter tabs ─── */
+async function loadGradeSchedule(gradeName, options) {
+  const requestId = ++state.requestId;
+  const force = Boolean(options && options.force);
+  const cached = state.sourceByGrade.get(gradeName);
+
+  if (cached && !force) {
+    state.sourceSummary = cached.summary;
+    state.sourceError = null;
+    renderSourceStatus();
+    renderCourses();
+    updateOutput();
+    return;
+  }
+
+  state.sourceLoading = true;
+  state.sourceError = null;
+  renderSourceStatus();
+  renderCourses();
+  updateOutput();
+
+  try {
+    const payload = await window.TSchoolScheduleData.fetchGradeSchedule(gradeName);
+    const summary = window.TSchoolScheduleData.summarizePayload(payload, new Date());
+
+    if (requestId !== state.requestId) {
+      return;
+    }
+
+    state.sourceByGrade.set(gradeName, { payload, summary });
+    state.sourceSummary = summary;
+  } catch (error) {
+    if (requestId !== state.requestId) {
+      return;
+    }
+
+    state.sourceSummary = null;
+    state.sourceError = error;
+  } finally {
+    if (requestId === state.requestId) {
+      state.sourceLoading = false;
+      renderSourceStatus();
+      renderCourses();
+      updateOutput();
+    }
+  }
+}
+
+function renderSourceStatus() {
+  if (state.sourceLoading) {
+    elements.sourceStatus.dataset.state = 'loading';
+    elements.sourceStatusTitle.textContent = '正在讀取課表';
+    elements.sourceStatusDetail.textContent = '確認目前年級與課程資料';
+    elements.sourceRefresh.disabled = true;
+    return;
+  }
+
+  elements.sourceRefresh.disabled = false;
+
+  if (state.sourceError) {
+    elements.sourceStatus.dataset.state = 'error';
+    elements.sourceStatusTitle.textContent = '目前無法讀取課表';
+    elements.sourceStatusDetail.textContent = state.sourceError.message || '請稍後重新嘗試';
+    return;
+  }
+
+  if (!state.sourceSummary) {
+    elements.sourceStatus.dataset.state = 'idle';
+    elements.sourceStatusTitle.textContent = '尚未讀取課表';
+    elements.sourceStatusDetail.textContent = '選擇年級後會自動確認資料';
+    return;
+  }
+
+  const summary = state.sourceSummary;
+  elements.sourceStatus.dataset.state = 'success';
+  elements.sourceStatusTitle.textContent = `${getCurrentGrade()}課表可用`;
+  elements.sourceStatusDetail.textContent = [
+    `${formatDateLabel(summary.firstDate)}–${formatDateLabel(summary.lastDate)}`,
+    `${summary.catalog.courses.length} 門課`,
+    `${summary.catalog.activities.length} 項活動`
+  ].join(' · ');
+}
 
 function bindFilterTabs() {
   const container = document.getElementById('filter-tabs');
-  if (!container) return;
+
+  if (!container) {
+    return;
+  }
 
   container.addEventListener('click', event => {
     const tab = event.target.closest('.filter-tab');
-    if (!tab) return;
 
-    document.querySelectorAll('.filter-tab').forEach(t => {
-      t.classList.remove('active');
-      t.setAttribute('aria-selected', 'false');
-    });
-    tab.classList.add('active');
-    tab.setAttribute('aria-selected', 'true');
-
-    state.activeFilter = tab.dataset.filter;
-    renderCourses();
+    if (tab) {
+      selectFilterTab(tab);
+    }
   });
+
+  container.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+
+    const tabs = Array.from(container.querySelectorAll('.filter-tab'));
+    const currentIndex = tabs.indexOf(document.activeElement);
+
+    if (currentIndex < 0) {
+      return;
+    }
+
+    event.preventDefault();
+    let nextIndex = currentIndex;
+
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = tabs.length - 1;
+
+    tabs[nextIndex].focus();
+    selectFilterTab(tabs[nextIndex]);
+  });
+}
+
+function selectFilterTab(tab) {
+  document.querySelectorAll('.filter-tab').forEach(item => {
+    const selected = item === tab;
+    item.classList.toggle('active', selected);
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+  });
+
+  state.activeFilter = tab.dataset.filter;
+  renderCourses();
 }
 
 function resetFilterTabs() {
-  document.querySelectorAll('.filter-tab').forEach(t => {
-    const isAll = t.dataset.filter === '全部';
-    t.classList.toggle('active', isAll);
-    t.setAttribute('aria-selected', String(isAll));
+  document.querySelectorAll('.filter-tab').forEach(tab => {
+    const selected = tab.dataset.filter === '全部';
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
   });
 }
 
-/* ─── Sync presets ─── */
-
 function renderSyncPresets() {
   const container = document.getElementById('sync-presets');
-  if (!container) return;
+
+  if (!container) {
+    return;
+  }
 
   container.innerHTML = SYNC_PRESETS.map(({ label, hour }) => {
     const checkbox = document.querySelector(`input[name="syncHour"][value="${hour}"]`);
-    const isChecked = checkbox
-      ? checkbox.checked
-      : DEFAULTS.syncHours.includes(hour);
-    return `<button type="button" class="preset-chip${isChecked ? ' active' : ''}" data-hour="${hour}">${escapeHtml(label)}</button>`;
+    const checked = checkbox ? checkbox.checked : DEFAULTS.syncHours.includes(hour);
+    return `<button type="button" class="preset-chip${checked ? ' active' : ''}" data-hour="${hour}" aria-pressed="${checked}">${escapeHtml(label)}</button>`;
   }).join('');
 
-  container.querySelectorAll('.preset-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const hour = Number(btn.dataset.hour);
-      const checkbox = document.querySelector(`input[name="syncHour"][value="${hour}"]`);
+  container.querySelectorAll('.preset-chip').forEach(button => {
+    button.addEventListener('click', () => {
+      const checkbox = document.querySelector(
+        `input[name="syncHour"][value="${Number(button.dataset.hour)}"]`
+      );
+
       if (checkbox) {
         checkbox.checked = !checkbox.checked;
         renderSyncPresets();
@@ -393,163 +327,251 @@ function renderSyncPresets() {
   });
 }
 
-/* ─── Expand/collapse full time grid ─── */
-
 function bindExpandTimeBtn() {
-  const btn = document.getElementById('expand-time-btn');
+  const button = document.getElementById('expand-time-btn');
   const wrap = document.getElementById('time-grid-wrap');
-  if (!btn || !wrap) return;
 
-  btn.addEventListener('click', () => {
-    const isHidden = wrap.hasAttribute('hidden');
-    if (isHidden) {
-      wrap.removeAttribute('hidden');
-      btn.setAttribute('aria-expanded', 'true');
-      btn.textContent = '收合';
-    } else {
-      wrap.setAttribute('hidden', '');
-      btn.setAttribute('aria-expanded', 'false');
-      btn.textContent = '自訂時段';
-    }
+  if (!button || !wrap) {
+    return;
+  }
+
+  button.addEventListener('click', () => {
+    const expanding = wrap.hasAttribute('hidden');
+    wrap.toggleAttribute('hidden', !expanding);
+    button.setAttribute('aria-expanded', String(expanding));
+    button.textContent = expanding ? '收合' : '自訂時段';
   });
 
-  elements.syncHours.addEventListener('change', () => {
-    renderSyncPresets();
-  });
+  elements.syncHours.addEventListener('change', renderSyncPresets);
 }
 
-/* ─── Mobile output toggle ─── */
-
 function initMobileOutput() {
-  const btn = document.getElementById('mobile-output-toggle');
-  if (btn) {
-    btn.setAttribute('aria-expanded', 'true');
-    btn.setAttribute('aria-label', '收合程式碼');
+  const button = document.getElementById('mobile-output-toggle');
+
+  if (button) {
+    button.setAttribute('aria-expanded', 'true');
+    button.setAttribute('aria-label', '收合程式碼');
   }
 }
 
 function bindMobileOutputToggle() {
-  const btn = document.getElementById('mobile-output-toggle');
-  if (!btn) return;
+  const button = document.getElementById('mobile-output-toggle');
 
-  btn.addEventListener('click', () => {
+  if (!button) {
+    return;
+  }
+
+  button.addEventListener('click', () => {
     const pane = document.querySelector('.output-pane');
-    const isNowCollapsed = pane.classList.toggle('mobile-collapsed');
-    btn.setAttribute('aria-expanded', String(!isNowCollapsed));
-    btn.setAttribute('aria-label', isNowCollapsed ? '展開程式碼' : '收合程式碼');
+    const collapsed = pane.classList.toggle('mobile-collapsed');
+    button.setAttribute('aria-expanded', String(!collapsed));
+    button.setAttribute('aria-label', collapsed ? '展開程式碼' : '收合程式碼');
   });
 }
 
-/* ─── Field validation ─── */
-
 function setupValidation() {
-  const sheetUrlInput = document.getElementById('sheet-url');
-  const calendarIdInput = document.getElementById('calendar-id');
-  const notificationEmailInput = document.getElementById('notification-email');
-
-  sheetUrlInput.addEventListener('blur', () => {
-    const val = sheetUrlInput.value.trim();
-    const fieldEl = document.getElementById('field-sheet-url');
-    if (!val) {
-      setFieldState(fieldEl, null, '');
-    } else if (val.includes('docs.google.com/spreadsheets/')) {
-      setFieldState(fieldEl, 'valid', '');
-    } else {
-      setFieldState(fieldEl, 'invalid', '請貼上有效的 Google Sheets 連結');
-    }
-  });
-
-  calendarIdInput.addEventListener('blur', () => {
-    const val = calendarIdInput.value.trim();
-    const fieldEl = document.getElementById('field-calendar-id');
-    if (!val) {
-      setFieldState(fieldEl, null, '');
-    } else if (val.includes('@')) {
-      setFieldState(fieldEl, 'valid', '');
-    } else {
-      setFieldState(fieldEl, 'invalid', '通常格式為 Gmail 或 ...@group.calendar.google.com');
-    }
-  });
-
-  notificationEmailInput.addEventListener('input', validateNotificationEmail);
-  notificationEmailInput.addEventListener('blur', validateNotificationEmail);
+  elements.notificationEmail.addEventListener('input', validateNotificationEmail);
+  elements.notificationEmail.addEventListener('blur', validateNotificationEmail);
 }
 
 function validateNotificationEmail() {
-  const val = elements.notificationEmail.value.trim();
-  const fieldEl = document.getElementById('field-notification-email');
+  const value = elements.notificationEmail.value.trim();
+  const field = document.getElementById('field-notification-email');
 
-  if (!val) {
+  if (!value) {
     elements.notificationEmail.setCustomValidity('');
-    setFieldState(fieldEl, null, '');
-    return;
+    setFieldState(field, null, '未填寫時會使用目前 Google 帳號的 Email');
+    return true;
   }
 
-  if (isSingleNotificationEmail(val)) {
+  if (/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(value)) {
     elements.notificationEmail.setCustomValidity('');
-    setFieldState(fieldEl, 'valid', '');
-    return;
+    setFieldState(field, 'valid', '');
+    return true;
   }
 
   elements.notificationEmail.setCustomValidity('請填入單一通知 Email');
-  setFieldState(fieldEl, 'invalid', '請填入單一 Email，不要使用逗號、分號、換行或顯示名稱');
+  setFieldState(field, 'invalid', '請填入單一 Email，不要使用逗號、分號或顯示名稱');
+  return false;
 }
 
-function isSingleNotificationEmail(value) {
-  return /^[^\s@,;<>]+@[^\s@,;<>]+$/.test(String(value || ''));
-}
+function setFieldState(field, stateValue, hint) {
+  if (!field) {
+    return;
+  }
 
-function setFieldState(fieldEl, stateValue, hint) {
-  if (!fieldEl) return;
+  const input = field.querySelector('input');
+
   if (stateValue) {
-    fieldEl.dataset.fieldState = stateValue;
+    field.dataset.fieldState = stateValue;
   } else {
-    delete fieldEl.dataset.fieldState;
+    delete field.dataset.fieldState;
   }
-  const hintEl = fieldEl.querySelector('.field-hint');
-  if (hintEl && hint !== undefined) {
-    hintEl.textContent = hint;
+
+  if (input) {
+    input.toggleAttribute('aria-invalid', stateValue === 'invalid');
+  }
+
+  const hintElement = field.querySelector('.field-hint');
+
+  if (hintElement && hint !== undefined) {
+    hintElement.textContent = hint;
   }
 }
-
-/* ─── Toast ─── */
-
-function showToast(message) {
-  const toast = document.getElementById('toast');
-  if (!toast) return;
-  toast.textContent = message;
-  toast.classList.add('visible');
-  clearTimeout(showToast._timer);
-  showToast._timer = setTimeout(() => toast.classList.remove('visible'), 2200);
-}
-
-/* ─── Render functions ─── */
 
 function renderSyncHours() {
-  const hours = Array.from({ length: 24 }, (_, hour) => hour);
-  elements.syncHours.innerHTML = hours.map(hour => {
+  elements.syncHours.innerHTML = Array.from({ length: 24 }, (_, hour) => {
     const checked = DEFAULTS.syncHours.includes(hour) ? 'checked' : '';
-    const label = `${pad2(hour)}:00`;
-    return `<label><input type="checkbox" name="syncHour" value="${hour}" ${checked}><span>${label}</span></label>`;
+    return `<label><input type="checkbox" name="syncHour" value="${hour}" ${checked}><span>${pad2(hour)}:00</span></label>`;
   }).join('');
 }
 
 function renderNotifyHours() {
-  elements.notifyHour.innerHTML = Array.from({ length: 24 }, (_, hour) => {
-    return `<option value="${hour}">${pad2(hour)}:00</option>`;
-  }).join('');
-  updateNotifyHourState();
+  elements.notifyHour.innerHTML = Array.from({ length: 24 }, (_, hour) =>
+    `<option value="${hour}">${pad2(hour)}:00</option>`
+  ).join('');
 }
 
 function updateNotifyHourState() {
   const hasEmail = Boolean(elements.notificationEmail.value.trim());
-  elements.notifyHour.disabled = !hasEmail;
-  elements.notifyHour.title = hasEmail ? '' : '請先填寫通知 Email';
+  elements.notifyHour.title = hasEmail ? '' : '未填寫時會使用目前 Google 帳號的 Email';
 }
 
-function loadGradeDefaults(gradeName) {
-  state.selectedCourses = new Set(COURSE_CATALOG[gradeName].defaults);
-  elements.courseSearch.value = '';
+function updateEventOptionVisibility() {
+  elements.customNotificationField.hidden = elements.notificationPreset.value !== 'custom';
+  elements.customTemplateField.hidden = elements.descriptionPreset.value !== 'custom';
+  elements.reminderMinutesField.hidden = elements.reminderMode.value === 'none';
+}
+
+function getSelectedCourses(gradeName) {
+  const grade = gradeName || getCurrentGrade();
+
+  if (!state.selectedByGrade.has(grade)) {
+    state.selectedByGrade.set(grade, new Set());
+  }
+
+  return state.selectedByGrade.get(grade);
+}
+
+function handleCourseSelectionChange(event) {
+  const input = event.target.closest('input[data-course]');
+
+  if (!input) {
+    return;
+  }
+
+  const selected = getSelectedCourses();
+
+  if (input.checked) {
+    selected.add(input.value);
+  } else {
+    selected.delete(input.value);
+  }
+
+  renderCourses();
+  updateOutput();
+}
+
+function renderCourses() {
+  if (state.sourceLoading) {
+    elements.courseList.innerHTML = '<div class="course-loading" aria-live="polite"><span class="loading-track" aria-hidden="true"></span><p>正在整理課程與活動…</p></div>';
+    renderSelectedCourses();
+    return;
+  }
+
+  if (state.sourceError) {
+    elements.courseList.innerHTML = '<p class="empty-course-list">課表尚未載入，請先重新讀取來源。</p>';
+    renderSelectedCourses();
+    return;
+  }
+
+  if (!state.sourceSummary) {
+    elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前課程。</p>';
+    renderSelectedCourses();
+    return;
+  }
+
+  const query = normalizeSearchText(elements.courseSearch.value);
+  const selected = getSelectedCourses();
+  const catalog = state.sourceSummary.catalog;
+  const sections = [];
+
+  if (state.activeFilter === '全部' || state.activeFilter === '課程' || state.activeFilter === '已選') {
+    const courses = catalog.courses.filter(item => {
+      if (state.activeFilter === '已選' && !selected.has(item.title)) {
+        return false;
+      }
+
+      return normalizeSearchText(item.title).includes(query);
+    });
+
+    if (courses.length > 0) {
+      sections.push(renderCourseSection('課程', courses.map(renderCourseCard).join('')));
+    }
+  }
+
+  if (state.activeFilter === '全部' || state.activeFilter === '活動') {
+    const activities = catalog.activities.filter(item =>
+      normalizeSearchText(item.title).includes(query)
+    );
+
+    if (activities.length > 0) {
+      sections.push(renderCourseSection(
+        '全年級／全校活動',
+        activities.map(renderActivityCard).join(''),
+        elements.includeActivities.checked ? '依上方開關自動同步' : '目前已關閉'
+      ));
+    }
+  }
+
+  elements.courseList.innerHTML = sections.length > 0
+    ? sections.join('')
+    : '<p class="empty-course-list">找不到符合條件的項目，請調整搜尋文字或篩選方式。</p>';
+
+  renderSelectedCourses();
+}
+
+function renderCourseSection(title, content, note) {
+  return [
+    '<section class="course-group">',
+    '<div class="course-group-heading">',
+    `<h3>${escapeHtml(title)}</h3>`,
+    note ? `<span>${escapeHtml(note)}</span>` : '',
+    '</div>',
+    `<div class="course-grid">${content}</div>`,
+    '</section>'
+  ].join('');
+}
+
+function renderCourseCard(item) {
+  const checked = getSelectedCourses().has(item.title) ? 'checked' : '';
+  return `<label class="course-card"><input type="checkbox" data-course value="${escapeHtml(item.title)}" ${checked}><span>${escapeHtml(item.title)}</span></label>`;
+}
+
+function renderActivityCard(item) {
+  const enabled = elements.includeActivities.checked;
+  return [
+    `<div class="course-card activity-card${enabled ? ' is-selected' : ''}" aria-disabled="${!enabled}">`,
+    '<span class="activity-marker" aria-hidden="true"></span>',
+    `<span>${escapeHtml(item.title)}</span>`,
+    `<small>${enabled ? '自動同步' : '未同步'}</small>`,
+    '</div>'
+  ].join('');
+}
+
+function renderSelectedCourses() {
+  const selected = Array.from(getSelectedCourses()).sort((a, b) =>
+    a.localeCompare(b, 'zh-Hant')
+  );
+
+  elements.courseCount.textContent = `已選 ${selected.length} 門課`;
+  elements.selectedToggle.textContent = state.selectedCoursesExpanded ? '收合' : '展開';
+  elements.selectedToggle.setAttribute('aria-expanded', String(state.selectedCoursesExpanded));
+  elements.selectedCourses.hidden = !state.selectedCoursesExpanded;
+
+  elements.selectedCourses.innerHTML = selected.length === 0
+    ? '<span class="empty-selected">尚未選擇課程</span>'
+    : selected.map(course => `<span class="pill">${escapeHtml(course)}</span>`).join('');
 }
 
 function getCurrentGrade() {
@@ -557,175 +579,10 @@ function getCurrentGrade() {
   return checked ? checked.value : DEFAULTS.gradeName;
 }
 
-function renderCourses() {
-  const gradeName = getCurrentGrade();
-  const query = normalizeSearchText(elements.courseSearch.value);
-  const catalog = COURSE_CATALOG[gradeName];
-
-  let sourceGroups = catalog.groups;
-
-  if (state.activeFilter && state.activeFilter !== '全部') {
-    sourceGroups = sourceGroups.filter(g => g.name === state.activeFilter);
-  }
-
-  const groups = sourceGroups
-    .map(group => ({
-      name: group.name,
-      courses: getDisplayCoursesForGroup(group.courses).filter(course =>
-        courseMatchesQuery(course, query)
-      )
-    }))
-    .filter(group => group.courses.length > 0);
-
-  elements.courseList.innerHTML = groups.map(group => {
-    const cards = group.courses.map(course => {
-      return renderCourseCard(course);
-    }).join('');
-
-    return `<section class="course-group"><h3>${escapeHtml(group.name)}</h3><div class="course-grid">${cards}</div></section>`;
-  }).join('');
-
-  elements.courseList.querySelectorAll('input[data-course-simple]').forEach(input => {
-    input.addEventListener('change', event => {
-      const course = event.target.value;
-
-      if (event.target.checked) {
-        state.selectedCourses.add(course);
-      } else {
-        state.selectedCourses.delete(course);
-      }
-
-      renderSelectedCourses();
-      updateOutput();
-    });
-  });
-
-  elements.courseList.querySelectorAll('input[data-course-parent]').forEach(input => {
-    input.addEventListener('change', event => {
-      const course = event.target.value;
-      const options = COURSE_VARIANT_OPTIONS[course] || [];
-
-      options.forEach(option => {
-        if (event.target.checked) {
-          state.selectedCourses.add(option.value);
-        } else {
-          state.selectedCourses.delete(option.value);
-        }
-      });
-
-      renderCourses();
-      updateOutput();
-    });
-  });
-
-  elements.courseList.querySelectorAll('input[data-course-variant]').forEach(input => {
-    input.addEventListener('change', event => {
-      const course = event.target.value;
-
-      if (event.target.checked) {
-        state.selectedCourses.add(course);
-      } else {
-        state.selectedCourses.delete(course);
-      }
-
-      renderCourses();
-      updateOutput();
-    });
-  });
-
-  renderSelectedCourses();
-}
-
-function renderCourseCard(course) {
-  const options = COURSE_VARIANT_OPTIONS[course];
-
-  if (!options) {
-    const checked = state.selectedCourses.has(course) ? 'checked' : '';
-    return `<label class="course-card"><input type="checkbox" data-course-simple value="${escapeHtml(course)}" ${checked}><span>${escapeHtml(course)}</span></label>`;
-  }
-
-  const selectedCount = options.filter(option => state.selectedCourses.has(option.value)).length;
-  const checked = selectedCount > 0 ? 'checked' : '';
-  const optionControls = options.map(option => {
-    const optionChecked = state.selectedCourses.has(option.value) ? 'checked' : '';
-    return [
-      `<label class="course-suboption">`,
-      `<input type="checkbox" data-course-variant value="${escapeHtml(option.value)}" ${optionChecked}>`,
-      `<span>${escapeHtml(option.label)}</span>`,
-      `</label>`
-    ].join('');
-  }).join('');
-
-  return [
-    `<div class="course-card course-card-with-options${selectedCount > 0 ? ' is-selected' : ''}">`,
-    `<label class="course-main-toggle">`,
-    `<input type="checkbox" data-course-parent value="${escapeHtml(course)}" ${checked}>`,
-    `<span>${escapeHtml(course)}</span>`,
-    `</label>`,
-    `<div class="course-suboptions" aria-label="${escapeHtml(course)}細項">`,
-    optionControls,
-    `</div>`,
-    `</div>`
-  ].join('');
-}
-
-function courseMatchesQuery(course, query) {
-  if (!query) {
-    return true;
-  }
-
-  if (normalizeSearchText(course).includes(query)) {
-    return true;
-  }
-
-  return (COURSE_VARIANT_OPTIONS[course] || []).some(option => {
-    return normalizeSearchText(option.label).includes(query) ||
-      normalizeSearchText(option.value).includes(query);
-  });
-}
-
-function getDisplayCoursesForGroup(courses) {
-  const seen = new Set();
-
-  return courses.filter(course => {
-    const key = getCourseDisplayKey(course);
-
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
-function getCourseDisplayKey(course) {
-  return normalizeSearchText(course)
-    .replace(/\([0-9０-９]+\s*人\)$/i, '');
-}
-
-function renderSelectedCourses() {
-  const selected = Array.from(state.selectedCourses).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-  elements.courseCount.textContent = `已選 ${selected.length} 門課`;
-  elements.selectedToggle.textContent = state.selectedCoursesExpanded ? '收合' : '展開';
-  elements.selectedToggle.setAttribute('aria-expanded', String(state.selectedCoursesExpanded));
-  elements.selectedCourses.hidden = !state.selectedCoursesExpanded;
-
-  if (selected.length === 0) {
-    elements.selectedCourses.innerHTML = '<span class="empty-selected">尚未選擇課程</span>';
-    return;
-  }
-
-  elements.selectedCourses.innerHTML = selected
-    .map(course => `<span class="pill">${escapeHtml(course)}</span>`)
-    .join('');
-}
-
 function getSettings() {
   const selectedHours = Array.from(document.querySelectorAll('input[name="syncHour"]:checked'))
     .map(input => Number(input.value))
     .sort((a, b) => a - b);
-
   const notifyHour = Number(elements.notifyHour.value);
   const autoSyncHours = selectedHours.length > 0 ? selectedHours : [notifyHour];
 
@@ -734,36 +591,79 @@ function getSettings() {
     autoSyncHours.sort((a, b) => a - b);
   }
 
+  const summary = state.sourceSummary;
+
   return {
-    sheetUrl: elements.sheetUrl.value.trim(),
-    sheetName: elements.sheetName.value.trim() || DEFAULTS.sheetName,
-    calendarId: elements.calendarId.value.trim(),
+    appVersion: '2.0.0-mvp',
+    sourceApiUrl: window.TSchoolScheduleData.API_URL,
     gradeName: getCurrentGrade(),
+    calendarName: DEFAULTS.calendarName,
     notificationEmail: elements.notificationEmail.value.trim(),
     autoSyncHours,
     notifySyncHour: notifyHour,
-    notifyHour,
-    includeWholeSchool: elements.includeWholeSchool.checked,
-    selectedCourses: Array.from(state.selectedCourses).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+    includeActivities: elements.includeActivities.checked,
+    selectedCourses: Array.from(getSelectedCourses()).sort((a, b) =>
+      a.localeCompare(b, 'zh-Hant')
+    ),
+    notificationPreset: elements.notificationPreset.value,
+    customNotification: elements.customNotification.value.trim() || DEFAULTS.customNotification,
+    descriptionPreset: elements.descriptionPreset.value,
+    customDescription: elements.customDescription.value.trim() || DEFAULTS.customDescription,
+    reminderMode: elements.reminderMode.value,
+    reminderMinutes: Number(elements.reminderMinutes.value),
+    initialTermKey: summary ? summary.termKey : '',
+    initialSourceFingerprint: summary ? summary.fingerprint : '',
+    initialKnownTitles: summary ? summary.catalog.all.map(item => item.title) : []
   };
 }
 
 function updateOutput() {
+  const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
+  elements.copyCode.disabled = !ready;
+
+  if (elements.copyCodeInline) {
+    elements.copyCodeInline.disabled = !ready;
+  }
+
+  if (!ready || typeof window.buildAppsScriptCode !== 'function') {
+    elements.generatedCode.value = state.sourceError
+      ? '// 課表來源目前無法讀取，請重新嘗試後再複製。'
+      : '// 正在準備控制台程式碼…';
+    return;
+  }
+
   elements.generatedCode.value = window.buildAppsScriptCode(getSettings());
 }
 
 async function copyGeneratedCode() {
+  if (!state.sourceSummary || !validateNotificationEmail()) {
+    elements.notificationEmail.reportValidity();
+    return;
+  }
+
   try {
     await navigator.clipboard.writeText(elements.generatedCode.value);
-  } catch {
+  } catch (error) {
     elements.generatedCode.focus();
     elements.generatedCode.select();
     document.execCommand('copy');
   }
-  showToast('✓ 已複製到剪貼簿');
+
+  showToast('已複製控制台程式碼');
 }
 
-/* ─── Utilities ─── */
+function showToast(message) {
+  const toast = document.getElementById('toast');
+
+  if (!toast) {
+    return;
+  }
+
+  toast.textContent = message;
+  toast.classList.add('visible');
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => toast.classList.remove('visible'), 2400);
+}
 
 function normalizeSearchText(value) {
   return String(value || '')
@@ -771,6 +671,10 @@ function normalizeSearchText(value) {
     .replace(/（/g, '(')
     .replace(/）/g, ')')
     .toLowerCase();
+}
+
+function formatDateLabel(date) {
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function escapeHtml(value) {

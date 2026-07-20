@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
-  <title>T-SCHOOL 行程同步腳本產生器</title>
+  <meta name="theme-color" content="#006a62">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
+  <title>T-SCHOOL 課表同步控制台安裝器</title>
   <link id="app-stylesheet" rel="stylesheet">
   <script>
     (function () {
@@ -15,63 +16,29 @@
   </script>
 </head>
 <body>
-  <div id="toast" class="toast" role="status" aria-live="assertive"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <main class="app-shell">
     <section class="config-pane" aria-labelledby="page-title">
       <div class="title-block">
-        <p class="eyebrow">t-school-schedule-sync</p>
-        <h1 id="page-title">行程同步腳本產生器</h1>
-        <p class="intro">用於解決個人行事曆排程因學校調課或活動增減而變得不同步的問題，並融入調課通知等實用功能</p>
+        <p class="eyebrow">T-SCHOOL · Schedule Sync</p>
+        <h1 id="page-title"><span>課表同步</span><span>控制台安裝器</span></h1>
+        <p class="intro">選好年級、課程與同步偏好，產生一份由你自己持有的 Apps Script。安裝後可直接在試算表控制台調整設定、查看狀態與立即同步。</p>
       </div>
 
       <form id="config-form" class="form-stack">
         <section class="section-band" aria-labelledby="basic-settings-title">
           <div class="section-heading">
-            <h2 id="basic-settings-title">基本設定</h2>
+            <h2 id="basic-settings-title">課表來源</h2>
           </div>
 
-          <label class="field validated-field" id="field-sheet-url">
-            <span>Google Sheets URL</span>
-            <div class="input-wrap">
-              <input id="sheet-url" name="sheetUrl" type="url" autocomplete="off"
-                     placeholder="https://docs.google.com/spreadsheets/d/…">
-              <span class="field-icon" aria-hidden="true"></span>
-            </div>
-            <span class="field-hint" aria-live="polite"></span>
-          </label>
-
-          <div class="two-column">
-            <label class="field">
-              <span>表格分頁名稱</span>
-              <input id="sheet-name" name="sheetName" type="text">
-            </label>
-
-            <div class="field validated-field" id="field-calendar-id">
-              <div class="label-with-info">
-                <label for="calendar-id">Calendar ID</label>
-                <span class="info-trigger">
-                  <button type="button" class="info-btn" aria-label="如何取得 Calendar ID？" aria-describedby="calendar-id-tooltip">
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                      <circle cx="7" cy="7" r="6.5" stroke="currentColor" stroke-width="1.3"/>
-                      <line x1="7" y1="6.5" x2="7" y2="10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                      <circle cx="7" cy="4.5" r="0.8" fill="currentColor"/>
-                    </svg>
-                  </button>
-                  <span class="info-tooltip" id="calendar-id-tooltip" role="tooltip">
-                    <span class="tip-title">如何取得 Calendar ID</span>
-                    <span class="tip-body">Google 日曆 → 齒輪設定 → 找到目標日曆 → 滑到整合日曆區段 → 複製 Calendar ID</span>
-                    <span class="tip-note">請務必另建一個專用日曆供此腳本使用，以避免影響既有日曆內容。</span>
-                  </span>
-                </span>
-              </div>
-              <div class="input-wrap">
-                <input id="calendar-id" name="calendarId" type="text" autocomplete="off"
-                       placeholder="請使用校內帳號另建專用日曆">
-                <span class="field-icon" aria-hidden="true"></span>
-              </div>
-              <span class="field-hint" aria-live="polite"></span>
-            </div>
+          <div class="source-status" id="source-status" role="status" aria-live="polite" data-state="loading">
+            <span class="source-status-indicator" aria-hidden="true"></span>
+            <span class="source-status-copy">
+              <strong id="source-status-title">正在讀取課表</strong>
+              <span id="source-status-detail">確認目前年級與課程資料</span>
+            </span>
+            <button type="button" class="icon-button source-refresh" id="source-refresh" aria-label="重新讀取課表" title="重新讀取課表">↻</button>
           </div>
 
           <fieldset class="segmented-field">
@@ -82,6 +49,8 @@
               <label><input type="radio" name="gradeName" value="高三"><span>高三</span></label>
             </div>
           </fieldset>
+
+          <p class="source-note">程式固定讀取 T-SCHOOL 目前使用的課表 API，不會再存取已停止更新的舊 Google Sheet。</p>
         </section>
 
         <section class="section-band" aria-labelledby="sync-settings-title">
@@ -94,17 +63,34 @@
               <span>通知 Email</span>
               <div class="input-wrap">
                 <input id="notification-email" name="notificationEmail" type="email"
-                       placeholder="填寫後可設定成功通知時段">
+                       placeholder="填寫後可設定成功通知時段"
+                       aria-describedby="notification-email-hint">
                 <span class="field-icon" aria-hidden="true"></span>
               </div>
-              <span class="field-hint" aria-live="polite"></span>
+              <span class="field-hint" id="notification-email-hint" aria-live="polite"></span>
             </label>
 
             <label class="field">
               <span>成功通知時段</span>
               <select id="notify-hour" name="notifyHour"></select>
             </label>
+
+            <label class="field">
+              <span>異動通知格式</span>
+              <select id="notification-preset" name="notificationPreset">
+                <option value="compact">簡潔</option>
+                <option value="standard" selected>標準</option>
+                <option value="detailed">詳細</option>
+                <option value="custom">進階自訂</option>
+              </select>
+            </label>
           </div>
+
+          <label class="field custom-template-field" id="custom-notification-field" hidden>
+            <span>自訂異動通知模板</span>
+            <textarea id="custom-notification" name="customNotification" rows="5" aria-describedby="custom-notification-hint"></textarea>
+            <span class="field-hint" id="custom-notification-hint">可使用 {type}、{course}、{oldDate}、{newDate}、{oldPeriod}、{newPeriod}、{oldTime}、{newTime}、{oldLocation}、{newLocation}</span>
+          </label>
 
           <fieldset class="check-field sync-time-field">
             <legend class="sync-time-summary">
@@ -121,7 +107,50 @@
 
           <label class="toggle-row">
             <input id="include-whole-school" name="includeWholeSchool" type="checkbox" checked>
-            <span>同步全年級、全校性質活動與重要公告</span>
+            <span>同步已辨識的全年級、全校活動與重要公告</span>
+          </label>
+        </section>
+
+        <section class="section-band" aria-labelledby="event-settings-title">
+          <div class="section-heading">
+            <h2 id="event-settings-title">行事曆呈現</h2>
+          </div>
+
+          <div class="two-column">
+            <label class="field">
+              <span>事件說明格式</span>
+              <select id="description-preset" name="descriptionPreset">
+                <option value="compact">簡潔</option>
+                <option value="standard" selected>標準</option>
+                <option value="detailed">詳細</option>
+                <option value="custom">進階自訂</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>活動提醒</span>
+              <select id="reminder-mode" name="reminderMode">
+                <option value="none" selected>不提醒</option>
+                <option value="popup">日曆彈出通知</option>
+                <option value="email">Email 提醒</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field custom-template-field" id="custom-template-field" hidden>
+            <span>自訂說明模板</span>
+            <textarea id="custom-description" name="customDescription" rows="5" aria-describedby="custom-template-hint"></textarea>
+            <span class="field-hint" id="custom-template-hint">可使用 {course}、{date}、{weekday}、{week}、{period}、{startTime}、{endTime}、{location}、{sourceUpdatedAt}</span>
+          </label>
+
+          <label class="field reminder-minutes-field" id="reminder-minutes-field" hidden>
+            <span>提前時間</span>
+            <select id="reminder-minutes" name="reminderMinutes">
+              <option value="10">10 分鐘</option>
+              <option value="30">30 分鐘</option>
+              <option value="60">1 小時</option>
+              <option value="1440">1 天</option>
+            </select>
           </label>
         </section>
 
@@ -139,17 +168,15 @@
             <input id="course-search" type="search" placeholder="輸入課名、班別或線上">
           </label>
 
-          <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="按分類篩選課程">
+          <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="篩選課表項目">
             <button type="button" class="filter-tab active" data-filter="全部"
-                    role="tab" aria-selected="true">全部</button>
-            <button type="button" class="filter-tab" data-filter="必修"
-                    role="tab" aria-selected="false">必修</button>
-            <button type="button" class="filter-tab" data-filter="學科選修"
-                    role="tab" aria-selected="false">學科選修</button>
-            <button type="button" class="filter-tab" data-filter="校內多元選修"
-                    role="tab" aria-selected="false">校內多元</button>
-            <button type="button" class="filter-tab" data-filter="跨校多元選修"
-                    role="tab" aria-selected="false">跨校多元</button>
+                    role="tab" aria-selected="true" tabindex="0">全部</button>
+            <button type="button" class="filter-tab" data-filter="課程"
+                    role="tab" aria-selected="false" tabindex="-1">課程</button>
+            <button type="button" class="filter-tab" data-filter="活動"
+                    role="tab" aria-selected="false" tabindex="-1">活動</button>
+            <button type="button" class="filter-tab" data-filter="已選"
+                    role="tab" aria-selected="false" tabindex="-1">已選</button>
           </div>
 
           <div class="selected-summary">
@@ -168,7 +195,7 @@
       <div class="output-header">
         <div>
           <p class="eyebrow">Generated Apps Script</p>
-          <h2 id="output-title">完整 Code.gs</h2>
+          <h2 id="output-title">控制台 Code.gs</h2>
         </div>
         <div class="output-actions">
           <button type="button" class="primary-button" id="copy-code">複製</button>
@@ -187,34 +214,34 @@
 
         <section class="steps" aria-labelledby="steps-title">
           <h3 id="steps-title">使用步驟</h3>
-          <p class="steps-intro">＊ Apps Script 是 Google 提供的線上程式執行工具　＊每項步驟皆請等待程式執行完成</p>
+          <p class="steps-intro">程式與設定只會保存在你自己的 Google 帳號。第一次安裝後，日常操作都在試算表控制台完成。</p>
           <ol class="steps-list">
             <li class="step-card">
               <span class="step-num" aria-hidden="true">1</span>
               <span class="step-text">
-                <strong>建立 Apps Script 專案</strong>
-                <span>前往 <a href="https://script.google.com/" target="_blank" rel="noopener noreferrer"><code>script.google.com</code></a> → 點左上角「新專案」→ 刪掉範例文字 → 貼上剛複製的 <button type="button" class="inline-code-button" id="copy-code-inline" aria-label="複製 Code.gs 內容"><code>Code.gs</code></button> → 儲存（cmd / ctrl + s）</span>
+                <strong>建立控制台試算表</strong>
+                <span>新增一份空白 Google 試算表 → 命名為「課表同步控制台」→ 開啟「擴充功能 → Apps Script」</span>
               </span>
             </li>
             <li class="step-card">
               <span class="step-num" aria-hidden="true">2</span>
               <span class="step-text">
-                <strong>執行第一次同步</strong>
-                <span>上方函式選單選 <code>syncMyScheduleToCalendar</code> → 按「執行」→ 選擇自己的校內 Google 帳號 → 允許存取試算表與日曆</span>
+                <strong>安裝程式</strong>
+                <span>刪除編輯器中的範例文字 → 貼上剛複製的 <button type="button" class="inline-code-button" id="copy-code-inline" aria-label="複製 Code.gs 內容"><code>Code.gs</code></button> → 儲存 → 回到試算表並重新整理</span>
               </span>
             </li>
             <li class="step-card">
               <span class="step-num" aria-hidden="true">3</span>
               <span class="step-text">
-                <strong>檢查日曆內容</strong>
-                <span>打開專用 Google 日曆 → 對照原本 Google Sheet → 確認同步正確</span>
+                <strong>完成第一次同步</strong>
+                <span>點選試算表上方「課表同步 → 開啟設定」→ 檢查選課 → 按「儲存並首次同步」→ 依 Google 畫面完成授權</span>
               </span>
             </li>
             <li class="step-card">
               <span class="step-num" aria-hidden="true">4</span>
               <span class="step-text">
-                <strong>建立每日自動同步</strong>
-                <span>函式選單選 <code>setupAutoSyncTriggers</code> → 按「執行」→ 按左側鬧鐘圖示確認觸發條件正確</span>
+                <strong>檢查專用日曆</strong>
+                <span>同步完成後開啟系統建立的「T-SCHOOL 課表」日曆 → 確認課程、時間與地點正確；後續設定都從同一個試算表選單調整</span>
               </span>
             </li>
           </ol>
@@ -227,7 +254,8 @@
     (function () {
       var version = window.TSCHOOL_ASSET_VERSION || String(Date.now());
       var assets = [
-        'gemini-code-1778375297203.js',
+        'schedule-data.js',
+        'sidebar-template.js',
         'code-template.js',
         'app.js'
       ];

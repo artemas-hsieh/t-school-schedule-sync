@@ -1,24 +1,23 @@
 (function () {
+  'use strict';
+
   function escapeJsonForScript(json) {
-    return json
-      .replace(/\u2028/g, '\\u2028')
-      .replace(/\u2029/g, '\\u2029');
+    return json.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   }
 
   function formatString(value) {
     return escapeJsonForScript(JSON.stringify(String(value == null ? '' : value)));
   }
 
-  function formatNumberArray(values) {
-    return `[${values.map(Number).join(', ')}]`;
-  }
+  function formatLongString(value) {
+    const text = String(value == null ? '' : value);
+    const chunks = [];
 
-  function formatStringArray(values) {
-    if (!values || values.length === 0) {
-      return '[]';
+    for (let index = 0; index < text.length; index += 7000) {
+      chunks.push(formatString(text.slice(index, index + 7000)));
     }
 
-    return `[\n${values.map(value => `  ${formatString(value)}`).join(',\n')}\n]`;
+    return chunks.length ? chunks.join(' +\n  ') : "''";
   }
 
   function formatObject(value) {
@@ -32,9 +31,8 @@
 
   function normalizeHourArray(values, fallbackHour) {
     const result = [];
-    const source = Array.isArray(values) ? values : [];
 
-    source.forEach(value => {
+    (Array.isArray(values) ? values : []).forEach(value => {
       const hour = normalizeHour(value, null);
 
       if (hour !== null && !result.includes(hour)) {
@@ -50,1326 +48,1389 @@
   }
 
   window.buildAppsScriptCode = function buildAppsScriptCode(settings) {
-    const rawNotifyHour = settings.notifySyncHour != null && settings.notifySyncHour !== ''
-      ? settings.notifySyncHour
-      : settings.notifyHour;
-    const notifyHour = normalizeHour(rawNotifyHour, 5);
-    const autoSyncHours = normalizeHourArray(settings.autoSyncHours, notifyHour);
-    const courseDictionary = window.TSCHOOL_COURSE_DICTIONARY || {};
-    const nonElectiveEvents = window.TSCHOOL_NON_ELECTIVE_EVENTS || {};
+    const notifyHour = normalizeHour(settings.notifySyncHour, 5);
+    const initialSettings = {
+      schemaVersion: 2,
+      appVersion: settings.appVersion || '2.0.0-mvp',
+      setupComplete: false,
+      gradeName: settings.gradeName || '高一',
+      calendarId: '',
+      calendarName: settings.calendarName || 'T-SCHOOL 課表',
+      notificationEmail: settings.notificationEmail || '',
+      selectedCourses: settings.selectedCourses || [],
+      includeActivities: settings.includeActivities !== false,
+      autoSyncEnabled: true,
+      autoSyncHours: normalizeHourArray(settings.autoSyncHours, notifyHour),
+      notifySyncHour: notifyHour,
+      notificationPreset: settings.notificationPreset || 'standard',
+      customNotification: settings.customNotification || '',
+      descriptionPreset: settings.descriptionPreset || 'standard',
+      customDescription: settings.customDescription || '',
+      reminderMode: settings.reminderMode || 'none',
+      reminderMinutes: Number(settings.reminderMinutes) || 10,
+      knownTitles: settings.initialKnownTitles || [],
+      pendingTitles: [],
+      excludedTitles: [],
+      termKey: settings.initialTermKey || '',
+      sourceFingerprint: settings.initialSourceFingerprint || '',
+      pendingTermKey: '',
+      pausedReason: '',
+      calendarMigrationFromId: ''
+    };
+    const sidebarHtml = window.TSCHOOL_SIDEBAR_HTML || '';
 
-    return `const CONFIG = {
-  sheetUrl: ${formatString(settings.sheetUrl)},
-  sheetName: ${formatString(settings.sheetName)},
-  calendarId: ${formatString(settings.calendarId)},
+    return `const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-mvp')};
+const SETTINGS_SCHEMA_VERSION = 2;
+const TIMEZONE = 'Asia/Taipei';
+const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
+const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
+const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
+const STATUS_STORE = 'TSCHOOL_STATUS';
+const NOTICE_STORE = 'TSCHOOL_NOTICE_STATE';
+const MANAGED_MARKER = '[T-SCHOOL-SCHEDULE-SYNC]';
+const DESCRIPTION_MARKER = '[T-SCHOOL 課表同步]';
+const ALLOW_QUICK_DELETE_ALL = false;
+const DEFAULT_SETTINGS = ${formatObject(initialSettings)};
+const SETTINGS_SIDEBAR_HTML = ${formatLongString(sidebarHtml)};
+const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
+const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+const MANUAL_MERGE_EXCEPTIONS = {};
+const ACTIVITY_PATTERNS = [
+  /全校(?:性)?活動/,
+  /^高[一二三](?:導入期|全校活動)$/,
+  /^休業式(?:_高[一二三])?$/,
+  /^勞動節$/,
+  /模擬考/,
+  /校際交流/,
+  /教育局.*(?:協作坊|輔導團)/,
+  /^全天(?:吉林|弘道)$/,
+  /防災|避難演練|畢業典禮|畢展布展/
+];
 
-  gradeName: ${formatString(settings.gradeName)},
-  timezone: 'Asia/Taipei',
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('課表同步')
+    .addItem('開啟設定', 'showSettingsSidebar')
+    .addSeparator()
+    .addItem('立即同步', 'syncMyScheduleToCalendar')
+    .addItem('暫停／恢復自動同步', 'toggleAutoSyncFromMenu')
+    .addItem('查看同步狀態', 'showSyncStatus')
+    .addItem('強制修復', 'forceFullSyncMyScheduleToCalendar')
+    .addSeparator()
+    .addItem('移除受管理事件', 'confirmQuickDeleteSyncedEvents')
+    .addToUi();
+}
 
-  eventTitlePrefix: '',
-  syncIdPrefix: '[T-SCHOOL-SCHEDULE-SYNC]',
-  managedEventDescriptionPrefix: '[T-SCHOOL 課表同步]',
+function showSettingsSidebar() {
+  const output = HtmlService.createHtmlOutput(SETTINGS_SIDEBAR_HTML)
+    .setTitle('T-SCHOOL 課表同步');
+  SpreadsheetApp.getUi().showSidebar(output);
+}
 
-  syncLookbackDays: 0,
-  autoSyncHours: ${formatNumberArray(autoSyncHours)},
-  notifySyncHour: ${notifyHour},
-  notificationEmail: ${formatString(settings.notificationEmail)},
-  notificationSuccessSubject: '[T-SCHOOL 課表同步] 課表同步成功',
-  notificationFailureSubject: '[T-SCHOOL 課表同步] ！課表同步失敗！',
-  rescheduleNoticeStateProperty: 'RESCHEDULE_NOTICE_STATE',
+function getSettingsUiData() {
+  let settings = loadSettings_();
+  const source = loadSourceContext_(settings.gradeName);
+  settings = applyTermTransitionIfNeeded_(settings, source, true);
 
-  allowQuickDeleteAllCalendarEvents: false,
-  quickDeleteAllFromYear: 2000,
-  quickDeleteAllToYear: 2100,
+  return buildUiData_(settings, source);
+}
 
-  schoolYearOffset: 1911
-};
+function getSourceCatalogForUi(gradeName) {
+  const cleanGrade = sanitizeGrade_(gradeName);
+  return buildSourceUiModel_(loadSourceContext_(cleanGrade), cleanGrade);
+}
 
-const SELECTED_COURSES = ${formatStringArray(settings.selectedCourses)};
+function saveSettingsFromUi(input) {
+  const result = saveSettingsCore_(input);
+  return {
+    message: '設定已儲存',
+    uiData: buildUiData_(result.settings, result.source)
+  };
+}
 
-const INCLUDE_NON_ELECTIVE_EVENTS = ${settings.includeWholeSchool ? 'true' : 'false'};
+function previewSettingsImpactFromUi(input) {
+  const previous = loadSettings_();
+  const source = loadSourceContext_(sanitizeGrade_(input && input.gradeName));
+  const next = sanitizeSettingsInput_(input, previous, source);
+  const todayKey = formatDateKey_(new Date());
+  const oldState = loadSyncState_();
+  const desiredEvents = source.events
+    .filter(event => event.dateKey >= todayKey)
+    .filter(event => shouldIncludeEvent_(event, next));
+  const calendarChanged = Boolean(previous.calendarId && next.calendarId && previous.calendarId !== next.calendarId);
 
-const COURSE_DICTIONARY = ${formatObject(courseDictionary)};
+  if (calendarChanged) {
+    return {
+      calendarChanged: true,
+      created: desiredEvents.length,
+      updated: 0,
+      deleted: Object.keys(oldState).filter(key => oldState[key].dateKey >= todayKey).length,
+      unchanged: 0
+    };
+  }
 
-const NON_ELECTIVE_EVENTS = ${formatObject(nonElectiveEvents)};
+  const plan = buildSyncPlan_(oldState, desiredEvents, todayKey);
+  const changedExact = plan.exact.filter(pair => pair.oldItem.syncSignature !== makeEventSignature_(pair.newItem, next)).length;
+  return {
+    calendarChanged: false,
+    created: plan.additions.length,
+    updated: plan.moved.length + changedExact,
+    deleted: plan.deletions.length,
+    unchanged: plan.exact.length - changedExact
+  };
+}
 
-function syncMyScheduleToCalendar() {
+function saveSettingsAndSyncFromUi(input) {
+  const before = loadSettings_();
+  const result = saveSettingsCore_(input);
+  const firstSetup = !before.setupComplete;
+  let syncResult;
+
   try {
-    return syncMyScheduleToCalendar_({
+    syncResult = syncSchedule_({
+      reason: firstSetup ? 'setup' : 'settings',
+      forceCalendarCheck: true,
       notifyOnSuccess: false
     });
   } catch (error) {
-    notifySyncFailure_();
+    notifySyncFailureUnlessActionRequired_(error);
     throw error;
   }
+
+  try {
+    refreshAutoSyncTriggers_(loadSettings_());
+  } catch (error) {
+    notifySyncFailureUnlessActionRequired_(error);
+    throw error;
+  }
+
+  if (firstSetup) {
+    sendFirstSetupNotificationSafe_(syncResult);
+  }
+
+  return {
+    message: firstSetup ? '第一次同步完成，請檢查專用日曆' : '設定已儲存並同步',
+    uiData: getSettingsUiData()
+  };
+}
+
+function runSyncFromUi() {
+  try {
+    const result = syncSchedule_({ reason: 'manual' });
+    return { message: formatSyncResultMessage_(result), uiData: getSettingsUiData() };
+  } catch (error) {
+    notifySyncFailureUnlessActionRequired_(error);
+    throw error;
+  }
+}
+
+function forceRepairFromUi() {
+  try {
+    const result = syncSchedule_({ reason: 'repair', forceCalendarCheck: true });
+    return { message: '修復完成：' + formatSyncResultMessage_(result), uiData: getSettingsUiData() };
+  } catch (error) {
+    notifySyncFailureUnlessActionRequired_(error);
+    throw error;
+  }
+}
+
+function createDedicatedCalendarForUi() {
+  const settings = loadSettings_();
+  const calendar = CalendarApp.createCalendar(buildDedicatedCalendarName_(settings));
+  return {
+    message: '已建立專用日曆',
+    calendarId: calendar.getId(),
+    calendars: listOwnedCalendars_()
+  };
+}
+
+function confirmPendingTitleFromUi(title) {
+  const settings = loadSettings_();
+  const normalized = normalizeTitle_(title);
+  settings.pendingTitles = settings.pendingTitles.filter(item => normalizeTitle_(item) !== normalized);
+
+  if (!settings.selectedCourses.some(item => normalizeTitle_(item) === normalized)) {
+    settings.selectedCourses.push(String(title));
+  }
+
+  settings.excludedTitles = settings.excludedTitles.filter(item => normalizeTitle_(item) !== normalized);
+  saveSettings_(settings);
+  return { message: '已保留「' + title + '」', uiData: getSettingsUiData() };
+}
+
+function rejectPendingTitleFromUi(title) {
+  const settings = loadSettings_();
+  const normalized = normalizeTitle_(title);
+  settings.pendingTitles = settings.pendingTitles.filter(item => normalizeTitle_(item) !== normalized);
+  settings.selectedCourses = settings.selectedCourses.filter(item => normalizeTitle_(item) !== normalized);
+
+  if (!settings.excludedTitles.some(item => normalizeTitle_(item) === normalized)) {
+    settings.excludedTitles.push(String(title));
+  }
+
+  saveSettings_(settings);
+  return { message: '已排除「' + title + '」，下次同步會移除同名活動', uiData: getSettingsUiData() };
+}
+
+function saveSettingsCore_(input) {
+  const oldSettings = loadSettings_();
+  const source = loadSourceContext_(sanitizeGrade_(input && input.gradeName));
+  const next = sanitizeSettingsInput_(input, oldSettings, source);
+
+  saveSettings_(next);
+  if (next.setupComplete) refreshAutoSyncTriggers_(next);
+  else deleteAutoSyncTriggers();
+  return { settings: next, source };
+}
+
+function sanitizeSettingsInput_(input, previous, source) {
+  const value = input || {};
+  const gradeName = sanitizeGrade_(value.gradeName);
+  const gradeChanged = previous.gradeName !== gradeName;
+  const selectedCourses = uniqueStrings_(Array.isArray(value.selectedCourses) ? value.selectedCourses : []);
+  const sourceTitles = source.catalog.all.map(item => item.title);
+  const sourceKeys = sourceTitles.map(normalizeTitle_);
+  const cleanSelected = selectedCourses.filter(title => sourceKeys.indexOf(normalizeTitle_(title)) !== -1);
+  const notificationEmail = String(value.notificationEmail || '').trim();
+
+  if (notificationEmail) {
+    assertSingleEmail_(notificationEmail);
+  }
+
+  if (previous.pendingTermKey && cleanSelected.length === 0) {
+    throw new Error('新學期必須重新選擇至少一門課程後才能儲存。');
+  }
+
+  const calendarId = String(value.calendarId || '').trim();
+
+  if (calendarId) {
+    assertDedicatedCalendar_(calendarId);
+  }
+
+  const notifyHour = normalizeHour_(value.notifySyncHour, 5);
+  const hours = normalizeHourArray_(value.autoSyncHours, notifyHour);
+  const reminderMode = ['none', 'popup', 'email'].indexOf(value.reminderMode) !== -1
+    ? value.reminderMode
+    : 'none';
+  const descriptionPreset = ['compact', 'standard', 'detailed', 'custom'].indexOf(value.descriptionPreset) !== -1
+    ? value.descriptionPreset
+    : 'standard';
+  const notificationPreset = ['compact', 'standard', 'detailed', 'custom'].indexOf(value.notificationPreset) !== -1
+    ? value.notificationPreset
+    : 'standard';
+
+  const calendarMigrationFromId = previous.calendarId && calendarId && previous.calendarId !== calendarId
+    ? previous.calendarId
+    : (calendarId === previous.calendarId ? '' : previous.calendarMigrationFromId || '');
+
+  return Object.assign({}, previous, {
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
+    appVersion: APP_VERSION,
+    gradeName,
+    selectedCourses: cleanSelected,
+    includeActivities: value.includeActivities !== false,
+    calendarId,
+    notificationEmail,
+    autoSyncEnabled: value.autoSyncEnabled !== false,
+    autoSyncHours: hours,
+    notifySyncHour: notifyHour,
+    notificationPreset,
+    customNotification: String(value.customNotification || previous.customNotification || '').slice(0, 4000),
+    descriptionPreset,
+    customDescription: String(value.customDescription || previous.customDescription || '').slice(0, 4000),
+    reminderMode,
+    reminderMinutes: sanitizeReminderMinutes_(value.reminderMinutes),
+    knownTitles: sourceTitles,
+    pendingTitles: gradeChanged ? [] : previous.pendingTitles.filter(title => sourceKeys.indexOf(normalizeTitle_(title)) !== -1),
+    excludedTitles: gradeChanged ? [] : previous.excludedTitles,
+    termKey: source.termKey,
+    sourceFingerprint: source.fingerprint,
+    pendingTermKey: '',
+    pausedReason: '',
+    calendarMigrationFromId
+  });
+}
+
+function buildUiData_(settings, source) {
+  return {
+    appVersion: APP_VERSION,
+    settings,
+    source: buildSourceUiModel_(source, settings.gradeName),
+    calendars: listOwnedCalendars_(),
+    status: loadStatus_()
+  };
+}
+
+function buildSourceUiModel_(source, gradeName) {
+  return {
+    gradeName,
+    firstDate: source.firstDateKey,
+    lastDate: source.lastDateKey,
+    courseCount: source.catalog.courses.length,
+    activityCount: source.catalog.activities.length,
+    updateLabel: source.sourceUpdatedLabel,
+    warning: source.sourceStale,
+    catalog: source.catalog,
+    termKey: source.termKey,
+    fingerprint: source.fingerprint
+  };
+}
+
+function listOwnedCalendars_() {
+  const defaultId = CalendarApp.getDefaultCalendar().getId();
+  return CalendarApp.getAllOwnedCalendars()
+    .filter(calendar => calendar.getId() !== defaultId)
+    .map(calendar => ({ id: calendar.getId(), name: calendar.getName() }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function buildDedicatedCalendarName_(settings) {
+  return (settings.calendarName || 'T-SCHOOL 課表') + '・' + settings.gradeName;
+}
+
+function ensureDedicatedCalendar_(settings) {
+  if (settings.calendarId) {
+    return assertDedicatedCalendar_(settings.calendarId);
+  }
+
+  const calendar = CalendarApp.createCalendar(buildDedicatedCalendarName_(settings));
+  settings.calendarId = calendar.getId();
+  saveSettings_(settings);
+  return calendar;
+}
+
+function assertDedicatedCalendar_(calendarId) {
+  const calendar = CalendarApp.getCalendarById(calendarId);
+
+  if (!calendar) {
+    throw new Error('找不到選擇的專用日曆。');
+  }
+
+  if (calendar.getId() === CalendarApp.getDefaultCalendar().getId()) {
+    throw new Error('不能使用主要日曆，請建立或選擇專用日曆。');
+  }
+
+  if (typeof calendar.isOwnedByMe === 'function' && !calendar.isOwnedByMe()) {
+    throw new Error('只能使用自己擁有的專用日曆。');
+  }
+
+  return calendar;
+}
+
+function syncMyScheduleToCalendar() {
+  return runSyncEntryPoint_({ reason: 'source' });
 }
 
 function syncMyScheduleToCalendarWithNotification() {
-  try {
-    return syncMyScheduleToCalendar_({
-      notifyOnSuccess: true
-    });
-  } catch (error) {
-    notifySyncFailure_();
-    throw error;
-  }
+  return runSyncEntryPoint_({ reason: 'source', notifyOnSuccess: true });
 }
 
 function forceFullSyncMyScheduleToCalendar() {
+  return runSyncEntryPoint_({ reason: 'repair', forceCalendarCheck: true });
+}
+
+function runSyncEntryPoint_(options) {
   try {
-    return syncMyScheduleToCalendar_({
-      notifyOnSuccess: false,
-      forceCalendarCheck: true
-    });
+    return syncSchedule_(options || {});
   } catch (error) {
-    notifySyncFailure_();
+    notifySyncFailureUnlessActionRequired_(error);
     throw error;
   }
 }
 
-function syncMyScheduleToCalendar_(options) {
-  const ss = SpreadsheetApp.openByUrl(CONFIG.sheetUrl);
-  const sheet = ss.getSheetByName(CONFIG.sheetName);
+function syncSchedule_(options) {
+  const lock = LockService.getScriptLock();
 
-  if (!sheet) {
-    throw new Error(\`找不到工作表：\${CONFIG.sheetName}\`);
+  if (!lock.tryLock(15000)) {
+    throw new Error('另一個同步仍在執行，請稍後再試。');
   }
 
-  const calendar = CalendarApp.getCalendarById(CONFIG.calendarId);
+  try {
+    let settings = loadSettings_();
+    const source = loadSourceContext_(settings.gradeName);
+    settings = applyTermTransitionIfNeeded_(settings, source, false);
+    settings = registerNewTitles_(settings, source);
+    const calendar = ensureDedicatedCalendar_(settings);
+    const todayKey = formatDateKey_(new Date());
+    const desiredEvents = source.events
+      .filter(event => event.dateKey >= todayKey)
+      .filter(event => shouldIncludeEvent_(event, settings));
+    const oldState = loadSyncState_();
+    const plan = buildSyncPlan_(oldState, desiredEvents, todayKey);
 
-  if (!calendar) {
-    throw new Error(\`找不到日曆，請確認 Calendar ID：\${CONFIG.calendarId}\`);
-  }
+    assertSafeDeletionPlan_(plan, oldState, options && options.reason);
+    const migrationFromId = settings.calendarMigrationFromId;
+    const syncOptions = migrationFromId
+      ? Object.assign({}, options || {}, { forceCalendarCheck: true })
+      : (options || {});
+    const result = applySyncPlan_(calendar, oldState, plan, settings, syncOptions);
+    if (migrationFromId && migrationFromId !== calendar.getId()) {
+      removeStateEventsFromCalendar_(migrationFromId, oldState);
+      settings.calendarMigrationFromId = '';
+    }
+    writeChunkedJson_(SYNC_STATE_STORE, result.state);
 
-  const syncStartDate = getSyncStartDate_();
-  const sheetContext = buildSheetContext_(sheet);
-  const rescheduleNotices = findNewRescheduleNotices_(sheetContext);
-  const events = parseMyGradeEvents_(sheetContext).filter(item => item.date >= syncStartDate);
-  const oldState = loadState_();
-  const keptState = {};
-  const newState = {};
-  const forceCalendarCheck = Boolean(options && options.forceCalendarCheck);
-  let skippedUnchangedCount = 0;
+    settings.setupComplete = true;
+    settings.sourceFingerprint = source.fingerprint;
+    settings.knownTitles = uniqueStrings_(settings.knownTitles.concat(source.catalog.all.map(item => item.title)));
+    saveSettings_(settings);
 
-  events.forEach(item => {
-    const syncId = makeSyncId_(item);
-    const syncSignature = makeItemSyncSignature_(item);
-    newState[syncId] = Object.assign({}, item, {
-      syncSignature
+    const status = {
+      ok: true,
+      message: formatSyncResultMessage_(result),
+      lastSync: new Date().toISOString(),
+      lastSyncLabel: formatDateTime_(new Date()),
+      eventCount: Object.keys(result.state).length,
+      created: result.created,
+      updated: result.updated,
+      deleted: result.deleted,
+      unchanged: result.unchanged
+    };
+    writeChunkedJson_(STATUS_STORE, status);
+
+    sendSyncNotificationsSafe_(settings, result, options || {});
+    return Object.assign({}, result, { calendarId: calendar.getId() });
+  } catch (error) {
+    writeChunkedJson_(STATUS_STORE, {
+      ok: false,
+      message: userFacingError_(error),
+      lastSync: new Date().toISOString(),
+      lastSyncLabel: formatDateTime_(new Date()),
+      eventCount: Object.keys(readChunkedJson_(SYNC_STATE_STORE, {})).length
     });
+    throw error;
+  } finally {
+    lock.releaseLock();
+  }
+}
 
-    const previous = oldState[syncId];
+function applyTermTransitionIfNeeded_(settings, source, quiet) {
+  if (!settings.setupComplete || !settings.termKey || settings.termKey === source.termKey) {
+    return settings;
+  }
 
-    if (previous && previous.calendarEventId) {
-      if (!forceCalendarCheck && isUnchangedStoredItem_(previous, item, syncSignature)) {
-        newState[syncId].calendarEventId = previous.calendarEventId;
-        skippedUnchangedCount++;
-        return;
-      }
+  if (settings.pendingTermKey !== source.termKey) {
+    settings.selectedCourses = [];
+    settings.pendingTitles = [];
+    settings.pendingTermKey = source.termKey;
+    settings.autoSyncEnabled = false;
+    settings.pausedReason = '偵測到新學期，請重新選擇課程。';
+    saveSettings_(settings);
+    deleteAutoSyncTriggers();
+    sendActionRequiredSafe_(settings, '新學期課表已更新', '系統已暫停自動同步並保留原有日曆事件。請開啟課表同步控制台，重新選擇本學期課程。');
+  }
 
-      const updatedId = updateCalendarEvent_(calendar, previous.calendarEventId, item, syncId);
-      newState[syncId].calendarEventId = updatedId;
-    } else {
-      const event = createCalendarEvent_(calendar, item, syncId);
-      newState[syncId].calendarEventId = event.getId();
+  if (!quiet) {
+    throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟設定並重新選課。');
+  }
+
+  return settings;
+}
+
+function registerNewTitles_(settings, source) {
+  if (!settings.setupComplete) {
+    return settings;
+  }
+
+  const known = settings.knownTitles.map(normalizeTitle_);
+  const excluded = settings.excludedTitles.map(normalizeTitle_);
+  const pending = settings.pendingTitles.map(normalizeTitle_);
+  const discovered = source.catalog.all
+    .map(item => item.title)
+    .filter(title => known.indexOf(normalizeTitle_(title)) === -1)
+    .filter(title => excluded.indexOf(normalizeTitle_(title)) === -1);
+
+  if (discovered.length === 0) {
+    return settings;
+  }
+
+  discovered.forEach(title => {
+    settings.knownTitles.push(title);
+    if (pending.indexOf(normalizeTitle_(title)) === -1) {
+      settings.pendingTitles.push(title);
     }
   });
 
-  Object.keys(oldState).forEach(syncId => {
-    const oldItem = oldState[syncId];
-
-    if (shouldKeepOldState_(oldItem, syncStartDate)) {
-      keptState[syncId] = oldItem;
-      return;
-    }
-
-    if (!newState[syncId] && oldItem.calendarEventId) {
-      deleteCalendarEvent_(calendar, oldItem.calendarEventId, syncId);
-    }
-  });
-
-  saveState_(Object.assign({}, keptState, newState));
-  notifySyncSuccess_(Boolean(options && options.notifyOnSuccess), rescheduleNotices);
-
-  Logger.log(\`同步完成，自 \${formatDateKey_(syncStartDate)} 起共 \${events.length} 筆事件，跳過未變更 \${skippedUnchangedCount} 筆。\`);
+  saveSettings_(settings);
+  sendActionRequiredSafe_(settings, '發現新的課表項目', '下列項目已先加入日曆，請在控制台確認是否屬於你：\\n\\n' + discovered.join('\\n'));
+  return settings;
 }
 
-function buildSheetContext_(sheet) {
-  const range = sheet.getDataRange();
-  const values = range.getValues();
-  const displays = range.getDisplayValues();
-  const grade = findGradeBlock_(values, CONFIG.gradeName);
-  const weekRows = findWeekRows_(values, grade.labelCol);
+function shouldIncludeEvent_(event, settings) {
+  const normalized = normalizeTitle_(event.originalTitle);
 
-  return {
-    sheet,
-    range,
-    values,
-    displays,
-    grade,
-    weekRows,
-    matchContext: buildMatchContext_()
-  };
-}
-
-function parseMyGradeEvents_(sheetContext) {
-  const values = sheetContext.values;
-  const displays = sheetContext.displays;
-  const grade = sheetContext.grade;
-  const weekRows = sheetContext.weekRows;
-  const events = [];
-  const mergedMap = buildMergedRangeMap_(sheetContext.range);
-  const handledMergedCells = {};
-
-  weekRows.forEach((weekStartRow, index) => {
-    const nextWeekStartRow = weekRows[index + 1] || values.length;
-    const weekName = String(values[weekStartRow][grade.labelCol] || '').trim();
-
-    const dateRow = weekStartRow;
-    const weekdayRow = weekStartRow + 1;
-    const firstPeriodRow = weekStartRow + 2;
-
-    const dayGroups = buildDayGroups_(values, displays, dateRow, weekdayRow, grade);
-
-    for (let periodIndex = 0; periodIndex < 8; periodIndex++) {
-      const rowIndex = firstPeriodRow + periodIndex;
-
-      if (rowIndex >= nextWeekStartRow) {
-        continue;
-      }
-
-      const periodNumber = Number(values[rowIndex][grade.labelCol]);
-
-      if (!periodNumber || periodNumber < 1 || periodNumber > 8) {
-        continue;
-      }
-
-      dayGroups.forEach(day => {
-        day.cols.forEach(colIndex => {
-          const mergedInfo = getMergedInfo_(mergedMap, rowIndex, colIndex);
-
-          if (mergedInfo) {
-            const mergedKey = \`\${mergedInfo.startRow},\${mergedInfo.startCol}\`;
-
-            if (handledMergedCells[mergedKey]) {
-              return;
-            }
-
-            if (mergedInfo.startRow !== rowIndex + 1 || mergedInfo.startCol !== colIndex + 1) {
-              return;
-            }
-
-            handledMergedCells[mergedKey] = true;
-          }
-
-          const rawText = mergedInfo
-            ? mergedInfo.value
-            : normalizeCellText_(displays[rowIndex][colIndex]);
-
-          if (!rawText) {
-            return;
-          }
-
-          const parsed = parseCourseCell_(rawText);
-          const matched = classifyMatchedEvent_(parsed.title, sheetContext.matchContext);
-
-          if (!matched.shouldInclude) {
-            return;
-          }
-
-          const date = toDateObject_(values[dateRow][day.firstCol]);
-
-          if (!date) {
-            return;
-          }
-
-          const timeInfo = parsePeriodTime_(displays[rowIndex][0]);
-
-          if (!timeInfo) {
-            return;
-          }
-
-          let periodEnd = periodNumber;
-          let endClock = timeInfo.end;
-
-          if (mergedInfo && mergedInfo.endRow > mergedInfo.startRow) {
-            const mergedEndRowIndex = mergedInfo.endRow - 1;
-            const detectedEndPeriod = getPeriodNumberFromRow_(values, mergedEndRowIndex, grade.labelCol);
-            const detectedEndClock = getEndTimeFromPeriodRow_(displays, mergedEndRowIndex);
-
-            if (detectedEndPeriod && detectedEndClock) {
-              periodEnd = detectedEndPeriod;
-              endClock = detectedEndClock;
-            }
-          }
-
-          const event = {
-            title: buildEventTitle_(parsed.title, matched.type),
-            originalTitle: parsed.title,
-            type: matched.type,
-            weekName,
-            date,
-            weekday: day.weekday,
-            periodStart: periodNumber,
-            periodEnd,
-            start: combineDateAndClock_(date, timeInfo.start),
-            end: combineDateAndClock_(date, endClock),
-            location: parsed.location,
-            description: buildDescription_({
-              weekName,
-              weekday: day.weekday,
-              periodStart: periodNumber,
-              periodEnd,
-              sourceCell: toA1_(rowIndex + 1, colIndex + 1),
-              rawText
-            }),
-            sourceCell: toA1_(rowIndex + 1, colIndex + 1),
-            sourceColumn: colIndex + 1,
-            rawText
-          };
-
-          events.push(event);
-        });
-      });
-    }
-  });
-
-  return mergeContinuousEvents_(events);
-}
-
-function buildMergedRangeMap_(range) {
-  const map = {};
-  const mergedRanges = range.getMergedRanges();
-
-  mergedRanges.forEach(range => {
-    const startRow = range.getRow();
-    const startCol = range.getColumn();
-    const numRows = range.getNumRows();
-    const numCols = range.getNumColumns();
-    const value = normalizeCellText_(range.getDisplayValue());
-
-    if (!value) {
-      return;
-    }
-
-    for (let row = startRow; row < startRow + numRows; row++) {
-      for (let col = startCol; col < startCol + numCols; col++) {
-        map[\`\${row},\${col}\`] = {
-          startRow,
-          startCol,
-          endRow: startRow + numRows - 1,
-          endCol: startCol + numCols - 1,
-          value
-        };
-      }
-    }
-  });
-
-  return map;
-}
-
-function getMergedInfo_(mergedMap, rowIndex, colIndex) {
-  return mergedMap[\`\${rowIndex + 1},\${colIndex + 1}\`] || null;
-}
-
-function getPeriodNumberFromRow_(values, rowIndex, labelCol) {
-  const value = values[rowIndex][labelCol];
-  const period = Number(value);
-
-  if (!period || period < 1 || period > 8) {
-    return null;
+  if (settings.excludedTitles.some(title => normalizeTitle_(title) === normalized)) {
+    return false;
   }
 
-  return period;
-}
-
-function getEndTimeFromPeriodRow_(displays, rowIndex) {
-  const timeInfo = parsePeriodTime_(displays[rowIndex][0]);
-
-  if (!timeInfo) {
-    return null;
-  }
-
-  return timeInfo.end;
-}
-
-function findGradeBlock_(values, gradeName) {
-  const headerRowIndex = 1;
-  const row = values[headerRowIndex];
-
-  let gradeCol = -1;
-
-  for (let col = 0; col < row.length; col++) {
-    if (String(row[col] || '').trim() === gradeName) {
-      gradeCol = col;
-      break;
-    }
-  }
-
-  if (gradeCol === -1) {
-    throw new Error(\`找不到年級區塊：\${gradeName}\`);
-  }
-
-  let nextGradeCol = row.length;
-
-  for (let col = gradeCol + 1; col < row.length; col++) {
-    const text = String(row[col] || '').trim();
-
-    if (text === '高一' || text === '高二' || text === '高三' || text.includes('會議安排')) {
-      nextGradeCol = col;
-      break;
-    }
-  }
-
-  return {
-    labelCol: gradeCol,
-    firstCourseCol: gradeCol + 1,
-    lastCourseCol: nextGradeCol - 1
-  };
-}
-
-function findWeekRows_(values, labelCol) {
-  const rows = [];
-
-  for (let row = 0; row < values.length; row++) {
-    const text = String(values[row][labelCol] || '').trim();
-
-    if (/^第.+週$/.test(text)) {
-      rows.push(row);
-    }
-  }
-
-  if (rows.length === 0) {
-    throw new Error('找不到任何週次列，請確認課表格式是否改變。');
-  }
-
-  return rows;
-}
-
-function buildDayGroups_(values, displays, dateRow, weekdayRow, grade) {
-  const groups = [];
-  let current = null;
-
-  for (let col = grade.firstCourseCol; col <= grade.lastCourseCol; col++) {
-    const weekday = normalizeCellText_(displays[weekdayRow][col]);
-    const dateValue = values[dateRow][col];
-
-    if (isWeekdayText_(weekday)) {
-      if (current) {
-        groups.push(current);
-      }
-
-      current = {
-        weekday,
-        firstCol: col,
-        cols: [col]
-      };
-    } else if (current) {
-      const hasDate = Boolean(toDateObject_(dateValue));
-
-      if (!hasDate) {
-        current.cols.push(col);
-      } else {
-        groups.push(current);
-        current = null;
-      }
-    }
-  }
-
-  if (current) {
-    groups.push(current);
-  }
-
-  return groups;
-}
-
-function buildMatchContext_() {
-  const gradeDictionary = COURSE_DICTIONARY[CONFIG.gradeName] || {};
-  const gradeOtherEvents = getGradeOtherEvents_();
-  const selectedCandidates = [];
-  const otherEventCandidates = [];
-  const knownCandidates = [];
-
-  SELECTED_COURSES.forEach(selectedCourse => {
-    const normalizedSelectedCourse = normalizeCourseName_(selectedCourse);
-
-    addPreparedCandidate_(selectedCandidates, selectedCourse);
-
-    for (const baseCourse in gradeDictionary) {
-      if (normalizeCourseName_(baseCourse) !== normalizedSelectedCourse) {
-        continue;
-      }
-
-      addPreparedCandidates_(selectedCandidates, gradeDictionary[baseCourse] || []);
-    }
-  });
-
-  for (const baseCourse in gradeDictionary) {
-    addPreparedCandidate_(knownCandidates, baseCourse);
-    addPreparedCandidates_(knownCandidates, gradeDictionary[baseCourse] || []);
-  }
-
-  addPreparedCandidates_(otherEventCandidates, gradeOtherEvents);
-  addPreparedCandidates_(knownCandidates, getGradeRequiredCourseEvents_());
-  addPreparedCandidates_(knownCandidates, gradeOtherEvents);
-
-  return {
-    selectedCandidates,
-    otherEventCandidates,
-    knownCandidates
-  };
-}
-
-function addPreparedCandidates_(target, candidates) {
-  (candidates || []).forEach(candidate => addPreparedCandidate_(target, candidate));
-}
-
-function addPreparedCandidate_(target, candidate) {
-  const parsed = parseCourseCell_(candidate);
-  const normalizedTitle = normalizeCourseName_(parsed.title);
-
-  if (normalizedTitle && target.indexOf(normalizedTitle) === -1) {
-    target.push(normalizedTitle);
-  }
-}
-
-function matchesPreparedCandidates_(normalizedTitle, candidates) {
-  return candidates.some(candidate => {
-    return isNormalizedCourseTitlePatternMatch_(normalizedTitle, candidate);
-  });
-}
-
-function classifyMatchedEvent_(title, matchContext) {
-  const context = matchContext || buildMatchContext_();
-  const normalizedTitle = normalizeCourseName_(title);
-
-  const matchedCourse = matchesPreparedCandidates_(normalizedTitle, context.selectedCandidates);
-
-  if (matchedCourse) {
-    return {
-      shouldInclude: true,
-      type: 'course'
-    };
-  }
-
-  const matchedKnownOtherEvent = INCLUDE_NON_ELECTIVE_EVENTS &&
-    matchesPreparedCandidates_(normalizedTitle, context.otherEventCandidates);
-
-  if (matchedKnownOtherEvent) {
-    return {
-      shouldInclude: true,
-      type: 'wholeSchool'
-    };
-  }
-
-  const matchedNewNonCourseEvent = INCLUDE_NON_ELECTIVE_EVENTS &&
-    !matchesPreparedCandidates_(normalizedTitle, context.knownCandidates);
-
-  if (matchedNewNonCourseEvent) {
-    return {
-      shouldInclude: true,
-      type: 'wholeSchool'
-    };
-  }
-
-  return {
-    shouldInclude: false,
-    type: 'ignored'
-  };
-}
-
-function getGradeOtherEvents_() {
-  const gradeEvents = NON_ELECTIVE_EVENTS[CONFIG.gradeName] || {};
-  return Array.isArray(gradeEvents) ? gradeEvents : gradeEvents['其他'] || [];
-}
-
-function getGradeRequiredCourseEvents_() {
-  const gradeEvents = NON_ELECTIVE_EVENTS[CONFIG.gradeName] || {};
-  return Array.isArray(gradeEvents) ? [] : gradeEvents['必修課程'] || [];
-}
-
-function isCourseTitlePatternMatch_(normalizedTitle, course) {
-  const normalizedCourse = normalizeCourseName_(course);
-  return isNormalizedCourseTitlePatternMatch_(normalizedTitle, normalizedCourse);
-}
-
-function isNormalizedCourseTitlePatternMatch_(normalizedTitle, normalizedCourse) {
-  if (normalizedTitle === normalizedCourse) {
+  if (settings.pendingTitles.some(title => normalizeTitle_(title) === normalized)) {
     return true;
   }
 
-  if (!normalizedTitle.startsWith(normalizedCourse)) {
-    return false;
+  if (event.type === 'activity') {
+    return settings.includeActivities;
   }
 
-  const suffix = normalizedTitle.slice(normalizedCourse.length);
-  return /^(\([^)]*\))+$/.test(suffix) ||
-    /^_[^_].+/.test(suffix) ||
-    /^[-－:：].+/.test(suffix);
+  return settings.selectedCourses.some(title => normalizeTitle_(title) === normalized);
 }
 
-function parseCourseCell_(text) {
-  const normalized = normalizeCellText_(text);
-  const locationMatches = [...normalized.matchAll(/\\[([^\\]]+)\\]/g)];
-  const locations = locationMatches.map(match => match[1].trim()).filter(Boolean);
+function buildSyncPlan_(oldState, desiredEvents, todayKey) {
+  const oldFuture = Object.keys(oldState)
+    .map(key => Object.assign({ stateKey: key }, oldState[key]))
+    .filter(item => item.dateKey >= todayKey);
+  const oldPast = Object.keys(oldState)
+    .filter(key => oldState[key].dateKey < todayKey)
+    .reduce((result, key) => { result[key] = oldState[key]; return result; }, {});
+  const oldByKey = {};
+  oldFuture.forEach(item => { oldByKey[item.stateKey] = item; });
 
-  const title = normalized
-    .replace(/\\[[^\\]]+\\]/g, '')
-    .replace(/\\s+/g, ' ')
-    .trim();
+  const exact = [];
+  const unmatchedNew = [];
+  const matchedOld = {};
+
+  desiredEvents.forEach(event => {
+    const key = makeOccurrenceKey_(event);
+    if (oldByKey[key]) {
+      exact.push({ oldItem: oldByKey[key], newItem: event, newKey: key });
+      matchedOld[key] = true;
+    } else {
+      unmatchedNew.push(event);
+    }
+  });
+
+  const unmatchedOld = oldFuture.filter(item => !matchedOld[item.stateKey]);
+  const moved = [];
+  const usedOld = {};
+  const stillNew = [];
+
+  unmatchedNew.forEach(newItem => {
+    let best = null;
+    unmatchedOld.forEach(oldItem => {
+      if (usedOld[oldItem.stateKey] || normalizeTitle_(oldItem.originalTitle) !== normalizeTitle_(newItem.originalTitle)) {
+        return;
+      }
+      const distance = Math.abs(new Date(oldItem.start).getTime() - newItem.start.getTime());
+      if (distance > 21 * 24 * 60 * 60 * 1000) {
+        return;
+      }
+      if (!best || distance < best.distance) {
+        best = { oldItem, distance };
+      }
+    });
+
+    if (best) {
+      usedOld[best.oldItem.stateKey] = true;
+      moved.push({ oldItem: best.oldItem, newItem, newKey: makeOccurrenceKey_(newItem) });
+    } else {
+      stillNew.push(newItem);
+    }
+  });
 
   return {
-    title,
-    location: locations.join('、')
+    oldPast,
+    exact,
+    moved,
+    additions: stillNew,
+    deletions: unmatchedOld.filter(item => !usedOld[item.stateKey])
   };
 }
 
-function mergeContinuousEvents_(events) {
-  const sorted = events.slice().sort((a, b) => {
-    return a.date - b.date ||
-      a.sourceColumn - b.sourceColumn ||
-      a.periodStart - b.periodStart ||
-      a.originalTitle.localeCompare(b.originalTitle);
-  });
+function assertSafeDeletionPlan_(plan, oldState, reason) {
+  if (reason === 'settings' || reason === 'setup' || reason === 'repair') {
+    return;
+  }
 
-  const merged = [];
+  const oldCount = Object.keys(oldState).length;
+  const deletedCount = plan.deletions.length;
 
-  sorted.forEach(event => {
-    const last = merged[merged.length - 1];
+  if (oldCount >= 5 && deletedCount >= 5 && deletedCount / oldCount > 0.4) {
+    throw new Error('來源變動會一次移除過多事件，系統已停止同步以保護日曆。請開啟控制台檢查課表來源。');
+  }
+}
 
-    const canMerge = last &&
-      last.originalTitle === event.originalTitle &&
-      last.location === event.location &&
-      sameDate_(last.date, event.date) &&
-      last.sourceColumn === event.sourceColumn &&
-      last.periodEnd + 1 === event.periodStart &&
-      last.end.getTime() === event.start.getTime();
+function applySyncPlan_(calendar, oldState, plan, settings, options) {
+  const newState = Object.assign({}, plan.oldPast);
+  const changes = [];
+  let created = 0;
+  let updated = 0;
+  let deleted = 0;
+  let unchanged = 0;
 
-    if (canMerge) {
-      last.periodEnd = event.periodEnd;
-      last.end = event.end;
-      last.description = buildDescription_({
-        weekName: last.weekName,
-        weekday: last.weekday,
-        periodStart: last.periodStart,
-        periodEnd: last.periodEnd,
-        sourceCell: last.sourceCell,
-        rawText: last.rawText
-      });
+  plan.exact.concat(plan.moved).forEach(pair => {
+    const signature = makeEventSignature_(pair.newItem, settings);
+    let calendarEventId = pair.oldItem.calendarEventId;
+
+    if (!options.forceCalendarCheck && pair.oldItem.syncSignature === signature) {
+      unchanged += 1;
     } else {
-      merged.push(Object.assign({}, event));
+      calendarEventId = updateCalendarEvent_(calendar, calendarEventId, pair.newItem, pair.newKey, settings);
+      updated += 1;
+      changes.push({ type: pair.oldItem.stateKey === pair.newKey ? '更新' : '調整', oldItem: pair.oldItem, newItem: pair.newItem });
+    }
+
+    newState[pair.newKey] = serializeStateItem_(pair.newItem, calendarEventId, signature);
+  });
+
+  plan.additions.forEach(item => {
+    const key = makeOccurrenceKey_(item);
+    const signature = makeEventSignature_(item, settings);
+    const event = createCalendarEvent_(calendar, item, key, settings);
+    newState[key] = serializeStateItem_(item, event.getId(), signature);
+    created += 1;
+    changes.push({ type: '新增', newItem: item });
+  });
+
+  plan.deletions.forEach(item => {
+    if (deleteCalendarEvent_(calendar, item.calendarEventId, item.stateKey)) {
+      deleted += 1;
+      changes.push({ type: '取消', oldItem: item });
     }
   });
 
-  return merged;
+  return { state: newState, changes, created, updated, deleted, unchanged };
 }
 
-function createCalendarEvent_(calendar, item, syncId) {
-  return calendar.createEvent(
-    item.title,
-    item.start,
-    item.end,
-    {
-      location: item.location,
-      description: buildManagedDescription_(item, syncId)
-    }
-  );
+function createCalendarEvent_(calendar, item, stateKey, settings) {
+  const options = { location: item.location || '', description: buildManagedDescription_(item, stateKey, settings) };
+  const event = item.isAllDay
+    ? calendar.createAllDayEvent(buildEventTitle_(item, settings), item.start, options)
+    : calendar.createEvent(buildEventTitle_(item, settings), item.start, item.end, options);
+  applyEventReminders_(event, settings);
+  return event;
 }
 
-function updateCalendarEvent_(calendar, calendarEventId, item, syncId) {
-  const event = calendar.getEventById(calendarEventId);
-  const description = buildManagedDescription_(item, syncId);
+function updateCalendarEvent_(calendar, eventId, item, stateKey, settings) {
+  const event = calendar.getEventById(eventId);
 
   if (!event) {
-    const newEvent = createCalendarEvent_(calendar, item, syncId);
-    return newEvent.getId();
+    return createCalendarEvent_(calendar, item, stateKey, settings).getId();
   }
 
-  if (event.getTitle() !== item.title) {
-    event.setTitle(item.title);
+  if (event.isAllDayEvent() !== Boolean(item.isAllDay)) {
+    if (isManagedEvent_(event)) event.deleteEvent();
+    return createCalendarEvent_(calendar, item, stateKey, settings).getId();
   }
 
-  if (event.getStartTime().getTime() !== item.start.getTime() ||
-      event.getEndTime().getTime() !== item.end.getTime()) {
+  const title = buildEventTitle_(item, settings);
+  const description = buildManagedDescription_(item, stateKey, settings);
+  if (event.getTitle() !== title) event.setTitle(title);
+  if (item.isAllDay) {
+    if (formatDateKey_(event.getAllDayStartDate()) !== item.dateKey) event.setAllDayDate(item.start);
+  } else if (event.getStartTime().getTime() !== item.start.getTime() || event.getEndTime().getTime() !== item.end.getTime()) {
     event.setTime(item.start, item.end);
   }
-
-  if ((event.getLocation() || '') !== (item.location || '')) {
-    event.setLocation(item.location);
-  }
-
-  if ((event.getDescription() || '') !== description) {
-    event.setDescription(description);
-  }
-
+  if ((event.getLocation() || '') !== (item.location || '')) event.setLocation(item.location || '');
+  if ((event.getDescription() || '') !== description) event.setDescription(description);
+  applyEventReminders_(event, settings);
   return event.getId();
 }
 
-function deleteCalendarEvent_(calendar, calendarEventId, syncId) {
-  const event = calendar.getEventById(calendarEventId);
-
-  if (!event) {
-    return false;
-  }
-
-  if (!isManagedCalendarEvent_(event, syncId)) {
-    Logger.log(\`略過刪除非本工具建立的事件：\${event.getTitle()} / \${calendarEventId}\`);
-    return false;
-  }
-
+function deleteCalendarEvent_(calendar, eventId, stateKey) {
+  if (!eventId) return false;
+  const event = calendar.getEventById(eventId);
+  if (!event) return false;
+  if (!isManagedEvent_(event, stateKey)) return false;
   event.deleteEvent();
   return true;
 }
 
-function buildManagedDescription_(item, syncId) {
-  const lines = [
-    CONFIG.syncIdPrefix,
-    item.description || CONFIG.managedEventDescriptionPrefix
-  ];
-
-  if (syncId) {
-    lines.push('', \`同步識別碼：\${syncId}\`);
-  }
-
-  return lines.join('\\n');
-}
-
-function isManagedCalendarEvent_(event, syncId) {
+function isManagedEvent_(event, stateKey) {
   const description = String(event.getDescription() || '');
-  const hasCurrentMarker = description.indexOf(CONFIG.syncIdPrefix) !== -1;
-  const hasLegacyMarker = description.indexOf(CONFIG.managedEventDescriptionPrefix) === 0;
-
-  if (!hasCurrentMarker && !hasLegacyMarker) {
-    return false;
-  }
-
-  if (!syncId) {
-    return true;
-  }
-
-  if (description.indexOf(\`同步識別碼：\${syncId}\`) !== -1) {
-    return true;
-  }
-
-  const legacySourceCellMatch = description.match(/來源儲存格：([A-Z]+\\d+)/);
-  return hasLegacyMarker &&
-    legacySourceCellMatch !== null &&
-    description.indexOf('原始內容：') !== -1 &&
-    description.indexOf('同步識別碼：') === -1;
+  const hasManagedMarker = description.indexOf(MANAGED_MARKER) !== -1;
+  if (!hasManagedMarker) return false;
+  if (!stateKey || description.indexOf('同步識別碼：' + hashText_(stateKey)) !== -1) return true;
+  return description.indexOf(DESCRIPTION_MARKER) !== -1 &&
+    /來源儲存格：[A-Z]+\\d+/.test(description) &&
+    description.indexOf('原始內容：') !== -1;
 }
 
-function getStoredItemSyncSignature_(item) {
-  return item && item.syncSignature
-    ? item.syncSignature
-    : makeItemSyncSignature_(item);
+function applyEventReminders_(event, settings) {
+  event.removeAllReminders();
+  if (settings.reminderMode === 'popup') event.addPopupReminder(settings.reminderMinutes);
+  if (settings.reminderMode === 'email') event.addEmailReminder(settings.reminderMinutes);
 }
 
-function isUnchangedStoredItem_(storedItem, currentItem, currentSignature) {
-  const storedSignature = getStoredItemSyncSignature_(storedItem);
-
-  return storedSignature === currentSignature ||
-    storedSignature === makeItemLegacySyncSignature_(currentItem);
+function buildEventTitle_(item) {
+  return item.type === 'activity' ? '活動｜' + item.originalTitle : item.originalTitle;
 }
 
-function makeItemSyncSignature_(item) {
-  return JSON.stringify([
-    item.title || '',
-    item.originalTitle || '',
-    item.type || '',
-    getDateSignatureValue_(item.date),
-    item.weekName || '',
-    item.weekday || '',
-    Number(item.periodStart) || 0,
-    Number(item.periodEnd) || 0,
-    getTimeSignatureValue_(item.start),
-    getTimeSignatureValue_(item.end),
-    item.location || '',
-    item.sourceCell || '',
-    Number(item.sourceColumn) || 0,
-    item.rawText || ''
-  ]);
-}
-
-function makeItemLegacySyncSignature_(item) {
-  return JSON.stringify([
-    item.title || '',
-    item.originalTitle || '',
-    item.type || '',
-    getDateSignatureValue_(item.date),
-    item.weekName || '',
-    item.weekday || '',
-    Number(item.periodStart) || 0,
-    Number(item.periodEnd) || 0,
-    getTimeSignatureValue_(item.start),
-    getTimeSignatureValue_(item.end),
-    item.location || '',
-    item.description || '',
-    item.sourceCell || '',
-    Number(item.sourceColumn) || 0,
-    item.rawText || ''
-  ]);
-}
-
-function getDateSignatureValue_(value) {
-  const date = value instanceof Date ? value : new Date(value);
-
-  if (isNaN(date.getTime())) {
-    return '';
-  }
-
-  return formatDateKey_(date);
-}
-
-function getTimeSignatureValue_(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  const time = date.getTime();
-
-  return isNaN(time) ? '' : time;
-}
-
-function makeSyncId_(item) {
-  return [
-    CONFIG.gradeName,
-    formatDateKey_(item.date),
-    item.periodStart,
-    item.periodEnd,
-    item.sourceColumn,
-    normalizeCourseName_(item.originalTitle)
-  ].join('|');
-}
-
-function buildEventTitle_(title, type) {
-  if (type === 'wholeSchool') {
-    return \`全校｜\${title}\`;
-  }
-
-  return \`\${CONFIG.eventTitlePrefix}\${title}\`;
-}
-
-function buildDescription_(data) {
-  return [
-    CONFIG.managedEventDescriptionPrefix,
-    '',
-    \`週次：\${formatWeekName_(data.weekName)}\`,
-    \`星期：\${formatWeekdayLabel_(data.weekday)}\`,
-    \`節次：\${formatPeriodRange_(data.periodStart, data.periodEnd)}\`,
-    \`來源儲存格：\${data.sourceCell}\`,
-    '',
-    \`原始內容：\${data.rawText}\`
-  ].join('\\n');
-}
-
-function formatWeekName_(weekName) {
-  return String(weekName || '')
-    .replace(/^第/, '')
-    .replace(/週$/, '')
-    .trim();
-}
-
-function formatWeekdayLabel_(weekday) {
-  const text = String(weekday || '').trim();
-  const match = text.match(/^星期([一二三四五六日])$/);
-  return match ? \`（\${match[1]}）\` : text;
-}
-
-function formatPeriodRange_(periodStart, periodEnd) {
-  if (periodStart === periodEnd) {
-    return String(periodStart);
-  }
-
-  return \`\${periodStart}–\${periodEnd}\`;
-}
-
-function parsePeriodTime_(timeText) {
-  const text = String(timeText || '').trim();
-  const match = text.match(/(\\d{1,2}):(\\d{2})\\s*[–-]\\s*(\\d{1,2}):(\\d{2})/);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    start: {
-      hour: Number(match[1]),
-      minute: Number(match[2])
-    },
-    end: {
-      hour: Number(match[3]),
-      minute: Number(match[4])
-    }
+function buildManagedDescription_(item, stateKey, settings) {
+  const template = getDescriptionTemplate_(settings);
+  const values = {
+    course: item.originalTitle,
+    date: item.dateKey.replace(/-/g, '/'),
+    weekday: item.weekday,
+    week: String(item.weekNum),
+    period: item.isAllDay ? '全天' : (item.periodStart === item.periodEnd ? String(item.periodStart) : item.periodStart + '–' + item.periodEnd),
+    startTime: item.isAllDay ? '全天' : item.startTime,
+    endTime: item.isAllDay ? '全天' : item.endTime,
+    location: item.location || '未註明',
+    sourceUpdatedAt: item.sourceUpdatedLabel || '未提供'
   };
+  const body = renderTemplate_(template, values).trim();
+  return [MANAGED_MARKER, body || DESCRIPTION_MARKER, '', '同步識別碼：' + hashText_(stateKey)].join('\\n');
 }
 
-function combineDateAndClock_(date, clock) {
-  const result = new Date(date);
-  result.setHours(clock.hour);
-  result.setMinutes(clock.minute);
-  result.setSeconds(0);
-  result.setMilliseconds(0);
-  return result;
+function getDescriptionTemplate_(settings) {
+  if (settings.descriptionPreset === 'compact') return '{week} 週｜星期{weekday}｜第 {period} 節\\n{location}';
+  if (settings.descriptionPreset === 'detailed') return '{course}\\n{date}（{weekday}）\\n第 {period} 節｜{startTime}–{endTime}\\n地點：{location}\\n課表更新：{sourceUpdatedAt}';
+  if (settings.descriptionPreset === 'custom') return settings.customDescription;
+  return '第 {week} 週｜星期{weekday}｜第 {period} 節\\n時間：{startTime}–{endTime}\\n地點：{location}\\n課表更新：{sourceUpdatedAt}';
 }
 
-function toDateObject_(value) {
-  if (value instanceof Date && !isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  }
-
-  if (typeof value === 'number') {
-    const excelEpoch = new Date(1899, 11, 30);
-    const date = new Date(excelEpoch.getTime() + value * 24 * 60 * 60 * 1000);
-    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  }
-
-  return null;
-}
-
-function isWeekdayText_(text) {
-  return /^星期[一二三四五六日]$/.test(String(text || '').trim());
-}
-
-function sameDate_(a, b) {
-  return formatDateKey_(a) === formatDateKey_(b);
-}
-
-function getSyncStartDate_() {
-  const todayKey = Utilities.formatDate(new Date(), CONFIG.timezone, 'yyyy-MM-dd');
-  const parts = todayKey.split('-').map(Number);
-  const date = new Date(parts[0], parts[1] - 1, parts[2]);
-  date.setDate(date.getDate() - CONFIG.syncLookbackDays);
-  return date;
-}
-
-function shouldKeepOldState_(item, syncStartDate) {
-  if (!item || !item.date) {
-    return false;
-  }
-
-  const date = toDateObject_(new Date(item.date));
-  return date && date < syncStartDate;
-}
-
-function formatDateKey_(date) {
-  return Utilities.formatDate(date, CONFIG.timezone, 'yyyy-MM-dd');
-}
-
-function normalizeCellText_(value) {
-  return String(value || '')
-    .replace(/\\r/g, '\\n')
-    .replace(/\\n+/g, '\\n')
-    .trim();
-}
-
-function normalizeCourseName_(value) {
-  return String(value || '')
-    .replace(/\\s+/g, '')
-    .replace(/（/g, '(')
-    .replace(/）/g, ')')
-    .replace(/＿/g, '_')
-    .replace(/　/g, '')
-    .trim();
-}
-
-function toA1_(row, col) {
-  let columnName = '';
-  let n = col;
-
-  while (n > 0) {
-    const remainder = (n - 1) % 26;
-    columnName = String.fromCharCode(65 + remainder) + columnName;
-    n = Math.floor((n - 1) / 26);
-  }
-
-  return \`\${columnName}\${row}\`;
-}
-
-function loadState_() {
-  const raw = PropertiesService
-    .getScriptProperties()
-    .getProperty('SYNC_STATE');
-
-  return raw ? JSON.parse(raw) : {};
-}
-
-function saveState_(state) {
-  PropertiesService
-    .getScriptProperties()
-    .setProperty('SYNC_STATE', JSON.stringify(state));
-}
-
-function findNewRescheduleNotices_(sheetContext) {
-  const notices = parseRescheduleNotices_(sheetContext);
-  const oldState = loadRescheduleNoticeState_();
-
-  return notices.filter(notice => !oldState[notice.key]);
-}
-
-function parseRescheduleNotices_(sheetContext) {
-  const values = sheetContext.values;
-  const displays = sheetContext.displays;
-  const grade = sheetContext.grade;
-  const weekRows = sheetContext.weekRows;
-  const firstWeekRow = weekRows[0];
-  const dateMap = buildSheetDateMap_(values);
-  const seenText = {};
-  const notices = [];
-
-  for (let row = 0; row < firstWeekRow; row++) {
-    for (let col = grade.labelCol; col <= grade.lastCourseCol; col++) {
-      const text = normalizeCellText_(displays[row][col]);
-
-      if (!text || seenText[text]) {
-        continue;
-      }
-
-      seenText[text] = true;
-      notices.push.apply(notices, extractRescheduleNoticesFromText_(text, dateMap, sheetContext.matchContext));
-    }
-  }
-
-  return notices;
-}
-
-function extractRescheduleNoticesFromText_(text, dateMap, matchContext) {
-  const notices = [];
-  const normalizedText = normalizeCellText_(text);
-  const pattern = /(^|\\n)\\s*([^：:]+?)\\s*[：:]\\s*(\\d{1,2})\\s*\\/\\s*(\\d{1,2})\\s*第\\s*([0-9]+)\\s*節\\s*調整\\s*為\\s*(\\d{1,2})\\s*\\/\\s*(\\d{1,2})\\s*第\\s*([0-9]+)\\s*節/g;
-  let match;
-
-  while ((match = pattern.exec(normalizedText)) !== null) {
-    const parsed = parseCourseCell_(match[2]);
-    const matched = classifyMatchedEvent_(parsed.title, matchContext);
-
-    if (!matched.shouldInclude) {
-      continue;
-    }
-
-    const fromDate = resolveMonthDayDate_(dateMap, Number(match[3]), Number(match[4]));
-    const toDate = resolveMonthDayDate_(dateMap, Number(match[6]), Number(match[7]));
-    const fromPeriods = parsePeriodDigits_(match[5]);
-    const toPeriods = parsePeriodDigits_(match[8]);
-
-    if (!fromDate || !toDate || !fromPeriods || !toPeriods) {
-      continue;
-    }
-
-    const notice = {
-      title: parsed.title,
-      fromDate,
-      fromPeriodStart: fromPeriods.start,
-      fromPeriodEnd: fromPeriods.end,
-      toDate,
-      toPeriodStart: toPeriods.start,
-      toPeriodEnd: toPeriods.end
-    };
-
-    notice.key = makeRescheduleNoticeKey_(notice);
-    notices.push(notice);
-  }
-
-  return dedupeRescheduleNotices_(notices);
-}
-
-function buildSheetDateMap_(values) {
-  const dateMap = {};
-
-  values.forEach(row => {
-    row.forEach(value => {
-      const date = toDateObject_(value);
-
-      if (!date || date.getFullYear() < 2000) {
-        return;
-      }
-
-      const key = \`\${date.getMonth() + 1}/\${date.getDate()}\`;
-
-      if (!dateMap[key]) {
-        dateMap[key] = date;
-      }
-    });
-  });
-
-  return dateMap;
-}
-
-function resolveMonthDayDate_(dateMap, month, day) {
-  const mapped = dateMap[\`\${month}/\${day}\`];
-
-  if (mapped) {
-    return mapped;
-  }
-
-  const today = new Date();
-  const fallbackYear = Number(Utilities.formatDate(today, CONFIG.timezone, 'yyyy'));
-  const candidate = new Date(fallbackYear, month - 1, day);
-  const msPerDay = 24 * 60 * 60 * 1000;
-
-  if ((today.getTime() - candidate.getTime()) > 30 * msPerDay) {
-    return new Date(fallbackYear + 1, month - 1, day);
-  }
-
-  return candidate;
-}
-
-function parsePeriodDigits_(digits) {
-  const text = String(digits || '').trim();
-
-  if (!/^[1-8]+$/.test(text)) {
-    return null;
-  }
-
-  return {
-    start: Number(text.charAt(0)),
-    end: Number(text.charAt(text.length - 1))
-  };
-}
-
-function dedupeRescheduleNotices_(notices) {
-  const seen = {};
-
-  return notices.filter(notice => {
-    if (seen[notice.key]) {
-      return false;
-    }
-
-    seen[notice.key] = true;
-    return true;
-  });
-}
-
-function makeRescheduleNoticeKey_(notice) {
-  return [
-    normalizeCourseName_(notice.title),
-    formatDateKey_(notice.fromDate),
-    notice.fromPeriodStart,
-    notice.fromPeriodEnd,
-    formatDateKey_(notice.toDate),
-    notice.toPeriodStart,
-    notice.toPeriodEnd
-  ].join('|');
-}
-
-function notifySyncSuccess_(notifyOnSuccess, rescheduleNotices) {
-  if (!notifyOnSuccess && rescheduleNotices.length === 0) {
-    return;
-  }
-
-  const body = rescheduleNotices.map(formatRescheduleNotice_).join('\\n');
-  sendSyncNotification_(CONFIG.notificationSuccessSubject, body);
-
-  if (rescheduleNotices.length > 0) {
-    saveRescheduleNoticeState_(rescheduleNotices);
-  }
-}
-
-function notifySyncFailure_() {
-  try {
-    sendSyncNotification_(CONFIG.notificationFailureSubject);
-  } catch (notificationError) {
-    Logger.log(\`同步失敗通知寄送失敗：\${notificationError.message || notificationError}\`);
-  }
-}
-
-function formatRescheduleNotice_(notice) {
-  return [
-    \`「\${notice.title}」\${formatNoticeDate_(notice.fromDate)} \${formatPeriodRange_(notice.fromPeriodStart, notice.fromPeriodEnd)} 節\`,
-    ' → ',
-    \`\${formatNoticeDate_(notice.toDate)} \${formatPeriodRange_(notice.toPeriodStart, notice.toPeriodEnd)} 節\`
-  ].join('');
-}
-
-function formatNoticeDate_(date) {
-  return \`\${date.getFullYear()}/\${date.getMonth() + 1}/\${date.getDate()}\`;
-}
-
-function loadRescheduleNoticeState_() {
-  const raw = PropertiesService
-    .getScriptProperties()
-    .getProperty(CONFIG.rescheduleNoticeStateProperty);
-
-  return raw ? JSON.parse(raw) : {};
-}
-
-function saveRescheduleNoticeState_(notices) {
-  const state = loadRescheduleNoticeState_();
-
-  notices.forEach(notice => {
-    state[notice.key] = true;
-  });
-
-  PropertiesService
-    .getScriptProperties()
-    .setProperty(CONFIG.rescheduleNoticeStateProperty, JSON.stringify(state));
-}
-
-function sendSyncNotification_(subject, body) {
-  const recipient = getNotificationEmail_();
-  MailApp.sendEmail(recipient, subject, body || '');
-}
-
-function getNotificationEmail_() {
-  const configuredEmail = String(CONFIG.notificationEmail || '').trim();
-
-  if (configuredEmail) {
-    assertSingleNotificationEmail_(configuredEmail);
-    return configuredEmail;
-  }
-
-  const activeUserEmail = Session.getActiveUser().getEmail();
-
-  if (!activeUserEmail) {
-    throw new Error('找不到通知 Email，請在 CONFIG.notificationEmail 填入收件信箱。');
-  }
-
-  assertSingleNotificationEmail_(activeUserEmail);
-  return activeUserEmail;
-}
-
-function assertSingleNotificationEmail_(email) {
-  if (!/^[^\\s@,;<>]+@[^\\s@,;<>]+$/.test(String(email || ''))) {
-    throw new Error('通知 Email 格式不正確，請填入單一收件信箱，不要使用逗號、分號、換行或顯示名稱。');
-  }
-}
-
-function resetSyncState() {
-  PropertiesService
-    .getScriptProperties()
-    .deleteProperty('SYNC_STATE');
-}
-
-function setupAutoSyncTriggers() {
-  deleteAutoSyncTriggers();
-
-  CONFIG.autoSyncHours.forEach(hour => {
-    const handler = hour === CONFIG.notifySyncHour
-      ? 'syncMyScheduleToCalendarWithNotification'
-      : 'syncMyScheduleToCalendar';
-
-    ScriptApp.newTrigger(handler)
-      .timeBased()
-      .atHour(hour)
-      .nearMinute(0)
-      .everyDays(1)
-      .inTimezone(CONFIG.timezone)
-      .create();
-  });
-
-  Logger.log(\`已建立每日自動同步觸發器：\${CONFIG.autoSyncHours.map(hour => \`\${pad2_(hour)}:00\`).join('、')}\`);
-}
-
-function deleteAutoSyncTriggers() {
-  const triggers = ScriptApp.getProjectTriggers();
-  let deletedCount = 0;
-
-  triggers.forEach(trigger => {
-    const handler = trigger.getHandlerFunction();
-
-    if (handler === 'syncMyScheduleToCalendar' || handler === 'syncMyScheduleToCalendarWithNotification') {
-      ScriptApp.deleteTrigger(trigger);
-      deletedCount++;
-    }
-  });
-
-  Logger.log(\`已刪除 \${deletedCount} 個自動同步觸發器。\`);
-}
-
-function quickDeleteAllCalendarEvents() {
-  assertQuickDeleteAllIsEnabled_();
-
-  const calendar = CalendarApp.getCalendarById(CONFIG.calendarId);
-
-  if (!calendar) {
-    throw new Error(\`找不到日曆，請確認 Calendar ID：\${CONFIG.calendarId}\`);
-  }
-
-  let deletedCount = 0;
-  const windowStart = new Date(CONFIG.quickDeleteAllFromYear, 0, 1);
-  const windowEnd = new Date(CONFIG.quickDeleteAllToYear, 11, 31, 23, 59, 59);
-  const events = calendar.getEvents(windowStart, windowEnd);
-
-  events.forEach(event => {
-    event.deleteEvent();
-    deletedCount++;
-  });
-
-  resetSyncState();
-  Logger.log(\`快速刪除完成，共刪除 \${deletedCount} 筆事件，並已清除同步狀態。\`);
-}
-
-function assertQuickDeleteAllIsEnabled_() {
-  if (CONFIG.allowQuickDeleteAllCalendarEvents === true) {
-    return;
-  }
-
-  throw new Error(
-    'quickDeleteAllCalendarEvents() 會刪除 CONFIG.calendarId 指定日曆中 2000-2100 年的所有事件。' +
-    '若確定要使用，請先確認這是專用日曆，再把 CONFIG.allowQuickDeleteAllCalendarEvents 改成 true。'
+function renderTemplate_(template, values) {
+  return String(template || '').replace(/\\{([A-Za-z]+)\\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match
   );
 }
 
-function quickDeleteSyncedCalendarEvents() {
-  const calendar = CalendarApp.getCalendarById(CONFIG.calendarId);
+function makeOccurrenceKey_(item) {
+  return [normalizeTitle_(item.originalTitle), item.dateKey, item.isAllDay ? 'all-day' : item.periodStart, item.isAllDay ? 'all-day' : item.periodEnd, normalizeTitle_(item.location)].join('|');
+}
 
-  if (!calendar) {
-    throw new Error(\`找不到日曆，請確認 Calendar ID：\${CONFIG.calendarId}\`);
-  }
+function makeEventSignature_(item, settings) {
+  return JSON.stringify([
+    item.originalTitle, item.type, item.isAllDay, item.dateKey, item.periodStart, item.periodEnd,
+    item.start.toISOString(), item.end.toISOString(), item.location,
+    settings.descriptionPreset, settings.customDescription,
+    settings.reminderMode, settings.reminderMinutes
+  ]);
+}
 
-  let deletedCount = 0;
-  let skippedCount = 0;
-  const windowStart = getSyncStartDate_();
-  const oldState = loadState_();
-  const keptState = {};
+function serializeStateItem_(item, calendarEventId, signature) {
+  return {
+    originalTitle: item.originalTitle,
+    type: item.type,
+    isAllDay: Boolean(item.isAllDay),
+    dateKey: item.dateKey,
+    weekday: item.weekday,
+    weekNum: item.weekNum,
+    periodStart: item.periodStart,
+    periodEnd: item.periodEnd,
+    start: item.start.toISOString(),
+    end: item.end.toISOString(),
+    startTime: item.startTime,
+    endTime: item.endTime,
+    location: item.location,
+    sourceUpdatedLabel: item.sourceUpdatedLabel,
+    stateKey: makeOccurrenceKey_(item),
+    calendarEventId,
+    syncSignature: signature
+  };
+}
 
-  Object.keys(oldState).forEach(syncId => {
-    const item = oldState[syncId];
+function loadSourceContext_(gradeName) {
+  const payload = fetchSchedulePayload_(gradeName);
+  return parseSchedulePayload_(payload, gradeName, new Date());
+}
 
-    if (shouldKeepOldState_(item, windowStart)) {
-      keptState[syncId] = item;
-      return;
-    }
+function fetchSchedulePayload_(gradeName) {
+  const apiGrade = GRADE_API_NAMES[sanitizeGrade_(gradeName)];
+  const response = UrlFetchApp.fetch(SOURCE_API_URL + '?grade=' + encodeURIComponent(apiGrade), {
+    followRedirects: true,
+    muteHttpExceptions: true
+  });
+  const code = response.getResponseCode();
+  if (code !== 200) throw new Error('課表來源回應失敗（HTTP ' + code + '）。');
+  let payload;
+  try { payload = JSON.parse(response.getContentText('UTF-8')); }
+  catch (error) { throw new Error('課表來源不是有效的 JSON。'); }
+  assertSourcePayload_(payload, apiGrade);
+  return payload;
+}
 
-    if (!item || !item.calendarEventId) {
-      return;
-    }
+function assertSourcePayload_(payload, expectedGrade) {
+  if (!payload || typeof payload !== 'object') throw new Error('課表來源沒有回傳可讀取的資料。');
+  if (payload.currentGrade !== expectedGrade) throw new Error('課表來源回傳了錯誤的年級。');
+  if (!Array.isArray(payload.tableData) || payload.tableData.length < 10) throw new Error('課表來源缺少完整表格。');
+  if (!Array.isArray(payload.weekDataList) || payload.weekDataList.length === 0) throw new Error('課表來源缺少週次。');
+}
 
-    if (deleteCalendarEvent_(calendar, item.calendarEventId, syncId)) {
-      deletedCount++;
-    } else {
-      skippedCount++;
-    }
+function parseSchedulePayload_(payload, gradeName, now) {
+  const datedHeaders = inferHeaderDates_(payload, now);
+  const dateLookup = {};
+  datedHeaders.forEach(item => { dateLookup[item.rowIndex + '|' + item.dayIndex] = item.dateKey; });
+  const events = [];
+  const headerIndexes = [];
+  payload.tableData.forEach((row, index) => { if (row && row.isHeader) headerIndexes.push(index); });
+
+  headerIndexes.forEach(headerIndex => {
+    const header = payload.tableData[headerIndex];
+    const weekNum = Number(header.weekNum) || headerIndexes.indexOf(headerIndex) + 1;
+    const bodyRows = payload.tableData.slice(headerIndex + 1, headerIndex + 9);
+    if (bodyRows.length < 8) throw new Error('第 ' + weekNum + ' 週缺少節次資料。');
+    const times = bodyRows.map(row => parsePeriodTime_(row.cells && row.cells[0] && row.cells[0].value));
+    if (times.some(item => !item)) throw new Error('第 ' + weekNum + ' 週包含無法辨識的節次時間。');
+    const noteRow = payload.tableData[headerIndex + 9];
+    const sourceUpdatedLabel = extractUpdateLabel_(noteRow);
+    const occupiedUntil = {};
+
+    bodyRows.forEach((row, periodIndex) => {
+      const cells = Array.isArray(row.cells) ? row.cells : [];
+      let logicalColumn = 2;
+
+      cells.slice(2).forEach(cell => {
+        while (occupiedUntil[logicalColumn] >= periodIndex) logicalColumn += 1;
+        if (logicalColumn > 8) return;
+        const dayIndex = logicalColumn - 2;
+        const rowSpan = Math.max(1, Number(cell.rowSpan) || 1);
+        const periodEnd = Math.min(8, periodIndex + rowSpan);
+        const dateKey = dateLookup[headerIndex + '|' + dayIndex];
+
+        splitCellEntries_(cell.value).forEach(rawEntry => {
+          if (isStructuralValue_(rawEntry)) return;
+          const parsed = parseEntry_(rawEntry);
+          if (!parsed.title || !dateKey) return;
+          events.push({
+            originalTitle: parsed.title,
+            type: isActivityTitle_(parsed.title) ? 'activity' : 'course',
+            isAllDay: false,
+            weekNum,
+            weekday: WEEKDAY_LABELS[dayIndex],
+            dateKey,
+            periodStart: periodIndex + 1,
+            periodEnd,
+            startTime: times[periodIndex].start,
+            endTime: times[periodEnd - 1].end,
+            start: makeTaipeiDate_(dateKey, times[periodIndex].start),
+            end: makeTaipeiDate_(dateKey, times[periodEnd - 1].end),
+            location: parsed.location,
+            sourceUpdatedLabel
+          });
+        });
+
+        occupiedUntil[logicalColumn] = periodIndex + rowSpan - 1;
+        logicalColumn += 1;
+      });
+    });
+
+    (noteRow && noteRow.cells || []).slice(2, 9).forEach((cell, dayIndex) => {
+      const dateKey = dateLookup[headerIndex + '|' + dayIndex];
+      splitCellEntries_(cell.value).forEach(rawEntry => {
+        if (isStructuralValue_(rawEntry)) return;
+        const parsed = parseEntry_(rawEntry);
+        if (!parsed.title || !dateKey || !isActivityTitle_(parsed.title)) return;
+        const start = makeTaipeiDate_(dateKey, '00:00');
+        const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+        events.push({
+          originalTitle: parsed.title,
+          type: 'activity',
+          isAllDay: true,
+          weekNum,
+          weekday: WEEKDAY_LABELS[dayIndex],
+          dateKey,
+          periodStart: 0,
+          periodEnd: 0,
+          startTime: '',
+          endTime: '',
+          start,
+          end,
+          location: parsed.location,
+          sourceUpdatedLabel
+        });
+      });
+    });
   });
 
-  saveState_(keptState);
-  Logger.log(\`快速刪除完成，自 \${formatDateKey_(windowStart)} 起共刪除 \${deletedCount} 筆同步事件，略過 \${skippedCount} 筆非本工具事件或不存在事件，並已清除未來同步狀態。\`);
+  const catalogAll = extractCatalogFromPayload_(payload);
+  const firstDateKey = datedHeaders[0].dateKey;
+  const lastDateKey = datedHeaders[datedHeaders.length - 1].dateKey;
+  const termKey = GRADE_API_NAMES[gradeName] + '|' + firstDateKey;
+  const sourceUpdatedLabel = latestUpdateLabel_(events.map(event => event.sourceUpdatedLabel));
+
+  return {
+    gradeName,
+    firstDateKey,
+    lastDateKey,
+    termKey,
+    fingerprint: hashText_(JSON.stringify([termKey, lastDateKey, catalogAll.map(item => item.title)])),
+    sourceUpdatedLabel,
+    sourceStale: isSourceStale_(sourceUpdatedLabel, now),
+    catalog: {
+      all: catalogAll,
+      courses: catalogAll.filter(item => item.type === 'course'),
+      activities: catalogAll.filter(item => item.type === 'activity')
+    },
+    events
+  };
+}
+
+function extractCatalogFromPayload_(payload) {
+  const catalogMap = {};
+  (payload.tableData || []).forEach(row => {
+    if (!row || row.isHeader || !Array.isArray(row.cells)) return;
+    row.cells.forEach(cell => {
+      splitCellEntries_(cell && cell.value).forEach(rawEntry => {
+        if (isStructuralValue_(rawEntry)) return;
+        const parsed = parseEntry_(rawEntry);
+        const key = normalizeTitle_(parsed.title);
+        if (key && !catalogMap[key]) {
+          catalogMap[key] = { title: parsed.title, type: isActivityTitle_(parsed.title) ? 'activity' : 'course' };
+        }
+      });
+    });
+  });
+  return Object.keys(catalogMap).map(key => catalogMap[key]).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function inferHeaderDates_(payload, now) {
+  const records = [];
+  payload.tableData.forEach((row, rowIndex) => {
+    if (!row || !row.isHeader) return;
+    (row.cells || []).slice(2, 9).forEach((cell, dayIndex) => {
+      const monthDay = parseMonthDay_(cell.value);
+      if (monthDay) records.push({ rowIndex, dayIndex, month: monthDay.month, day: monthDay.day });
+    });
+  });
+  if (records.length < 7) throw new Error('課表日期不足，無法判定學期。');
+  const currentYear = Number(Utilities.formatDate(now, TIMEZONE, 'yyyy'));
+  let best = null;
+  [currentYear - 1, currentYear, currentYear + 1].forEach(year => {
+    let activeYear = year;
+    let previousMonth = null;
+    const dated = records.map(record => {
+      if (previousMonth !== null && previousMonth >= 10 && record.month <= 3) activeYear += 1;
+      previousMonth = record.month;
+      const dateKey = activeYear + '-' + pad2_(record.month) + '-' + pad2_(record.day);
+      return Object.assign({}, record, { dateKey, timestamp: Date.parse(dateKey + 'T12:00:00+08:00') });
+    });
+    const nearest = Math.min.apply(null, dated.map(item => Math.abs(item.timestamp - now.getTime())));
+    if (!best || nearest < best.nearest) best = { dated, nearest };
+  });
+  if (!best || best.nearest > 220 * 24 * 60 * 60 * 1000) throw new Error('課表日期與現在相距過遠，無法安全判定年份。');
+  return best.dated;
+}
+
+function parseMonthDay_(value) {
+  const match = normalizeText_(value).match(/\\(?\\s*(\\d{1,2})\\s*\\/\\s*(\\d{1,2})\\s*\\)?/);
+  if (!match) return null;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31 ? { month, day } : null;
+}
+
+function parsePeriodTime_(value) {
+  const match = normalizeText_(value).replace(/\\n/g, '').match(/(\\d{1,2}:\\d{2})\\s*[~～-]\\s*(\\d{1,2}:\\d{2})/);
+  return match ? { start: match[1], end: match[2] } : null;
+}
+
+function makeTaipeiDate_(dateKey, time) {
+  const date = new Date(dateKey + 'T' + time + ':00+08:00');
+  if (isNaN(date.getTime())) throw new Error('課表包含無法辨識的日期或時間。');
+  return date;
+}
+
+function splitCellEntries_(value) {
+  const text = normalizeText_(value);
+  return text ? text.split(/\\n[-─━—]{4,}\\n/g).map(normalizeText_).filter(Boolean) : [];
+}
+
+function parseEntry_(value) {
+  let title = normalizeText_(value);
+  const locations = [];
+  let match = title.match(/\\s*\\[([^\\]]+)\\]\\s*$/);
+  while (match) {
+    locations.unshift(normalizeText_(match[1]));
+    title = normalizeText_(title.slice(0, match.index));
+    match = title.match(/\\s*\\[([^\\]]+)\\]\\s*$/);
+  }
+  return { title: MANUAL_MERGE_EXCEPTIONS[normalizeTitle_(title)] || title, location: locations.join('、') };
+}
+
+function isStructuralValue_(value) {
+  const text = normalizeText_(value);
+  return !text || /^第\\s*\\d+\\s*週$/.test(text) || /^星期[一二三四五六日]/.test(text) || /^[1-8]$/.test(text) || text === '節次' || text === '備註' || text.indexOf('更新時間') === 0 || /^\\d{1,2}:\\d{2}/.test(text);
+}
+
+function isActivityTitle_(title) {
+  return ACTIVITY_PATTERNS.some(pattern => pattern.test(normalizeText_(title)));
+}
+
+function extractUpdateLabel_(row) {
+  let result = '';
+  (row && row.cells || []).forEach(cell => {
+    const match = normalizeText_(cell.value).match(/^更新時間\\n?(\\d{8})/);
+    if (match && match[1] > result) result = match[1];
+  });
+  return result;
+}
+
+function latestUpdateLabel_(values) {
+  return values.filter(Boolean).sort().pop() || '';
+}
+
+function isSourceStale_(label, now) {
+  if (!/^\\d{8}$/.test(label)) return true;
+  const month = Number(label.slice(0, 2));
+  const day = Number(label.slice(2, 4));
+  const currentYear = Number(Utilities.formatDate(now, TIMEZONE, 'yyyy'));
+  let candidate = new Date(currentYear + '-' + pad2_(month) + '-' + pad2_(day) + 'T12:00:00+08:00');
+  if (candidate.getTime() - now.getTime() > 60 * 24 * 60 * 60 * 1000) candidate = new Date((currentYear - 1) + '-' + pad2_(month) + '-' + pad2_(day) + 'T12:00:00+08:00');
+  return now.getTime() - candidate.getTime() > 30 * 24 * 60 * 60 * 1000;
+}
+
+function loadSettings_() {
+  const stored = readChunkedJson_(SETTINGS_STORE, null);
+  const settings = Object.assign({}, DEFAULT_SETTINGS, stored || {});
+  settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
+  settings.selectedCourses = uniqueStrings_(settings.selectedCourses || []);
+  settings.knownTitles = uniqueStrings_(settings.knownTitles || []);
+  settings.pendingTitles = uniqueStrings_(settings.pendingTitles || []);
+  settings.excludedTitles = uniqueStrings_(settings.excludedTitles || []);
+  return settings;
+}
+
+function loadSyncState_() {
+  let state = readChunkedJson_(SYNC_STATE_STORE, null);
+  const properties = PropertiesService.getScriptProperties();
+
+  if (state === null) {
+    const legacyRaw = properties.getProperty('SYNC_STATE');
+    if (legacyRaw) {
+      try { state = JSON.parse(legacyRaw); } catch (error) { state = {}; }
+    }
+  }
+
+  const normalized = normalizeStoredState_(state || {});
+  if (properties.getProperty('SYNC_STATE')) {
+    writeChunkedJson_(SYNC_STATE_STORE, normalized);
+    properties.deleteProperty('SYNC_STATE');
+  }
+  return normalized;
+}
+
+function normalizeStoredState_(state) {
+  const result = {};
+  Object.keys(state || {}).forEach(key => {
+    const item = state[key] || {};
+    const start = item.start ? new Date(item.start) : (item.date ? new Date(item.date) : null);
+    const dateKey = item.dateKey || (start && !isNaN(start.getTime()) ? formatDateKey_(start) : '');
+    const periodStart = Number(item.periodStart) || 0;
+    const periodEnd = Number(item.periodEnd) || periodStart;
+    const isAllDay = Boolean(item.isAllDay);
+    if (!item.originalTitle || !dateKey || (!isAllDay && !periodStart) || !item.calendarEventId) return;
+    const normalizedKey = [normalizeTitle_(item.originalTitle), dateKey, isAllDay ? 'all-day' : periodStart, isAllDay ? 'all-day' : periodEnd, normalizeTitle_(item.location)].join('|');
+    result[normalizedKey] = Object.assign({}, item, {
+      dateKey,
+      periodStart,
+      periodEnd,
+      isAllDay,
+      stateKey: normalizedKey
+    });
+  });
+  return result;
+}
+
+function saveSettings_(settings) {
+  writeChunkedJson_(SETTINGS_STORE, settings);
+}
+
+function loadStatus_() {
+  return readChunkedJson_(STATUS_STORE, { ok: null, message: '完成設定後即可開始同步。', eventCount: 0 });
+}
+
+function readChunkedJson_(key, fallback) {
+  const properties = PropertiesService.getScriptProperties();
+  const count = Number(properties.getProperty(key + '_COUNT')) || 0;
+  if (!count) return fallback;
+  let raw = '';
+  for (let index = 0; index < count; index += 1) raw += properties.getProperty(key + '_' + index) || '';
+  try { return JSON.parse(raw); } catch (error) { return fallback; }
+}
+
+function writeChunkedJson_(key, value) {
+  const properties = PropertiesService.getScriptProperties();
+  const raw = JSON.stringify(value);
+  const chunks = [];
+  for (let index = 0; index < raw.length; index += 7500) chunks.push(raw.slice(index, index + 7500));
+  const oldCount = Number(properties.getProperty(key + '_COUNT')) || 0;
+  const updates = {};
+  chunks.forEach((chunk, index) => { updates[key + '_' + index] = chunk; });
+  updates[key + '_COUNT'] = String(chunks.length);
+  properties.setProperties(updates, false);
+  for (let index = chunks.length; index < oldCount; index += 1) properties.deleteProperty(key + '_' + index);
+}
+
+function clearChunkedStore_(key) {
+  const properties = PropertiesService.getScriptProperties();
+  const count = Number(properties.getProperty(key + '_COUNT')) || 0;
+  for (let index = 0; index < count; index += 1) properties.deleteProperty(key + '_' + index);
+  properties.deleteProperty(key + '_COUNT');
+  if (key === SYNC_STATE_STORE) properties.deleteProperty('SYNC_STATE');
+}
+
+function setupAutoSyncTriggers() {
+  const settings = loadSettings_();
+  settings.autoSyncEnabled = true;
+  saveSettings_(settings);
+  refreshAutoSyncTriggers_(settings);
+}
+
+function refreshAutoSyncTriggers_(settings) {
+  deleteAutoSyncTriggers();
+  if (!settings.autoSyncEnabled) return;
+  settings.autoSyncHours.forEach(hour => {
+    const handler = hour === settings.notifySyncHour ? 'syncMyScheduleToCalendarWithNotification' : 'syncMyScheduleToCalendar';
+    ScriptApp.newTrigger(handler).timeBased().atHour(hour).nearMinute(0).everyDays(1).inTimezone(TIMEZONE).create();
+  });
+}
+
+function deleteAutoSyncTriggers() {
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (['syncMyScheduleToCalendar', 'syncMyScheduleToCalendarWithNotification'].indexOf(trigger.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(trigger);
+  });
+}
+
+function toggleAutoSyncFromMenu() {
+  const settings = loadSettings_();
+  settings.autoSyncEnabled = !settings.autoSyncEnabled;
+  settings.pausedReason = settings.autoSyncEnabled ? '' : '由使用者暫停。';
+  saveSettings_(settings);
+  refreshAutoSyncTriggers_(settings);
+  SpreadsheetApp.getUi().alert(settings.autoSyncEnabled ? '已恢復自動同步。' : '已暫停自動同步。');
+}
+
+function showSyncStatus() {
+  const status = loadStatus_();
+  SpreadsheetApp.getUi().alert('T-SCHOOL 課表同步', (status.message || '尚未同步') + '\\n\\n上次執行：' + (status.lastSyncLabel || '尚無紀錄'), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function previewParsedEvents() {
-  const ss = SpreadsheetApp.openByUrl(CONFIG.sheetUrl);
-  const sheet = ss.getSheetByName(CONFIG.sheetName);
+  const settings = loadSettings_();
+  const source = loadSourceContext_(settings.gradeName);
+  const events = source.events.filter(item => shouldIncludeEvent_(item, settings));
+  Logger.log(JSON.stringify(events.slice(0, 50), null, 2));
+  Logger.log('共解析 ' + events.length + ' 筆個人事件。');
+}
 
-  if (!sheet) {
-    throw new Error(\`找不到工作表：\${CONFIG.sheetName}\`);
+function confirmQuickDeleteSyncedEvents() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert('移除受管理事件', '只會刪除本工具建立且仍可辨識的事件。是否繼續？', ui.ButtonSet.YES_NO);
+  if (response === ui.Button.YES) {
+    const count = quickDeleteSyncedCalendarEvents();
+    ui.alert('已移除 ' + count + ' 筆事件。');
   }
+}
 
-  const events = parseMyGradeEvents_(buildSheetContext_(sheet));
+function quickDeleteSyncedCalendarEvents() {
+  const settings = loadSettings_();
+  const count = settings.calendarId ? removeManagedEventsFromCalendar_(settings.calendarId, true) : 0;
+  clearChunkedStore_(SYNC_STATE_STORE);
+  return count;
+}
 
-  events.forEach(event => {
-    Logger.log([
-      formatDateKey_(event.date),
-      event.weekday,
-      \`第\${event.periodStart}-\${event.periodEnd}節\`,
-      Utilities.formatDate(event.start, CONFIG.timezone, 'HH:mm'),
-      Utilities.formatDate(event.end, CONFIG.timezone, 'HH:mm'),
-      event.title,
-      event.location,
-      event.sourceCell
-    ].join('｜'));
+function removeManagedEventsFromCalendar_(calendarId, clearState) {
+  const calendar = CalendarApp.getCalendarById(calendarId);
+  const state = loadSyncState_();
+  let deleted = 0;
+  if (!calendar) return deleted;
+  Object.keys(state).forEach(key => { if (deleteCalendarEvent_(calendar, state[key].calendarEventId, key)) deleted += 1; });
+  if (clearState) clearChunkedStore_(SYNC_STATE_STORE);
+  return deleted;
+}
+
+function removeStateEventsFromCalendar_(calendarId, state) {
+  const calendar = CalendarApp.getCalendarById(calendarId);
+  let deleted = 0;
+  if (!calendar) return deleted;
+  Object.keys(state || {}).forEach(key => {
+    if (deleteCalendarEvent_(calendar, state[key].calendarEventId, key)) deleted += 1;
   });
+  return deleted;
+}
 
-  Logger.log(\`共解析出 \${events.length} 筆事件。\`);
+function quickDeleteAllCalendarEvents() {
+  if (!ALLOW_QUICK_DELETE_ALL) throw new Error('此危險功能預設停用。');
+}
+
+function resetSyncState() {
+  clearChunkedStore_(SYNC_STATE_STORE);
+  clearChunkedStore_(STATUS_STORE);
+}
+
+function sendSyncNotificationsSafe_(settings, result, options) {
+  try {
+    if (options.reason === 'source' && result.changes.length > 0) {
+      sendEmail_(settings, '[T-SCHOOL] 課表異動 ' + result.changes.length + ' 項', formatChangeDigest_(result, settings));
+    } else if (options.notifyOnSuccess) {
+      sendEmail_(settings, '[T-SCHOOL] 課表同步成功', formatSyncResultMessage_(result));
+    }
+  } catch (error) {
+    Logger.log('同步通知寄送失敗：' + error.message);
+  }
+}
+
+function sendFirstSetupNotificationSafe_(result) {
+  try {
+    sendEmail_(loadSettings_(), '[T-SCHOOL] 課表同步設定完成', '第一次同步已完成。\\n\\n' + formatSyncResultMessage_(result) + '\\n\\n請開啟專用 Google 日曆，確認課程、日期、節次與地點正確。');
+  } catch (error) {
+    Logger.log('設定完成通知寄送失敗：' + error.message);
+  }
+}
+
+function notifySyncFailureSafe_(error) {
+  try {
+    sendEmail_(loadSettings_(), '[T-SCHOOL] 課表同步失敗', userFacingError_(error) + '\\n\\n請開啟課表同步控制台查看狀態。');
+  } catch (mailError) {
+    Logger.log('同步失敗通知寄送失敗：' + mailError.message);
+  }
+}
+
+function notifySyncFailureUnlessActionRequired_(error) {
+  if (String(error.message || error).indexOf('[ACTION_REQUIRED]') !== 0) {
+    notifySyncFailureSafe_(error);
+  }
+}
+
+function sendActionRequiredSafe_(settings, subject, body) {
+  const noticeState = readChunkedJson_(NOTICE_STORE, {});
+  const key = hashText_(subject + '|' + body);
+  if (noticeState[key]) return;
+  try {
+    sendEmail_(settings, '[T-SCHOOL] ' + subject, body);
+    noticeState[key] = true;
+    writeChunkedJson_(NOTICE_STORE, noticeState);
+  } catch (error) {
+    Logger.log('操作提醒寄送失敗：' + error.message);
+  }
+}
+
+function sendEmail_(settings, subject, body) {
+  const recipient = getNotificationEmail_(settings);
+  MailApp.sendEmail(recipient, subject, body || '');
+}
+
+function getNotificationEmail_(settings) {
+  const configured = String(settings.notificationEmail || '').trim();
+  const email = configured || Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail();
+  assertSingleEmail_(email);
+  return email;
+}
+
+function assertSingleEmail_(email) {
+  if (!/^[^\\s@,;<>]+@[^\\s@,;<>]+$/.test(String(email || ''))) throw new Error('找不到可用的通知 Email，請在控制台填入單一信箱。');
+}
+
+function formatChangeDigest_(result, settings) {
+  const lines = result.changes.map(change =>
+    renderTemplate_(getNotificationTemplate_(settings), buildChangeTemplateValues_(change)).trim()
+  );
+  lines.push('', formatSyncResultMessage_(result));
+  return lines.join('\\n');
+}
+
+function getNotificationTemplate_(settings) {
+  if (settings.notificationPreset === 'compact') return '{type}｜{course}｜{newDate} {newPeriod}';
+  if (settings.notificationPreset === 'detailed') return '{type}｜{course}\\n原：{oldDate} {oldPeriod}｜{oldTime}｜{oldLocation}\\n新：{newDate} {newPeriod}｜{newTime}｜{newLocation}';
+  if (settings.notificationPreset === 'custom') return settings.customNotification;
+  return '{type}｜{course}\\n原：{oldDate} {oldPeriod} {oldLocation}\\n新：{newDate} {newPeriod} {newLocation}';
+}
+
+function buildChangeTemplateValues_(change) {
+  const oldItem = change.oldItem;
+  const newItem = change.newItem;
+  const activeItem = newItem || oldItem || {};
+  return {
+    type: change.type,
+    course: activeItem.originalTitle || '',
+    oldDate: oldItem ? oldItem.dateKey.replace(/-/g, '/') : '—',
+    newDate: newItem ? newItem.dateKey.replace(/-/g, '/') : '—',
+    oldPeriod: oldItem ? formatPeriodValue_(oldItem) : '—',
+    newPeriod: newItem ? formatPeriodValue_(newItem) : '—',
+    oldTime: oldItem ? formatTimeValue_(oldItem) : '—',
+    newTime: newItem ? formatTimeValue_(newItem) : '—',
+    oldLocation: oldItem && oldItem.location ? oldItem.location : '—',
+    newLocation: newItem && newItem.location ? newItem.location : '—'
+  };
+}
+
+function formatPeriodValue_(item) {
+  if (item.isAllDay) return '全天';
+  return '第 ' + (item.periodStart === item.periodEnd ? item.periodStart : item.periodStart + '–' + item.periodEnd) + ' 節';
+}
+
+function formatTimeValue_(item) {
+  if (item.isAllDay) return '全天';
+  return (item.startTime || '') + (item.endTime ? '–' + item.endTime : '');
+}
+
+function formatEventLine_(item, includeTitle) {
+  if (!item) return '';
+  const period = item.isAllDay ? '全天' : '第 ' + (item.periodStart === item.periodEnd ? item.periodStart : item.periodStart + '–' + item.periodEnd) + ' 節';
+  const detail = item.dateKey.replace(/-/g, '/') + ' ' + period + (item.location ? ' ' + item.location : '');
+  return includeTitle === false ? detail : item.originalTitle + '｜' + detail;
+}
+
+function formatSyncResultMessage_(result) {
+  return '新增 ' + result.created + '、更新 ' + result.updated + '、移除 ' + result.deleted + '、未變更 ' + result.unchanged + '。';
+}
+
+function userFacingError_(error) {
+  return String(error && error.message ? error.message : error).replace(/^\\[ACTION_REQUIRED\\]\\s*/, '');
+}
+
+function normalizeText_(value) {
+  return String(value == null ? '' : value).replace(/\\r/g, '\\n').replace(/（/g, '(').replace(/）/g, ')').replace(/＿/g, '_').replace(/[\\t\\u3000]+/g, ' ').replace(/[ ]+/g, ' ').replace(/\\n{2,}/g, '\\n').trim();
+}
+
+function normalizeTitle_(value) {
+  return normalizeText_(value).replace(/\\s+/g, '').toLowerCase();
+}
+
+function uniqueStrings_(values) {
+  const seen = {};
+  return (values || []).map(value => String(value || '').trim()).filter(value => {
+    const key = normalizeTitle_(value);
+    if (!key || seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+
+function sanitizeGrade_(value) {
+  return GRADE_API_NAMES[value] ? value : '高一';
+}
+
+function normalizeHour_(value, fallback) {
+  const hour = Number(value);
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : fallback;
+}
+
+function normalizeHourArray_(values, fallback) {
+  const result = [];
+  (Array.isArray(values) ? values : []).forEach(value => {
+    const hour = normalizeHour_(value, null);
+    if (hour !== null && result.indexOf(hour) === -1) result.push(hour);
+  });
+  if (!result.length) result.push(fallback);
+  return result.sort((a, b) => a - b);
+}
+
+function sanitizeReminderMinutes_(value) {
+  const minutes = Number(value);
+  return [10, 30, 60, 1440].indexOf(minutes) !== -1 ? minutes : 10;
+}
+
+function formatDateKey_(date) {
+  return Utilities.formatDate(date, TIMEZONE, 'yyyy-MM-dd');
+}
+
+function formatDateTime_(date) {
+  return Utilities.formatDate(date, TIMEZONE, 'yyyy/MM/dd HH:mm');
 }
 
 function pad2_(value) {
   return String(value).padStart(2, '0');
+}
+
+function hashText_(value) {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 `;
   };

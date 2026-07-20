@@ -1,17 +1,24 @@
 # PROJECT_CONTEXT_FOR_AI
 
-## Project Overview
+## Project overview
 
-This repository contains a static configurator for generating a Google Apps Script `Code.gs` that syncs T-SCHOOL schedule data from Google Sheets to Google Calendar.
+This repository contains a static configurator that generates one user-owned
+Google Apps Script `Code.gs`. The generated script reads T-SCHOOL schedule data
+from the current API, syncs selected events to a dedicated Google Calendar, and
+adds a graphical settings sidebar to a bound Google Sheet.
 
-The user-facing app is a static page:
+The public app remains build-free:
 
 - Root `index.html` redirects to `configurator/`.
-- `configurator/index.html` defines the UI.
-- `configurator/styles.css` defines layout and visual styling.
-- `configurator/app.js` handles form state, course selection, validation, and generated-code updates.
-- `configurator/code-template.js` generates the final Apps Script code copied by users.
-- `configurator/gemini-code-1778375297203.js` provides course dictionaries and non-elective event dictionaries.
+- `configurator/index.html` defines the installer UI.
+- `configurator/styles.css` implements the project design system.
+- `configurator/schedule-data.js` fetches and parses the live schedule API for
+  installer course selection.
+- `configurator/sidebar-template.js` contains the post-install HTML Service
+  sidebar embedded into generated code.
+- `configurator/code-template.js` generates the complete Apps Script backend.
+- `configurator/app.js` coordinates installer state, validation, API loading,
+  course selection, and code generation.
 
 The project is deployed through GitHub Pages at:
 
@@ -19,23 +26,56 @@ The project is deployed through GitHub Pages at:
 https://artemas-hsieh.github.io/t-school-schedule-sync/
 ```
 
-## Current Product Behavior
+## Runtime source
 
-The configurator lets users choose:
+The stopped Google Sheet is not a runtime source. Both installer and generated
+Apps Script use this stable deployment URL:
 
-- Google Sheets URL and sheet name
-- Google Calendar ID
-- grade
-- notification email and notification hour
-- auto-sync hours
-- selected courses
-- whether to include non-elective / whole-school events
+```text
+https://script.google.com/macros/s/AKfycbxoTgVMnLevp0OPZQEFOYscUrXD1iMagasz2WPArXpkG-w6jRygVMS8kOwcywhnQW_i/exec
+```
 
-It then generates a complete Apps Script `Code.gs`. Users paste that into their own Google Apps Script project and run functions there.
+Grade query values are `一年級`, `二年級`, and `三年級`. Never persist redirected
+`script.googleusercontent.com` URLs or `user_content_key` values.
 
-Important generated Apps Script public functions include:
+## Product flow
 
-- `previewParsedEvents()`
+1. The installer loads the selected grade from the API and derives a deduplicated
+   course catalog.
+2. The user chooses courses, activity inclusion, notification hours, description
+   format, and reminder behavior.
+3. The installer generates one `Code.gs`.
+4. The user creates a blank Google Sheet, opens its bound Apps Script project,
+   pastes the code, saves, and reloads the Sheet.
+5. The `課表同步` custom menu opens the settings sidebar.
+6. `儲存並首次同步` creates or selects a dedicated non-primary Calendar,
+   performs the first sync, starts triggers only after success, and sends one
+   setup-complete email.
+
+Ordinary settings changes happen in the Sheet sidebar. No Web App deployment or
+external settings account is required.
+
+## Parsing and classification
+
+- Course options are derived directly from API cells. Do not restore the old
+  large alias/course dictionaries.
+- Split parallel cell entries on the source separator line.
+- Strip trailing bracketed locations from titles and keep them as event location.
+- Normalize whitespace/punctuation and deduplicate exact normalized titles.
+- `MANUAL_MERGE_EXCEPTIONS` is intentionally small and currently empty.
+- Grade/school activities are identified only by explicit activity rules. Never
+  infer that an unknown title is an activity merely because it is absent from a
+  course dictionary.
+- Explicit activities found in weekly note rows become all-day Calendar events;
+  do not invent a time when the source gives none.
+- Newly discovered source titles are included once as pending review. A rejected
+  title is excluded and all future managed events with the same normalized title
+  are removed on the next sync.
+
+## Generated Apps Script surface
+
+Keep these public functions stable unless a deliberate migration is planned:
+
 - `syncMyScheduleToCalendar()`
 - `syncMyScheduleToCalendarWithNotification()`
 - `forceFullSyncMyScheduleToCalendar()`
@@ -44,127 +84,110 @@ Important generated Apps Script public functions include:
 - `quickDeleteAllCalendarEvents()`
 - `quickDeleteSyncedCalendarEvents()`
 - `resetSyncState()`
+- `previewParsedEvents()`
 
-Do not rename these casually. They are user-facing entry points in Apps Script.
+The bound Sheet also exposes `onOpen()`, `showSettingsSidebar()`, status/menu
+actions, and private `google.script.run` handlers used by the sidebar.
 
-## Recent Performance Work
+## Calendar sync behavior
 
-The generated Apps Script was optimized for sync performance and Google Calendar quota safety.
+- Only today and future events are actively reconciled; past state is preserved.
+- Exact unchanged source events skip Calendar API reads and writes.
+- Normal sync preserves direct manual Calendar edits when the source signature is
+  unchanged. Force repair reapplies source fields.
+- Source update labels are not part of the sync signature, preventing harmless
+  source refresh timestamps from causing mass Calendar writes.
+- Clear same-title date/time changes are paired as updates within a 21-day window;
+  ambiguous cases remain separate additions and cancellations.
+- Suspicious mass deletion stops automatic/source sync. User-confirmed settings,
+  setup, and repair operations may apply the previewed plan.
+- Calendar switching first rebuilds events in the new dedicated Calendar, then
+  removes managed events from the old Calendar.
+- Legacy `SYNC_STATE` is migrated to chunked storage. Legacy managed-event fallback
+  requires the managed marker, an A1-style source cell, and original-content text.
 
-Key changes already implemented:
+## Notifications and term transitions
 
-- `buildSheetContext_(sheet)` reads the sheet data once per sync/preview and shares:
-  - `range`
-  - `values`
-  - `displays`
-  - `grade`
-  - `weekRows`
-  - `matchContext`
-- `parseMyGradeEvents_()` and reschedule notice parsing consume the shared sheet context.
-- `buildMergedRangeMap_()` uses the existing range instead of calling `sheet.getDataRange()` again.
-- `buildMatchContext_()` precomputes normalized course/event candidates so every cell does not repeatedly scan and normalize dictionaries.
-- `updateCalendarEvent_()` only calls Calendar setters when the field actually differs.
-- Unchanged events use `syncSignature` to skip Calendar event API calls entirely.
-- `forceFullSyncMyScheduleToCalendar()` bypasses the unchanged-event fast path when a user needs to repair manually edited/deleted calendar events.
+- Source changes send one digest covering additions, cancellations, date/period/
+  time/location/title changes. The digest supports compact, standard, detailed,
+  and custom-variable formats.
+- Failures notify immediately.
+- No-change runs are silent except for the configured daily success-summary run.
+- Event reminders default to none and are configurable.
+- A new inferred term pauses triggers, preserves Calendar events, clears selected
+  courses, sends one action-required email, and requires course reselection before
+  writes resume.
 
-This was done because a second sync shortly after the first can hit Google Calendar short-window throttling, even when it is not a daily quota limit.
+## State and safety
 
-## Calendar Sync Tradeoff
+- Settings, status, notice state, and managed-event state live in Script
+  Properties. Large JSON values are chunked below per-property limits.
+- One generated script supports one grade, one notification address, and one
+  dedicated Calendar. The primary Calendar is rejected.
+- Deletion helpers operate only on stored event IDs and verify managed markers.
+- `quickDeleteAllCalendarEvents()` remains disabled behind
+  `ALLOW_QUICK_DELETE_ALL = false`.
+- User-provided values are serialized with `JSON.stringify` and U+2028/U+2029
+  escaping. Do not concatenate user strings into executable code.
+- The notification recipient is one plain email address. Mail failures must not
+  mask the original sync failure.
+- Keep the installer CSP narrow. Add explicit origins only when required.
 
-Normal sync now prioritizes quota safety:
+## UI visual exploration phase
 
-- If the parsed schedule event has the same `syncSignature` as the stored state, the script reuses the stored `calendarEventId`.
-- It does not call `calendar.getEventById()` for unchanged events.
-- This avoids repeated Calendar event reads/writes and reduces throttling risk.
+`UI_EXPLORATION_BRIEF.md` is the active source of truth for the next installer UI
+concept. Read it before UI changes.
 
-Tradeoff:
+- Prior strict Material Design 3 visual rules are archived under
+  `archive/visual-design-material3/` and are inactive during this concept pass.
+- Prioritize aesthetic quality, innovation, T-SCHOOL brand distinctiveness,
+  motion direction, and first-time-user focus before strict visual-system cleanup.
+- Only visual constraints are relaxed. Keep interface copy concise, Traditional
+  Chinese, action-oriented, and understandable without programming knowledge.
+- Preserve the static architecture and all current installer behavior, validation,
+  data loading, code generation, safety rules, and public Apps Script functions.
+- `1Campus/` must never be used as a visual or interaction reference.
+- The concept should use one vertical narrative flow, progressive disclosure,
+  step progress, a compact code preview, and optional contextual cursor motion.
+- Motion must not block the task. Keep touch and reduced-motion fallbacks usable.
 
-- Manual edits or deletions made directly in Google Calendar are not repaired by normal sync if the source schedule did not change.
-- Users should run `forceFullSyncMyScheduleToCalendar()` when they want a repair pass against Calendar.
+## Deployment and cache
 
-`syncSignature` intentionally excludes `description` because the description is derived from other fields. Including it would cause a future description-format-only change to trigger mass Calendar updates.
-
-There is compatibility logic for:
-
-- old state without `syncSignature`
-- legacy signatures that included `description`
-
-Preserve that compatibility unless there is a deliberate state migration.
-
-## Security / Safety Notes
-
-Generated Apps Script runs in the user's Google account, so destructive Calendar behavior must be guarded carefully.
-
-Current safety decisions:
-
-- `CONFIG.syncIdPrefix` is a real managed-event marker. New events include it in the Calendar event description.
-- Calendar deletion helpers must only delete events that can be recognized as this tool's managed events.
-- `quickDeleteSyncedCalendarEvents()` should delete by stored `SYNC_STATE` event IDs plus managed-event checks, not by scanning and deleting every future event in the target calendar.
-- Legacy synced events may not have `CONFIG.syncIdPrefix`; keep the legacy fallback strict and require a source-cell marker that looks like an A1-style cell reference.
-- `quickDeleteAllCalendarEvents()` is intentionally destructive and must remain behind an explicit config flag (`allowQuickDeleteAllCalendarEvents`).
-- User-provided strings inserted into generated Apps Script must be serialized as data, not concatenated as code. Keep `JSON.stringify`-based string/object formatting and the U+2028/U+2029 escaping.
-- Notification email is intentionally limited to a single plain address in both the frontend and generated Apps Script.
-- Failed notification sending must not mask the original sync failure.
-- The default Google Sheets URL is intentionally retained for user experience because the school Sheet is expected to be restricted to school accounts. Treat that access-control setting as an operational assumption.
-- `configurator/index.html` includes a CSP meta tag. If new external assets are added, update the CSP deliberately rather than loosening it broadly.
-- Reschedule notice date fallback handles cross-year notices by moving dates more than 30 days in the past to the next year.
-
-## Current UI / UX Notes
-
-Desktop layout intentionally uses independent panes:
-
-- The left configurator pane scrolls independently.
-- The right "Generated Apps Script / Code.gs" pane stays fixed within the desktop viewport and scrolls internally only if needed.
-- Tablet and mobile layouts return to normal document scrolling.
-
-Sync time selector behavior:
-
-- The four preset sync hours are visually styled like the full 24-hour grid, not like pill chips, because they represent the same kind of selectable time.
-- The full 24-hour selector is expanded via the small "自訂時段" control beside the "每日同步時段" label, matching the selected-courses expand/collapse pattern.
-
-Usage steps copy:
-
-- The right pane's "使用步驟" section is written for non-technical users who may not know Google Apps Script.
-- Keep the steps concise and action-oriented, using `→` to connect actions and minimizing punctuation.
-- `script.google.com` is a clickable external link that opens in a new tab.
-- The inline `Code.gs` text in step 1 is a copy button wired to the same generated-code copy behavior as the main "複製" button.
-- The primary setup flow intentionally skips `previewParsedEvents()` because checking Apps Script logs is too technical for most users. Users are guided to run `syncMyScheduleToCalendar()`, then compare the dedicated Google Calendar against the source Google Sheet.
-- The visible flow currently ends at `setupAutoSyncTriggers()` and includes checking trigger setup within that same step rather than as a separate step.
-
-## Deployment / Cache Notes
-
-GitHub Pages can deploy a new HTML file while browsers still reuse cached CSS or JS. The configurator now avoids manual query-string maintenance by assigning `window.TSCHOOL_ASSET_VERSION = String(Date.now())` on each page load and loading these assets with that version:
+`configurator/index.html` assigns a fresh `TSCHOOL_ASSET_VERSION` on each load and
+loads these files with that query value:
 
 - `styles.css`
-- `gemini-code-1778375297203.js`
+- `schedule-data.js`
+- `sidebar-template.js`
 - `code-template.js`
 - `app.js`
 
-This trades a little browser cache efficiency for deployment correctness: after a page refresh, users should receive the latest generator logic without needing a manually updated version string.
+This favors deployment correctness over browser cache efficiency.
 
-## Validation Commands
+## Validation
 
-Useful local checks:
+Run at minimum:
 
 ```bash
+node --check configurator/schedule-data.js
+node --check configurator/sidebar-template.js
 node --check configurator/code-template.js
 node --check configurator/app.js
 git diff --check
 ```
 
-For generated Apps Script syntax, use Node to load the dictionary and template, call `window.buildAppsScriptCode(...)`, and pass the result to `new Function(code)`.
+Also load `sidebar-template.js` and `code-template.js` in Node, call
+`window.buildAppsScriptCode(settings)`, and pass the result to `new Function()`.
+This catches escaping errors that source-file syntax checks cannot detect.
 
-When changing matching logic, compare old and new classification behavior for representative course/event titles.
+For parser changes, test all three live grade payloads. For UI changes, verify real
+course names at desktop, tablet, mobile, 320px, keyboard, and reduced-motion
+conditions.
 
-## Important Constraints
+## Constraints
 
-- Keep the configurator static. There is no build step.
-- Do not add dependencies unless there is a strong reason.
-- Avoid changing the frontend workflow unless explicitly requested.
-- Prefer correctness over maximum performance for calendar mutations.
-- Be careful with Google Calendar quota behavior: repeated `getEventById()`, setters, creates, and deletes can all contribute to throttling.
-- Do not mix unrelated UI wording changes with sync logic commits unless the user asks.
-
-## Current Known Local State Note
-
-The current working tree may contain uncommitted UI polish. Do not overwrite or revert user-made UI wording changes unless explicitly requested.
+- Keep the public configurator static and dependency-free.
+- Prefer Calendar quota safety and recoverability over maximum write speed.
+- Preserve uncommitted user UI work and do not revert unrelated files.
+- Manual code upgrades are acceptable, but stored user settings and managed-event
+  state should migrate when practical.
