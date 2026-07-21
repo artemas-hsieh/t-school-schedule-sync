@@ -12,6 +12,17 @@ global.window = global;
 require(path.join(root, 'configurator/sidebar-template.js'));
 require(path.join(root, 'configurator/code-template.js'));
 
+const sidebarHtml = global.TSCHOOL_SIDEBAR_HTML;
+const sidebarIds = Array.from(sidebarHtml.matchAll(/\sid="([^"]+)"/g), match => match[1]);
+
+assert.equal(new Set(sidebarIds).size, sidebarIds.length, 'Google Sheet 控制臺不應出現重複 id');
+assert.equal(sidebarHtml.includes('--primary-container'), false);
+assert.equal(sidebarHtml.includes('T-SCHOOL · Control'), false);
+assert.equal(sidebarHtml.includes('id="notification-preview"'), true);
+assert.equal(sidebarHtml.includes('id="description-preview"'), true);
+assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
+assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
+
 const generatedCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-mvp',
   sourceApiUrl: scheduleData.API_URL,

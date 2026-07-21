@@ -524,7 +524,7 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
     settings.pausedReason = '偵測到新學期，請重新選擇課程。';
     saveSettings_(settings);
     deleteAutoSyncTriggers();
-    sendActionRequiredSafe_(settings, '新學期課表已更新', '系統已暫停自動同步並保留原有日曆事件。請開啟行程同步控制台，重新選擇本學期課程。');
+    sendActionRequiredSafe_(settings, '新學期課表已更新', '系統已暫停自動同步並保留原有日曆事件。請開啟行程同步控制臺，重新選擇本學期課程。');
   }
 
   if (!quiet) {
@@ -559,7 +559,7 @@ function registerNewTitles_(settings, source) {
   });
 
   saveSettings_(settings);
-  sendActionRequiredSafe_(settings, '發現新的課表項目', '下列項目已先加入日曆，請在控制台確認是否屬於你：\\n\\n' + discovered.join('\\n'));
+  sendActionRequiredSafe_(settings, '發現新的課表項目', '下列項目已先加入日曆，請在控制臺確認是否屬於你：\\n\\n' + discovered.join('\\n'));
   return settings;
 }
 
@@ -655,7 +655,7 @@ function assertSafeDeletionPlan_(plan, oldState, reason) {
   const deletedCount = plan.deletions.length;
 
   if (oldCount >= 5 && deletedCount >= 5 && deletedCount / oldCount > 0.4) {
-    throw new Error('來源變動會一次移除過多事件，系統已停止同步以保護日曆。請開啟控制台檢查課表來源。');
+    throw new Error('來源變動會一次移除過多事件，系統已停止同步以保護日曆。請開啟控制臺檢查課表來源。');
   }
 }
 
@@ -1282,7 +1282,7 @@ function sendFirstSetupNotificationSafe_(result) {
 
 function notifySyncFailureSafe_(error) {
   try {
-    sendEmail_(loadSettings_(), '[T-SCHOOL] 行程同步失敗', userFacingError_(error) + '\\n\\n請開啟行程同步控制台查看狀態。');
+    sendEmail_(loadSettings_(), '[T-SCHOOL] 行程同步失敗', userFacingError_(error) + '\\n\\n請開啟行程同步控制臺查看狀態。');
   } catch (mailError) {
     Logger.log('同步失敗通知寄送失敗：' + mailError.message);
   }
@@ -1320,7 +1320,7 @@ function getNotificationEmail_(settings) {
 }
 
 function assertSingleEmail_(email) {
-  if (!/^[^\\s@,;<>]+@[^\\s@,;<>]+$/.test(String(email || ''))) throw new Error('找不到可用的通知 Email，請在控制台填入單一信箱。');
+  if (!/^[^\\s@,;<>]+@[^\\s@,;<>]+$/.test(String(email || ''))) throw new Error('找不到可用的通知 Email，請在控制臺填入單一信箱。');
 }
 
 function formatChangeDigest_(result, settings) {

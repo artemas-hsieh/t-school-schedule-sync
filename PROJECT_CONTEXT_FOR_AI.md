@@ -165,6 +165,9 @@ changes. Historical planning material is archived under `archive/`.
 - Home-to-first-step entry currently uses a normal page-scroll animation instead
   of the card snap animation. Step 1 must reach its actual sticky coordinate
   before its same-direction cooldown or next-step wheel accumulation can start.
+- The generated Google Sheet sidebar follows the same four-color palette, compact
+  radii, 4 px spacing grid, line-based section hierarchy, and responsive motion
+  language as the installer. Do not restore the archived Material 3 card style.
 
 ## Deployment and cache
 

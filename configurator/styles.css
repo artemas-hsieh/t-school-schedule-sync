@@ -3312,3 +3312,32 @@ select,
     line-height: 44px;
   }
 }
+
+/* Final mobile hero geometry must follow the desktop token overrides above. */
+@media (max-width: 600px) {
+  .hero-sticky {
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .hero-visual {
+    align-self: start;
+    width: 100%;
+    height: clamp(252px, 36svh, 300px);
+    min-height: 0;
+  }
+
+  .visual-board {
+    width: 46%;
+    height: clamp(196px, 27svh, 220px);
+    box-shadow: 7px 7px 0 rgba(20, 33, 29, 0.08);
+  }
+
+  .schedule-board {
+    top: var(--space-4);
+  }
+
+  .calendar-board {
+    top: calc(var(--space-8) + var(--space-1));
+  }
+}

@@ -771,7 +771,7 @@ function updateOutput() {
   if (!ready || typeof window.buildAppsScriptCode !== 'function') {
     elements.generatedCode.value = state.sourceError
       ? '// 課表來源目前無法讀取，請重新嘗試後再複製。'
-      : '// 正在準備控制台程式碼…';
+      : '// 正在準備控制臺程式碼…';
     return;
   }
 
@@ -792,7 +792,7 @@ async function copyGeneratedCode() {
     document.execCommand('copy');
   }
 
-  showToast('已複製控制台程式碼');
+  showToast('已複製控制臺程式碼');
 }
 
 function showToast(message) {
@@ -858,9 +858,16 @@ function initHeroScroll() {
     const distance = Math.max(1, rect.height - window.innerHeight);
     const progress = clamp(-rect.top / distance, 0, 1);
     const visual = stage.querySelector('.hero-visual');
+    const scheduleBoard = stage.querySelector('.schedule-board');
+    const calendarBoard = stage.querySelector('.calendar-board');
     const width = visual ? visual.clientWidth : window.innerWidth;
     const isNarrow = window.matchMedia('(max-width: 600px)').matches;
-    const distanceX = width * (isNarrow ? 0.48 : 0.55);
+    const measuredDistance = scheduleBoard && calendarBoard
+      ? calendarBoard.offsetLeft - scheduleBoard.offsetLeft
+      : 0;
+    const distanceX = measuredDistance > 0
+      ? measuredDistance * (isNarrow ? 0.92 : 1)
+      : width * (isNarrow ? 0.48 : 0.55);
 
     tiles.forEach((tile, index) => {
       const localProgress = clamp((progress - index * MOTION_CONFIG.heroTileStagger) / MOTION_CONFIG.heroTileTravel, 0, 1);
@@ -1045,7 +1052,7 @@ function initStepJourney() {
     }
 
     if (elements.headerStatus) {
-      const labels = ['選擇年級', '選擇課程', '同步與通知', '檢查設定', '安裝控制台'];
+      const labels = ['選擇年級', '選擇課程', '同步與通知', '檢查設定', '安裝控制臺'];
       elements.headerStatus.textContent = labels[activeStep - 1];
     }
 
