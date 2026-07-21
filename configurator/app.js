@@ -29,10 +29,37 @@ const SYNC_PRESETS = [
   { label: '22:00', hour: 22 }
 ];
 
+// Journey tuning: releaseDelta starts at a card edge; snapTargetOffset positions the target section.
+const MOTION_CONFIG = Object.freeze({
+  withinStack: {
+    releaseDelta: 800,
+    snapDuration: 0.48,
+    snapCooldown: 500,
+    contentScrollRearmDelay: 180,
+    edgeTolerance: 2,
+    snapTargetOffset: 0
+  },
+  betweenStacks: {
+    releaseDelta: 800,
+    snapDuration: 0.64,
+    snapCooldown: 1000,
+    contentScrollRearmDelay: 220,
+    edgeTolerance: 2,
+    snapTargetOffset: 0
+  },
+  activationLineRatio: 0.32,
+  activationLineMax: 190,
+  firstStepSettleTolerance: 3,
+  homeEntryScrollDuration: 0.9,
+  heroTileTravel: 0.72,
+  heroTileStagger: 0.08
+});
+
 const state = {
   activeFilter: '全部',
   selectedCoursesExpanded: false,
   selectedByGrade: new Map(),
+  excludedActivitiesByGrade: new Map(),
   sourceByGrade: new Map(),
   sourceSummary: null,
   sourceLoading: false,
@@ -73,7 +100,11 @@ const elements = {
   progressCurrent: document.querySelector('#progress-current'),
   headerStatus: document.querySelector('#header-status'),
   codeWindow: document.querySelector('#code-window'),
-  fullCodeToggle: document.querySelector('#full-code-toggle')
+  fullCodeToggle: document.querySelector('#full-code-toggle'),
+  notificationPreview: document.querySelector('#notification-preview'),
+  descriptionPreview: document.querySelector('#description-preview'),
+  previousStep: document.querySelector('#previous-step'),
+  nextStep: document.querySelector('#next-step')
 };
 
 async function init() {
@@ -100,6 +131,7 @@ async function init() {
   elements.notifyHour.value = String(DEFAULTS.notifyHour);
   updateNotifyHourState();
   updateEventOptionVisibility();
+  renderFormatPreviews();
   bindEvents();
   setupValidation();
   initVisualExperience();
@@ -130,6 +162,15 @@ function bindEvents() {
 
     if (event.target === elements.notificationPreset || event.target === elements.descriptionPreset || event.target === elements.reminderMode) {
       updateEventOptionVisibility();
+    }
+
+    if (
+      event.target === elements.notificationPreset ||
+      event.target === elements.descriptionPreset ||
+      event.target === elements.customNotification ||
+      event.target === elements.customDescription
+    ) {
+      renderFormatPreviews();
     }
 
     updateOutput();
@@ -455,6 +496,61 @@ function updateEventOptionVisibility() {
   elements.reminderMinutesField.hidden = elements.reminderMode.value === 'none';
 }
 
+function renderFormatPreviews() {
+  const notificationTemplates = {
+    compact: '{type}｜{course}｜{newDate} {newPeriod}',
+    standard: '{type}｜{course}\n原：{oldDate} {oldPeriod} {oldLocation}\n新：{newDate} {newPeriod} {newLocation}',
+    detailed: '{type}｜{course}\n原：{oldDate} {oldPeriod}｜{oldTime}｜{oldLocation}\n新：{newDate} {newPeriod}｜{newTime}｜{newLocation}',
+    custom: elements.customNotification.value.trim() || DEFAULTS.customNotification
+  };
+  const descriptionTemplates = {
+    compact: '{week} 週｜星期{weekday}｜第 {period} 節\n{location}',
+    standard: '第 {week} 週｜星期{weekday}｜第 {period} 節\n時間：{startTime}–{endTime}\n地點：{location}\n課表更新：{sourceUpdatedAt}',
+    detailed: '{course}\n{date}（{weekday}）\n第 {period} 節｜{startTime}–{endTime}\n地點：{location}\n課表更新：{sourceUpdatedAt}',
+    custom: elements.customDescription.value.trim() || DEFAULTS.customDescription
+  };
+  const values = {
+    type: '時間調整',
+    course: '公民',
+    oldDate: '3/12（四）',
+    newDate: '3/13（五）',
+    oldPeriod: '第 3 節',
+    newPeriod: '第 4 節',
+    oldTime: '10:10–11:00',
+    newTime: '11:10–12:00',
+    oldLocation: '402 教室',
+    newLocation: '專題教室',
+    date: '2026/03/13',
+    weekday: '五',
+    week: '4',
+    period: '4',
+    startTime: '11:10',
+    endTime: '12:00',
+    location: '專題教室',
+    sourceUpdatedAt: '2026/03/10 18:00'
+  };
+
+  if (elements.notificationPreview) {
+    elements.notificationPreview.textContent = renderExampleTemplate(
+      notificationTemplates[elements.notificationPreset.value] || notificationTemplates.standard,
+      values
+    );
+  }
+
+  if (elements.descriptionPreview) {
+    elements.descriptionPreview.textContent = renderExampleTemplate(
+      descriptionTemplates[elements.descriptionPreset.value] || descriptionTemplates.standard,
+      values
+    );
+  }
+}
+
+function renderExampleTemplate(template, values) {
+  return String(template || '').replace(/\{([A-Za-z]+)\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match
+  );
+}
+
 function getSelectedCourses(gradeName) {
   const grade = gradeName || getCurrentGrade();
 
@@ -465,10 +561,35 @@ function getSelectedCourses(gradeName) {
   return state.selectedByGrade.get(grade);
 }
 
+function getExcludedActivities(gradeName) {
+  const grade = gradeName || getCurrentGrade();
+
+  if (!state.excludedActivitiesByGrade.has(grade)) {
+    state.excludedActivitiesByGrade.set(grade, new Set());
+  }
+
+  return state.excludedActivitiesByGrade.get(grade);
+}
+
 function handleCourseSelectionChange(event) {
-  const input = event.target.closest('input[data-course]');
+  const input = event.target.closest('input[data-course], input[data-activity]');
 
   if (!input) {
+    return;
+  }
+
+  if (input.hasAttribute('data-activity')) {
+    const excluded = getExcludedActivities();
+
+    if (input.checked) {
+      excluded.delete(input.value);
+    } else {
+      excluded.add(input.value);
+    }
+
+    renderCourses();
+    updateOutput();
+    renderSettingsSummary();
     return;
   }
 
@@ -523,16 +644,17 @@ function renderCourses() {
     }
   }
 
-  if (state.activeFilter === '全部' || state.activeFilter === '活動') {
+  if (state.activeFilter === '全部' || state.activeFilter === '活動' || state.activeFilter === '已選') {
     const activities = catalog.activities.filter(item =>
-      normalizeSearchText(item.title).includes(query)
+      normalizeSearchText(item.title).includes(query) &&
+      (state.activeFilter !== '已選' || isActivitySelected(item.title))
     );
 
     if (activities.length > 0) {
       sections.push(renderCourseSection(
         '全年級／全校活動',
         activities.map(renderActivityCard).join(''),
-        elements.includeActivities.checked ? '依上方開關自動同步' : '目前已關閉'
+        elements.includeActivities.checked ? '預設全選，可取消個別活動' : '目前已關閉'
       ));
     }
   }
@@ -563,13 +685,12 @@ function renderCourseCard(item) {
 
 function renderActivityCard(item) {
   const enabled = elements.includeActivities.checked;
-  return [
-    `<div class="course-card activity-card${enabled ? ' is-selected' : ''}" aria-disabled="${!enabled}">`,
-    '<span class="activity-marker" aria-hidden="true"></span>',
-    `<span>${escapeHtml(item.title)}</span>`,
-    `<small>${enabled ? '自動同步' : '未同步'}</small>`,
-    '</div>'
-  ].join('');
+  const selected = isActivitySelected(item.title);
+  return `<label class="course-card activity-card" data-cursor-label="${selected ? '取消活動' : '選取活動'}"><input type="checkbox" data-activity value="${escapeHtml(item.title)}" ${selected ? 'checked' : ''} ${enabled ? '' : 'disabled'}><span>${escapeHtml(item.title)}</span><small>${selected ? '已同步' : '未同步'}</small></label>`;
+}
+
+function isActivitySelected(title) {
+  return elements.includeActivities.checked && !getExcludedActivities().has(title);
 }
 
 function renderSelectedCourses() {
@@ -577,15 +698,20 @@ function renderSelectedCourses() {
     a.localeCompare(b, 'zh-Hant')
   );
 
-  elements.courseCount.textContent = `已選 ${selected.length} 門課`;
+  const activities = state.sourceSummary ? state.sourceSummary.catalog.activities : [];
+  const selectedActivities = activities.filter(item => isActivitySelected(item.title));
+  elements.courseCount.textContent = `已選 ${selected.length} 門課 · ${selectedActivities.length} 項活動`;
   elements.selectedToggle.textContent = state.selectedCoursesExpanded ? '收合' : '展開';
   elements.selectedToggle.dataset.cursorLabel = state.selectedCoursesExpanded ? '收合' : '展開';
   elements.selectedToggle.setAttribute('aria-expanded', String(state.selectedCoursesExpanded));
   elements.selectedCourses.hidden = !state.selectedCoursesExpanded;
 
-  elements.selectedCourses.innerHTML = selected.length === 0
-    ? '<span class="empty-selected">尚未選擇課程</span>'
-    : selected.map(course => `<span class="pill">${escapeHtml(course)}</span>`).join('');
+  const selectedItems = selected
+    .map(course => `<span class="pill">${escapeHtml(course)}</span>`)
+    .concat(selectedActivities.map(item => `<span class="pill activity-pill">${escapeHtml(item.title)}</span>`));
+  elements.selectedCourses.innerHTML = selectedItems.length === 0
+    ? '<span class="empty-selected">尚未選擇課程或活動</span>'
+    : selectedItems.join('');
 }
 
 function getCurrentGrade() {
@@ -616,6 +742,9 @@ function getSettings() {
     autoSyncHours,
     notifySyncHour: notifyHour,
     includeActivities: elements.includeActivities.checked,
+    excludedActivities: Array.from(getExcludedActivities()).sort((a, b) =>
+      a.localeCompare(b, 'zh-Hant')
+    ),
     selectedCourses: Array.from(getSelectedCourses()).sort((a, b) =>
       a.localeCompare(b, 'zh-Hant')
     ),
@@ -734,8 +863,8 @@ function initHeroScroll() {
     const distanceX = width * (isNarrow ? 0.48 : 0.55);
 
     tiles.forEach((tile, index) => {
-      const localProgress = clamp((progress - index * 0.09) / 0.58, 0, 1);
-      const eased = 1 - Math.pow(1 - localProgress, 3);
+      const localProgress = clamp((progress - index * MOTION_CONFIG.heroTileStagger) / MOTION_CONFIG.heroTileTravel, 0, 1);
+      const eased = localProgress * localProgress * localProgress * (localProgress * (localProgress * 6 - 15) + 10);
       const arc = Math.sin(Math.PI * eased) * (isNarrow ? -15 : -30);
       const settleY = (index + 1) * (isNarrow ? 2 : 5);
       tile.style.transform = `translate3d(${distanceX * eased}px, ${arc + settleY * eased}px, 0)`;
@@ -768,21 +897,121 @@ function initStepJourney() {
   let activeStep = 1;
   let frameRequested = false;
   let progressTimer = 0;
+  let releaseDirection = 0;
+  let releaseProgress = 0;
+  let cooldownDirection = 0;
+  let cooldownUntil = 0;
+  let contentScrollLockedStep = 0;
+  let contentScrollUnlockNotBefore = 0;
+  let contentScrollUnlockTimer = 0;
+  let firstStepEntryArmed = true;
 
   steps.forEach((step, index) => {
     step.style.setProperty('--step-index', String(index + 1));
   });
 
-  function scrollToStep(stepNumber) {
+  function getTransitionConfig(fromStepNumber, toStepNumber) {
+    const fromStep = steps[fromStepNumber - 1];
+    const toStep = steps[toStepNumber - 1];
+    const sameStack = Boolean(
+      fromStep &&
+      toStep &&
+      fromStep.closest('.card-stack') === toStep.closest('.card-stack')
+    );
+    return sameStack ? MOTION_CONFIG.withinStack : MOTION_CONFIG.betweenStacks;
+  }
+
+  function getStepScrollTarget(target, offset) {
+    const stack = target.closest('.card-stack');
+    const stackSteps = stack ? Array.from(stack.children).filter(child => child.classList.contains('journey-step')) : [];
+    const stackIndex = Math.max(0, stackSteps.indexOf(target));
+    const stackTop = stack ? stack.getBoundingClientRect().top + window.scrollY : target.offsetTop;
+    const stickyTop = Number.parseFloat(window.getComputedStyle(target).top) || 0;
+    return stackTop + stackIndex * target.offsetHeight - stickyTop + offset;
+  }
+
+  function scheduleContentScrollUnlock(config) {
+    clearTimeout(contentScrollUnlockTimer);
+    const delay = Math.max(
+      config.contentScrollRearmDelay,
+      contentScrollUnlockNotBefore - Date.now()
+    );
+
+    contentScrollUnlockTimer = window.setTimeout(() => {
+      contentScrollLockedStep = 0;
+      contentScrollUnlockNotBefore = 0;
+    }, Math.max(0, delay));
+  }
+
+  function lockContentScroll(stepNumber, config, duration) {
+    contentScrollLockedStep = stepNumber;
+    contentScrollUnlockNotBefore = Date.now() + duration * 1000;
+    scheduleContentScrollUnlock(config);
+  }
+
+  function scrollToStep(stepNumber, options) {
     const target = document.getElementById(`step-${stepNumber}`);
+    const config = getTransitionConfig(activeStep, stepNumber);
+    const duration = options && Number.isFinite(options.duration)
+      ? options.duration
+      : config.snapDuration;
+    const offset = options && Number.isFinite(options.offset)
+      ? options.offset
+      : config.snapTargetOffset;
 
     if (target) {
+      const scrollTarget = getStepScrollTarget(target, offset);
+      lockContentScroll(stepNumber, config, duration);
+
       if (window.tschoolLenis && !prefersReducedMotion()) {
-        window.tschoolLenis.scrollTo(target, { offset: 0, duration: 0.82 });
+        window.tschoolLenis.scrollTo(scrollTarget, { duration });
       } else {
-        target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+        window.scrollTo({
+          top: scrollTarget,
+          behavior: prefersReducedMotion() ? 'auto' : 'smooth'
+        });
       }
     }
+  }
+
+  function enterFirstStepWithPageScroll() {
+    const target = steps[0];
+
+    if (!target) {
+      return;
+    }
+
+    const config = MOTION_CONFIG.withinStack;
+    const scrollTarget = getStepScrollTarget(target, config.snapTargetOffset);
+    firstStepEntryArmed = true;
+
+    if (window.tschoolLenis && !prefersReducedMotion()) {
+      window.tschoolLenis.scrollTo(scrollTarget, {
+        duration: MOTION_CONFIG.homeEntryScrollDuration
+      });
+    } else {
+      window.scrollTo({ top: scrollTarget, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    }
+  }
+
+  function resetReleaseProgress() {
+    releaseDirection = 0;
+    releaseProgress = 0;
+  }
+
+  function startDirectionalCooldown(direction, config) {
+    cooldownDirection = direction;
+    cooldownUntil = Date.now() + config.snapCooldown;
+  }
+
+  function isDirectionCoolingDown(direction) {
+    if (Date.now() >= cooldownUntil) {
+      cooldownDirection = 0;
+      cooldownUntil = 0;
+      return false;
+    }
+
+    return cooldownDirection === direction;
   }
 
   function setActiveStep(stepNumber) {
@@ -819,17 +1048,43 @@ function initStepJourney() {
       const labels = ['選擇年級', '選擇課程', '同步與通知', '檢查設定', '安裝控制台'];
       elements.headerStatus.textContent = labels[activeStep - 1];
     }
+
+    if (elements.previousStep && elements.nextStep) {
+      elements.previousStep.disabled = activeStep === 1;
+      elements.nextStep.disabled = activeStep === steps.length;
+      elements.previousStep.dataset.stepTarget = String(Math.max(1, activeStep - 1));
+      elements.nextStep.dataset.stepTarget = String(Math.min(steps.length, activeStep + 1));
+    }
+
+    resetReleaseProgress();
   }
 
   function updateFromScroll() {
     frameRequested = false;
 
     if (wizard && wizard.getBoundingClientRect().top > window.innerHeight * 0.68) {
+      firstStepEntryArmed = true;
+      setActiveStep(1);
+      updateExitProgress(Math.min(MOTION_CONFIG.activationLineMax, window.innerHeight * MOTION_CONFIG.activationLineRatio));
       return;
     }
 
-    const targetY = Math.min(190, window.innerHeight * 0.32);
+    const targetY = Math.min(
+      MOTION_CONFIG.activationLineMax,
+      window.innerHeight * MOTION_CONFIG.activationLineRatio
+    );
+    const firstStepTop = steps[0].getBoundingClientRect().top;
+    const firstStepStickyTop = (Number.parseFloat(window.getComputedStyle(steps[0]).top) || 0)
+      - MOTION_CONFIG.withinStack.snapTargetOffset;
     let closestStep = 1;
+
+    if (
+      firstStepEntryArmed &&
+      firstStepTop <= firstStepStickyTop + MOTION_CONFIG.firstStepSettleTolerance
+    ) {
+      firstStepEntryArmed = false;
+      startDirectionalCooldown(1, MOTION_CONFIG.withinStack);
+    }
 
     steps.forEach(step => {
       const rect = step.getBoundingClientRect();
@@ -881,8 +1136,89 @@ function initStepJourney() {
     if (editButton) scrollToStep(Number(editButton.dataset.editStep));
   });
 
+  wizard.addEventListener('wheel', event => {
+    const direction = Math.sign(event.deltaY);
+
+    if (!direction) {
+      return;
+    }
+
+    const step = steps[activeStep - 1];
+    const card = step ? step.querySelector('.step-card') : null;
+
+    if (!step || !card) {
+      return;
+    }
+
+    const targetStepNumber = activeStep + direction;
+    const hasTargetStep = targetStepNumber >= 1 && targetStepNumber <= steps.length;
+    const config = hasTargetStep
+      ? getTransitionConfig(activeStep, targetStepNumber)
+      : MOTION_CONFIG.betweenStacks;
+    const atTop = card.scrollTop <= config.edgeTolerance;
+    const atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - config.edgeTolerance;
+    const cardCanScroll = direction > 0 ? !atBottom : !atTop;
+    const eventInsideCard = card.contains(event.target);
+
+    if (activeStep === 1 && firstStepEntryArmed) {
+      resetReleaseProgress();
+      return;
+    }
+
+    // Momentum from the snap gesture must end before the target card can scroll.
+    if (cardCanScroll) {
+      resetReleaseProgress();
+
+      if (contentScrollLockedStep === activeStep) {
+        event.preventDefault();
+        event.stopPropagation();
+        scheduleContentScrollUnlock(config);
+        return;
+      }
+
+      if (!eventInsideCard) {
+        event.preventDefault();
+        event.stopPropagation();
+        card.scrollTop += event.deltaY;
+      }
+      return;
+    }
+
+    if (isDirectionCoolingDown(direction)) {
+      event.preventDefault();
+      event.stopPropagation();
+      resetReleaseProgress();
+      return;
+    }
+
+    if (!hasTargetStep) {
+      resetReleaseProgress();
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (releaseDirection !== direction) {
+      releaseDirection = direction;
+      releaseProgress = 0;
+    }
+
+    const multiplier = event.deltaMode === 1 ? 16 : (event.deltaMode === 2 ? window.innerHeight : 1);
+    releaseProgress += Math.abs(event.deltaY * multiplier);
+
+    if (releaseProgress >= config.releaseDelta) {
+      resetReleaseProgress();
+      startDirectionalCooldown(direction, config);
+      scrollToStep(targetStepNumber, {
+        duration: config.snapDuration,
+        offset: config.snapTargetOffset
+      });
+    }
+  }, { passive: false, capture: true });
+
   if (startButton) {
-    startButton.addEventListener('click', () => scrollToStep(1));
+    startButton.addEventListener('click', enterFirstStepWithPageScroll);
   }
 
   window.addEventListener('scroll', requestUpdate, { passive: true });
@@ -923,7 +1259,10 @@ function renderSettingsSummary() {
     ? `${selected.length} 門｜${selected.slice(0, 4).join('、')}${selected.length > 4 ? '…' : ''}`
     : '尚未選擇課程';
   const hours = checkedHours.length > 0 ? checkedHours.join('、') : `${pad2(Number(elements.notifyHour.value || 5))}:00`;
-  const activityLabel = elements.includeActivities.checked ? '包含年級與全校活動' : '不同步年級與全校活動';
+  const activityCount = state.sourceSummary
+    ? state.sourceSummary.catalog.activities.filter(item => isActivitySelected(item.title)).length
+    : 0;
+  const activityLabel = elements.includeActivities.checked ? `包含 ${activityCount} 項年級與全校活動` : '不同步年級與全校活動';
 
   elements.settingsSummary.innerHTML = [
     renderSummaryItem('年級', getCurrentGrade(), 1),

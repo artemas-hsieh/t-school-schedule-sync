@@ -256,10 +256,10 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>課程選擇</h2><span id="course-count">0 門</span></div>
+        <div class="section-head"><h2>課程與活動</h2><span id="course-count">0 門課 · 0 項活動</span></div>
         <div class="course-toolbar">
-          <input type="search" id="course-search" placeholder="搜尋課程" aria-label="搜尋課程">
-          <button type="button" class="small-button" id="clear-courses">清除</button>
+          <input type="search" id="course-search" placeholder="搜尋課程或活動" aria-label="搜尋課程或活動">
+          <button type="button" class="small-button" id="clear-courses">清除課程</button>
         </div>
         <div class="course-list" id="course-list"></div>
         <label class="switch">
@@ -319,6 +319,7 @@
     (function () {
       var model = null;
       var selectedCourses = new Set();
+      var excludedActivities = new Set();
       var busy = false;
 
       function byId(id) { return document.getElementById(id); }
@@ -333,6 +334,7 @@
         model = data;
         var settings = data.settings;
         selectedCourses = new Set(settings.selectedCourses || []);
+        excludedActivities = new Set(settings.excludedActivities || []);
         document.querySelector('input[name="grade"][value="' + settings.gradeName + '"]').checked = true;
         byId('include-activities').checked = settings.includeActivities;
         byId('email').value = settings.notificationEmail || '';
@@ -378,8 +380,13 @@
         if (!model) return;
         var query = normalize(byId('course-search').value);
         var courses = (model.source.catalog.courses || []).filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
-        byId('course-list').innerHTML = courses.length ? courses.map(function (item) { return '<label class="choice"><input type="checkbox" value="' + escapeHtml(item.title) + '" ' + (selectedCourses.has(item.title) ? 'checked' : '') + '><span>' + escapeHtml(item.title) + '</span></label>'; }).join('') : '<p class="empty">找不到符合的課程</p>';
-        byId('course-count').textContent = selectedCourses.size + ' 門';
+        var activities = (model.source.catalog.activities || []).filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
+        var includeActivities = byId('include-activities').checked;
+        var courseHtml = courses.map(function (item) { return '<label class="choice"><input type="checkbox" data-kind="course" value="' + escapeHtml(item.title) + '" ' + (selectedCourses.has(item.title) ? 'checked' : '') + '><span>' + escapeHtml(item.title) + '</span></label>'; }).join('');
+        var activityHtml = activities.map(function (item) { var checked = includeActivities && !excludedActivities.has(item.title); return '<label class="choice"><input type="checkbox" data-kind="activity" value="' + escapeHtml(item.title) + '" ' + (checked ? 'checked' : '') + ' ' + (includeActivities ? '' : 'disabled') + '><span>活動｜' + escapeHtml(item.title) + '</span></label>'; }).join('');
+        byId('course-list').innerHTML = courseHtml + activityHtml || '<p class="empty">找不到符合的課程或活動</p>';
+        var selectedActivityCount = (model.source.catalog.activities || []).filter(function (item) { return includeActivities && !excludedActivities.has(item.title); }).length;
+        byId('course-count').textContent = selectedCourses.size + ' 門課 · ' + selectedActivityCount + ' 項活動';
       }
 
       function renderPending(items) {
@@ -407,6 +414,7 @@
           gradeName: getCheckedGrade(),
           selectedCourses: Array.from(selectedCourses),
           includeActivities: byId('include-activities').checked,
+          excludedActivities: Array.from(excludedActivities),
           calendarId: byId('calendar').value,
           notificationEmail: byId('email').value.trim(),
           autoSyncEnabled: byId('auto-sync').checked,
@@ -459,8 +467,10 @@
       }
 
       document.addEventListener('change', function (event) {
-        if (event.target.matches('#course-list input')) { event.target.checked ? selectedCourses.add(event.target.value) : selectedCourses.delete(event.target.value); renderCourses(); }
-        if (event.target.name === 'grade') { setBusy(true, '正在讀取年級課表…'); server('getSourceCatalogForUi', event.target.value).then(function (data) { model.source = data; selectedCourses = new Set(); renderSource(data); renderCourses(); }).catch(function (error) { showToast(error.message); }).finally(function () { setBusy(false); }); }
+        if (event.target.matches('#course-list input[data-kind="course"]')) { event.target.checked ? selectedCourses.add(event.target.value) : selectedCourses.delete(event.target.value); renderCourses(); }
+        if (event.target.matches('#course-list input[data-kind="activity"]')) { event.target.checked ? excludedActivities.delete(event.target.value) : excludedActivities.add(event.target.value); renderCourses(); }
+        if (event.target.id === 'include-activities') renderCourses();
+        if (event.target.name === 'grade') { setBusy(true, '正在讀取年級課表…'); server('getSourceCatalogForUi', event.target.value).then(function (data) { model.source = data; selectedCourses = new Set(); excludedActivities = new Set(); renderSource(data); renderCourses(); }).catch(function (error) { showToast(error.message); }).finally(function () { setBusy(false); }); }
         if (event.target.id === 'notification-preset' || event.target.id === 'description-preset' || event.target.id === 'reminder-mode') updateConditionalFields();
       });
       byId('course-search').addEventListener('input', renderCourses);

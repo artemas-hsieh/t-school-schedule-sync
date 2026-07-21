@@ -21,6 +21,7 @@ const generatedCode = global.buildAppsScriptCode({
   autoSyncHours: [5, 12, 18, 22],
   notifySyncHour: 5,
   includeActivities: true,
+  excludedActivities: ['高一全校活動'],
   selectedCourses: ['公民'],
   notificationPreset: 'standard',
   customNotification: '{type}｜{course}',

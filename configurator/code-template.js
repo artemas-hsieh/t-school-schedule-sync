@@ -50,7 +50,7 @@
   window.buildAppsScriptCode = function buildAppsScriptCode(settings) {
     const notifyHour = normalizeHour(settings.notifySyncHour, 5);
     const initialSettings = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       appVersion: settings.appVersion || '2.0.0-mvp',
       setupComplete: false,
       gradeName: settings.gradeName || '高一',
@@ -59,6 +59,7 @@
       notificationEmail: settings.notificationEmail || '',
       selectedCourses: settings.selectedCourses || [],
       includeActivities: settings.includeActivities !== false,
+      excludedActivities: settings.excludedActivities || [],
       autoSyncEnabled: true,
       autoSyncHours: normalizeHourArray(settings.autoSyncHours, notifyHour),
       notifySyncHour: notifyHour,
@@ -80,7 +81,7 @@
     const sidebarHtml = window.TSCHOOL_SIDEBAR_HTML || '';
 
     return `const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-mvp')};
-const SETTINGS_SCHEMA_VERSION = 2;
+const SETTINGS_SCHEMA_VERSION = 3;
 const TIMEZONE = 'Asia/Taipei';
 const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
 const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
@@ -289,9 +290,12 @@ function sanitizeSettingsInput_(input, previous, source) {
   const gradeName = sanitizeGrade_(value.gradeName);
   const gradeChanged = previous.gradeName !== gradeName;
   const selectedCourses = uniqueStrings_(Array.isArray(value.selectedCourses) ? value.selectedCourses : []);
+  const excludedActivities = uniqueStrings_(Array.isArray(value.excludedActivities) ? value.excludedActivities : []);
   const sourceTitles = source.catalog.all.map(item => item.title);
   const sourceKeys = sourceTitles.map(normalizeTitle_);
   const cleanSelected = selectedCourses.filter(title => sourceKeys.indexOf(normalizeTitle_(title)) !== -1);
+  const activityKeys = source.catalog.activities.map(item => normalizeTitle_(item.title));
+  const cleanExcludedActivities = excludedActivities.filter(title => activityKeys.indexOf(normalizeTitle_(title)) !== -1);
   const notificationEmail = String(value.notificationEmail || '').trim();
 
   if (notificationEmail) {
@@ -330,6 +334,7 @@ function sanitizeSettingsInput_(input, previous, source) {
     gradeName,
     selectedCourses: cleanSelected,
     includeActivities: value.includeActivities !== false,
+    excludedActivities: cleanExcludedActivities,
     calendarId,
     notificationEmail,
     autoSyncEnabled: value.autoSyncEnabled !== false,
@@ -512,6 +517,7 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
 
   if (settings.pendingTermKey !== source.termKey) {
     settings.selectedCourses = [];
+    settings.excludedActivities = [];
     settings.pendingTitles = [];
     settings.pendingTermKey = source.termKey;
     settings.autoSyncEnabled = false;
@@ -561,6 +567,10 @@ function shouldIncludeEvent_(event, settings) {
   const normalized = normalizeTitle_(event.originalTitle);
 
   if (settings.excludedTitles.some(title => normalizeTitle_(title) === normalized)) {
+    return false;
+  }
+
+  if (event.type === 'activity' && settings.excludedActivities.some(title => normalizeTitle_(title) === normalized)) {
     return false;
   }
 
@@ -1075,6 +1085,7 @@ function loadSettings_() {
   const settings = Object.assign({}, DEFAULT_SETTINGS, stored || {});
   settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
   settings.selectedCourses = uniqueStrings_(settings.selectedCourses || []);
+  settings.excludedActivities = uniqueStrings_(settings.excludedActivities || []);
   settings.knownTitles = uniqueStrings_(settings.knownTitles || []);
   settings.pendingTitles = uniqueStrings_(settings.pendingTitles || []);
   settings.excludedTitles = uniqueStrings_(settings.excludedTitles || []);

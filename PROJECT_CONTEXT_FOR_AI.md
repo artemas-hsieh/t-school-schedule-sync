@@ -42,8 +42,8 @@ Grade query values are `一年級`, `二年級`, and `三年級`. Never persist 
 
 1. The installer loads the selected grade from the API and derives a deduplicated
    course catalog.
-2. The user chooses courses, activity inclusion, notification hours, description
-   format, and reminder behavior.
+2. The user chooses courses, activity inclusion or individual activity exclusions,
+   notification hours, description format, and reminder behavior.
 3. The installer generates one `Code.gs`.
 4. The user creates a blank Google Sheet, opens its bound Apps Script project,
    pastes the code, saves, and reloads the Sheet.
@@ -71,6 +71,9 @@ external settings account is required.
 - Newly discovered source titles are included once as pending review. A rejected
   title is excluded and all future managed events with the same normalized title
   are removed on the next sync.
+- Settings schema 3 stores explicit initial activity opt-outs in
+  `excludedActivities`. Activities remain opt-out by default: newly discovered
+  activities are included unless the user excludes that normalized title.
 
 ## Generated Apps Script surface
 
@@ -150,7 +153,18 @@ changes. Historical planning material is archived under `archive/`.
 - `1Campus/` must never be used as a visual or interaction reference.
 - The installer uses one vertical narrative flow, progressive disclosure, sticky
   stacked step cards, a separate code-output section, and contextual cursor motion.
+- The final block in `configurator/styles.css` defines the shared 4 px spacing
+  scale and type/line-height tokens. Update those tokens before adding component-
+  specific spacing values.
+- `MOTION_CONFIG` near the top of `configurator/app.js` separately controls
+  within-stack and between-stack wheel release distance, snap duration,
+  same-direction cooldown, content-scroll rearm delay, edge tolerance, and snap
+  target offset. The shared activation-line values control when the visible card
+  becomes the active step; hero tile timing is configured in the same object.
 - Motion must not block the task. Keep touch and reduced-motion fallbacks usable.
+- Home-to-first-step entry currently uses a normal page-scroll animation instead
+  of the card snap animation. Step 1 must reach its actual sticky coordinate
+  before its same-direction cooldown or next-step wheel accumulation can start.
 
 ## Deployment and cache
 
