@@ -67,7 +67,13 @@ const elements = {
   customTemplateField: document.querySelector('#custom-template-field'),
   reminderMode: document.querySelector('#reminder-mode'),
   reminderMinutes: document.querySelector('#reminder-minutes'),
-  reminderMinutesField: document.querySelector('#reminder-minutes-field')
+  reminderMinutesField: document.querySelector('#reminder-minutes-field'),
+  settingsSummary: document.querySelector('#settings-summary'),
+  progressNumber: document.querySelector('#progress-number'),
+  progressCurrent: document.querySelector('#progress-current'),
+  headerStatus: document.querySelector('#header-status'),
+  codeWindow: document.querySelector('#code-window'),
+  fullCodeToggle: document.querySelector('#full-code-toggle')
 };
 
 async function init() {
@@ -95,10 +101,11 @@ async function init() {
   updateNotifyHourState();
   updateEventOptionVisibility();
   bindEvents();
-  initMobileOutput();
   setupValidation();
+  initVisualExperience();
   renderCourses();
   updateOutput();
+  renderSettingsSummary();
   await loadGradeSchedule(DEFAULTS.gradeName);
 }
 
@@ -108,6 +115,7 @@ function bindEvents() {
       state.activeFilter = '全部';
       resetFilterTabs();
       elements.courseSearch.value = '';
+      renderSettingsSummary();
       loadGradeSchedule(event.target.value);
       return;
     }
@@ -125,6 +133,7 @@ function bindEvents() {
     }
 
     updateOutput();
+    renderSettingsSummary();
   });
 
   elements.courseSearch.addEventListener('input', renderCourses);
@@ -134,6 +143,7 @@ function bindEvents() {
     getSelectedCourses().clear();
     renderCourses();
     updateOutput();
+    renderSettingsSummary();
   });
 
   elements.copyCode.addEventListener('click', copyGeneratedCode);
@@ -153,7 +163,6 @@ function bindEvents() {
 
   bindFilterTabs();
   bindExpandTimeBtn();
-  bindMobileOutputToggle();
 }
 
 async function loadGradeSchedule(gradeName, options) {
@@ -167,6 +176,7 @@ async function loadGradeSchedule(gradeName, options) {
     renderSourceStatus();
     renderCourses();
     updateOutput();
+    renderSettingsSummary();
     return;
   }
 
@@ -199,6 +209,7 @@ async function loadGradeSchedule(gradeName, options) {
       renderSourceStatus();
       renderCourses();
       updateOutput();
+      renderSettingsSummary();
     }
   }
 }
@@ -309,7 +320,7 @@ function renderSyncPresets() {
   container.innerHTML = SYNC_PRESETS.map(({ label, hour }) => {
     const checkbox = document.querySelector(`input[name="syncHour"][value="${hour}"]`);
     const checked = checkbox ? checkbox.checked : DEFAULTS.syncHours.includes(hour);
-    return `<button type="button" class="preset-chip${checked ? ' active' : ''}" data-hour="${hour}" aria-pressed="${checked}">${escapeHtml(label)}</button>`;
+    return `<button type="button" class="preset-chip${checked ? ' active' : ''}" data-hour="${hour}" data-cursor-label="切換 ${escapeHtml(label)}" aria-pressed="${checked}">${escapeHtml(label)}</button>`;
   }).join('');
 
   container.querySelectorAll('.preset-chip').forEach(button => {
@@ -322,6 +333,7 @@ function renderSyncPresets() {
         checkbox.checked = !checkbox.checked;
         renderSyncPresets();
         updateOutput();
+        renderSettingsSummary();
       }
     });
   });
@@ -470,6 +482,7 @@ function handleCourseSelectionChange(event) {
 
   renderCourses();
   updateOutput();
+  renderSettingsSummary();
 }
 
 function renderCourses() {
@@ -480,13 +493,13 @@ function renderCourses() {
   }
 
   if (state.sourceError) {
-    elements.courseList.innerHTML = '<p class="empty-course-list">課表尚未載入，請先重新讀取來源。</p>';
+    elements.courseList.innerHTML = '<p class="empty-course-list">課表尚未載入，請先重新讀取來源</p>';
     renderSelectedCourses();
     return;
   }
 
   if (!state.sourceSummary) {
-    elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前課程。</p>';
+    elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前課程</p>';
     renderSelectedCourses();
     return;
   }
@@ -526,7 +539,7 @@ function renderCourses() {
 
   elements.courseList.innerHTML = sections.length > 0
     ? sections.join('')
-    : '<p class="empty-course-list">找不到符合條件的項目，請調整搜尋文字或篩選方式。</p>';
+    : '<p class="empty-course-list">找不到符合條件的項目，請調整搜尋文字或篩選方式</p>';
 
   renderSelectedCourses();
 }
@@ -545,7 +558,7 @@ function renderCourseSection(title, content, note) {
 
 function renderCourseCard(item) {
   const checked = getSelectedCourses().has(item.title) ? 'checked' : '';
-  return `<label class="course-card"><input type="checkbox" data-course value="${escapeHtml(item.title)}" ${checked}><span>${escapeHtml(item.title)}</span></label>`;
+  return `<label class="course-card" data-cursor-label="選取課程"><input type="checkbox" data-course value="${escapeHtml(item.title)}" ${checked}><span>${escapeHtml(item.title)}</span></label>`;
 }
 
 function renderActivityCard(item) {
@@ -566,6 +579,7 @@ function renderSelectedCourses() {
 
   elements.courseCount.textContent = `已選 ${selected.length} 門課`;
   elements.selectedToggle.textContent = state.selectedCoursesExpanded ? '收合' : '展開';
+  elements.selectedToggle.dataset.cursorLabel = state.selectedCoursesExpanded ? '收合' : '展開';
   elements.selectedToggle.setAttribute('aria-expanded', String(state.selectedCoursesExpanded));
   elements.selectedCourses.hidden = !state.selectedCoursesExpanded;
 
@@ -663,6 +677,359 @@ function showToast(message) {
   toast.classList.add('visible');
   clearTimeout(showToast._timer);
   showToast._timer = setTimeout(() => toast.classList.remove('visible'), 2400);
+}
+
+function initVisualExperience() {
+  initSmoothScroll();
+  initHeroScroll();
+  initStepJourney();
+  initCodeDisclosure();
+  initKineticCursor();
+}
+
+function initSmoothScroll() {
+  const canSmooth = window.matchMedia('(pointer: fine) and (prefers-reduced-motion: no-preference)').matches;
+
+  if (!canSmooth || typeof window.Lenis !== 'function') {
+    return;
+  }
+
+  const lenis = new window.Lenis({
+    lerp: 0.14,
+    smoothWheel: true,
+    wheelMultiplier: 1,
+    syncTouch: false,
+    allowNestedScroll: true,
+    anchors: true
+  });
+
+  window.tschoolLenis = lenis;
+
+  function raf(time) {
+    lenis.raf(time);
+    requestAnimationFrame(raf);
+  }
+
+  requestAnimationFrame(raf);
+}
+
+function initHeroScroll() {
+  const stage = document.getElementById('hero-stage');
+  const tiles = Array.from(document.querySelectorAll('.transfer-tile'));
+
+  if (!stage || tiles.length === 0) {
+    return;
+  }
+
+  let frameRequested = false;
+
+  function update() {
+    frameRequested = false;
+    const rect = stage.getBoundingClientRect();
+    const distance = Math.max(1, rect.height - window.innerHeight);
+    const progress = clamp(-rect.top / distance, 0, 1);
+    const visual = stage.querySelector('.hero-visual');
+    const width = visual ? visual.clientWidth : window.innerWidth;
+    const isNarrow = window.matchMedia('(max-width: 600px)').matches;
+    const distanceX = width * (isNarrow ? 0.48 : 0.55);
+
+    tiles.forEach((tile, index) => {
+      const localProgress = clamp((progress - index * 0.09) / 0.58, 0, 1);
+      const eased = 1 - Math.pow(1 - localProgress, 3);
+      const arc = Math.sin(Math.PI * eased) * (isNarrow ? -15 : -30);
+      const settleY = (index + 1) * (isNarrow ? 2 : 5);
+      tile.style.transform = `translate3d(${distanceX * eased}px, ${arc + settleY * eased}px, 0)`;
+    });
+
+    stage.classList.toggle('is-complete', progress > 0.82);
+  }
+
+  function requestUpdate() {
+    if (!frameRequested) {
+      frameRequested = true;
+      requestAnimationFrame(update);
+    }
+  }
+
+  window.addEventListener('scroll', requestUpdate, { passive: true });
+  window.addEventListener('resize', requestUpdate);
+  update();
+}
+
+function initStepJourney() {
+  const steps = Array.from(document.querySelectorAll('.journey-step'));
+  const startButton = document.getElementById('start-config');
+  const wizard = document.getElementById('wizard');
+
+  if (steps.length === 0) {
+    return;
+  }
+
+  let activeStep = 1;
+  let frameRequested = false;
+  let progressTimer = 0;
+
+  steps.forEach((step, index) => {
+    step.style.setProperty('--step-index', String(index + 1));
+  });
+
+  function scrollToStep(stepNumber) {
+    const target = document.getElementById(`step-${stepNumber}`);
+
+    if (target) {
+      if (window.tschoolLenis && !prefersReducedMotion()) {
+        window.tschoolLenis.scrollTo(target, { offset: 0, duration: 0.82 });
+      } else {
+        target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+      }
+    }
+  }
+
+  function setActiveStep(stepNumber) {
+    if (stepNumber === activeStep && steps.some(step => step.classList.contains('is-current'))) {
+      return;
+    }
+
+    activeStep = stepNumber;
+    steps.forEach(step => {
+      const number = Number(step.dataset.step);
+      const distance = activeStep - number;
+      step.classList.toggle('is-current', number === activeStep);
+      step.classList.toggle('is-past', number < activeStep);
+      step.classList.toggle('is-past-one', distance === 1);
+      step.classList.toggle('is-past-two', distance === 2);
+      step.classList.toggle('is-buried', distance > 2);
+      step.classList.toggle('is-future', number > activeStep);
+      step.toggleAttribute('inert', number !== activeStep);
+    });
+
+    if (elements.progressCurrent && elements.progressNumber) {
+      const previous = elements.progressCurrent.textContent;
+      elements.progressNumber.dataset.previous = previous;
+      elements.progressNumber.dataset.direction = Number(previous) < activeStep ? 'next' : 'previous';
+      elements.progressCurrent.textContent = String(activeStep);
+      elements.progressNumber.classList.remove('is-changing');
+      void elements.progressNumber.offsetWidth;
+      elements.progressNumber.classList.add('is-changing');
+      clearTimeout(progressTimer);
+      progressTimer = window.setTimeout(() => elements.progressNumber.classList.remove('is-changing'), 360);
+    }
+
+    if (elements.headerStatus) {
+      const labels = ['選擇年級', '選擇課程', '同步與通知', '檢查設定', '安裝控制台'];
+      elements.headerStatus.textContent = labels[activeStep - 1];
+    }
+  }
+
+  function updateFromScroll() {
+    frameRequested = false;
+
+    if (wizard && wizard.getBoundingClientRect().top > window.innerHeight * 0.68) {
+      return;
+    }
+
+    const targetY = Math.min(190, window.innerHeight * 0.32);
+    let closestStep = 1;
+
+    steps.forEach(step => {
+      const rect = step.getBoundingClientRect();
+      if (rect.top <= targetY) {
+        closestStep = Math.max(closestStep, Number(step.dataset.step));
+      }
+    });
+
+    setActiveStep(closestStep);
+    updateExitProgress(targetY);
+  }
+
+  function updateExitProgress(targetY) {
+    const compact = window.matchMedia('(max-width: 600px)').matches;
+    const exitY = compact ? -9 : -12;
+    const exitScale = compact ? 0.986 : 0.982;
+    const exitRotate = compact ? -0.24 : -0.35;
+
+    steps.forEach((step, index) => {
+      const number = Number(step.dataset.step);
+      const nextStep = steps[index + 1];
+      let progress = 0;
+
+      if (nextStep && number === activeStep) {
+        const nextTop = nextStep.getBoundingClientRect().top;
+        progress = clamp((window.innerHeight - nextTop) / Math.max(1, window.innerHeight - targetY), 0, 1);
+      }
+
+      step.classList.toggle('is-exiting', progress > 0.001);
+      step.style.setProperty('--exit-y', `${(exitY * progress).toFixed(2)}px`);
+      step.style.setProperty('--exit-scale', (1 - (1 - exitScale) * progress).toFixed(4));
+      step.style.setProperty('--exit-rotate', `${(exitRotate * progress).toFixed(3)}deg`);
+      step.style.setProperty('--exit-opacity', (1 - 0.08 * progress).toFixed(3));
+    });
+  }
+
+  function requestUpdate() {
+    if (!frameRequested) {
+      frameRequested = true;
+      requestAnimationFrame(updateFromScroll);
+    }
+  }
+
+  document.addEventListener('click', event => {
+    const navigationButton = event.target.closest('[data-step-target]');
+    const editButton = event.target.closest('[data-edit-step]');
+
+    if (navigationButton) scrollToStep(Number(navigationButton.dataset.stepTarget));
+    if (editButton) scrollToStep(Number(editButton.dataset.editStep));
+  });
+
+  if (startButton) {
+    startButton.addEventListener('click', () => scrollToStep(1));
+  }
+
+  window.addEventListener('scroll', requestUpdate, { passive: true });
+  window.addEventListener('resize', requestUpdate);
+  setActiveStep(1);
+  updateFromScroll();
+}
+
+function initCodeDisclosure() {
+  if (!elements.fullCodeToggle || !elements.codeWindow) {
+    return;
+  }
+
+  elements.fullCodeToggle.addEventListener('click', () => {
+    const expanded = elements.codeWindow.classList.toggle('is-expanded');
+    const label = expanded ? '收合完整程式碼' : '查看完整程式碼';
+    elements.fullCodeToggle.textContent = label;
+    elements.fullCodeToggle.dataset.cursorLabel = label;
+    elements.fullCodeToggle.setAttribute('aria-expanded', String(expanded));
+
+    if (!expanded) {
+      elements.generatedCode.scrollTop = 0;
+    }
+  });
+}
+
+function renderSettingsSummary() {
+  if (!elements.settingsSummary) {
+    return;
+  }
+
+  const selected = Array.from(getSelectedCourses());
+  const checkedHours = Array.from(document.querySelectorAll('input[name="syncHour"]:checked'))
+    .map(input => `${pad2(Number(input.value))}:00`)
+    .sort();
+  const email = elements.notificationEmail.value.trim() || '目前 Google 帳號';
+  const courses = selected.length > 0
+    ? `${selected.length} 門｜${selected.slice(0, 4).join('、')}${selected.length > 4 ? '…' : ''}`
+    : '尚未選擇課程';
+  const hours = checkedHours.length > 0 ? checkedHours.join('、') : `${pad2(Number(elements.notifyHour.value || 5))}:00`;
+  const activityLabel = elements.includeActivities.checked ? '包含年級與全校活動' : '不同步年級與全校活動';
+
+  elements.settingsSummary.innerHTML = [
+    renderSummaryItem('年級', getCurrentGrade(), 1),
+    renderSummaryItem('課程', courses, 2),
+    renderSummaryItem('每日同步', hours, 3),
+    renderSummaryItem('通知與活動', `${email}｜${activityLabel}`, 3)
+  ].join('');
+}
+
+function renderSummaryItem(label, value, editStep) {
+  return [
+    '<section class="summary-item">',
+    `<span>${escapeHtml(label)}</span>`,
+    `<strong>${escapeHtml(value)}</strong>`,
+    `<button type="button" class="summary-edit" data-edit-step="${editStep}" data-cursor-label="修改" aria-label="修改${escapeHtml(label)}">↗</button>`,
+    '</section>'
+  ].join('');
+}
+
+function initKineticCursor() {
+  const cursor = document.getElementById('kinetic-cursor');
+  const pointer = cursor ? cursor.querySelector('.cursor-pointer') : null;
+  const caption = cursor ? cursor.querySelector('.cursor-caption') : null;
+  const enabled = window.matchMedia('(pointer: fine) and (prefers-reduced-motion: no-preference)').matches;
+
+  if (!cursor || !pointer || !caption || !enabled) {
+    return;
+  }
+
+  document.documentElement.classList.add('has-kinetic-cursor');
+
+  let targetX = window.innerWidth / 2;
+  let targetY = window.innerHeight / 2;
+  let currentX = targetX;
+  let currentY = targetY;
+  let previousX = targetX;
+  let previousY = targetY;
+  let targetAngle = 0;
+  let currentAngle = 0;
+  let visible = false;
+
+  function updateCursorContext(target) {
+    const labelled = target && target.closest ? target.closest('[data-cursor-label]') : null;
+    const textTarget = target && target.closest
+      ? target.closest('input:not([type="radio"]):not([type="checkbox"]), textarea, [contenteditable="true"], [data-cursor-mode="text"]')
+      : null;
+
+    cursor.classList.toggle('has-label', Boolean(labelled) && !textTarget);
+    cursor.classList.toggle('is-text', Boolean(textTarget));
+    caption.textContent = labelled && !textTarget ? labelled.dataset.cursorLabel : '';
+  }
+
+  function updateTarget(event) {
+    const dx = event.clientX - previousX;
+    const dy = event.clientY - previousY;
+    targetX = event.clientX;
+    targetY = event.clientY;
+
+    if (Math.hypot(dx, dy) > 1.5) {
+      targetAngle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+    }
+
+    previousX = event.clientX;
+    previousY = event.clientY;
+    updateCursorContext(event.target);
+
+    if (!visible) {
+      visible = true;
+      cursor.style.opacity = '1';
+      currentX = targetX;
+      currentY = targetY;
+    }
+  }
+
+  function animate() {
+    currentX += (targetX - currentX) * 0.24;
+    currentY += (targetY - currentY) * 0.24;
+    let angleDelta = ((targetAngle - currentAngle + 540) % 360) - 180;
+    currentAngle += angleDelta * 0.18;
+    cursor.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+    cursor.style.setProperty('--cursor-angle', cursor.classList.contains('is-text') ? '0deg' : `${currentAngle}deg`);
+    requestAnimationFrame(animate);
+  }
+
+  window.addEventListener('mousemove', updateTarget, { passive: true });
+  window.addEventListener('scroll', () => {
+    updateCursorContext(document.elementFromPoint(targetX, targetY));
+  }, { passive: true });
+  document.addEventListener('mouseleave', () => {
+    visible = false;
+    cursor.style.opacity = '0';
+  });
+  document.addEventListener('mouseenter', () => {
+    if (visible) cursor.style.opacity = '1';
+  });
+  document.addEventListener('mousedown', () => cursor.style.setProperty('--cursor-scale', '0.76'));
+  document.addEventListener('mouseup', () => cursor.style.setProperty('--cursor-scale', '1'));
+  animate();
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function normalizeSearchText(value) {

@@ -88,7 +88,8 @@ const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
 const STATUS_STORE = 'TSCHOOL_STATUS';
 const NOTICE_STORE = 'TSCHOOL_NOTICE_STATE';
 const MANAGED_MARKER = '[T-SCHOOL-SCHEDULE-SYNC]';
-const DESCRIPTION_MARKER = '[T-SCHOOL 課表同步]';
+const DESCRIPTION_MARKER = '[T-SCHOOL 行程同步]';
+const LEGACY_DESCRIPTION_MARKER = '[T-SCHOOL 課表同步]';
 const ALLOW_QUICK_DELETE_ALL = false;
 const DEFAULT_SETTINGS = ${formatObject(initialSettings)};
 const SETTINGS_SIDEBAR_HTML = ${formatLongString(sidebarHtml)};
@@ -109,7 +110,7 @@ const ACTIVITY_PATTERNS = [
 
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('課表同步')
+    .createMenu('行程同步')
     .addItem('開啟設定', 'showSettingsSidebar')
     .addSeparator()
     .addItem('立即同步', 'syncMyScheduleToCalendar')
@@ -123,7 +124,7 @@ function onOpen() {
 
 function showSettingsSidebar() {
   const output = HtmlService.createHtmlOutput(SETTINGS_SIDEBAR_HTML)
-    .setTitle('T-SCHOOL 課表同步');
+    .setTitle('T-SCHOOL 行程同步');
   SpreadsheetApp.getUi().showSidebar(output);
 }
 
@@ -517,7 +518,7 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
     settings.pausedReason = '偵測到新學期，請重新選擇課程。';
     saveSettings_(settings);
     deleteAutoSyncTriggers();
-    sendActionRequiredSafe_(settings, '新學期課表已更新', '系統已暫停自動同步並保留原有日曆事件。請開啟課表同步控制台，重新選擇本學期課程。');
+    sendActionRequiredSafe_(settings, '新學期課表已更新', '系統已暫停自動同步並保留原有日曆事件。請開啟行程同步控制台，重新選擇本學期課程。');
   }
 
   if (!quiet) {
@@ -739,7 +740,7 @@ function isManagedEvent_(event, stateKey) {
   const hasManagedMarker = description.indexOf(MANAGED_MARKER) !== -1;
   if (!hasManagedMarker) return false;
   if (!stateKey || description.indexOf('同步識別碼：' + hashText_(stateKey)) !== -1) return true;
-  return description.indexOf(DESCRIPTION_MARKER) !== -1 &&
+  return (description.indexOf(DESCRIPTION_MARKER) !== -1 || description.indexOf(LEGACY_DESCRIPTION_MARKER) !== -1) &&
     /來源儲存格：[A-Z]+\\d+/.test(description) &&
     description.indexOf('原始內容：') !== -1;
 }
@@ -1192,7 +1193,7 @@ function toggleAutoSyncFromMenu() {
 
 function showSyncStatus() {
   const status = loadStatus_();
-  SpreadsheetApp.getUi().alert('T-SCHOOL 課表同步', (status.message || '尚未同步') + '\\n\\n上次執行：' + (status.lastSyncLabel || '尚無紀錄'), SpreadsheetApp.getUi().ButtonSet.OK);
+  SpreadsheetApp.getUi().alert('T-SCHOOL 行程同步', (status.message || '尚未同步') + '\\n\\n上次執行：' + (status.lastSyncLabel || '尚無紀錄'), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function previewParsedEvents() {
@@ -1253,7 +1254,7 @@ function sendSyncNotificationsSafe_(settings, result, options) {
     if (options.reason === 'source' && result.changes.length > 0) {
       sendEmail_(settings, '[T-SCHOOL] 課表異動 ' + result.changes.length + ' 項', formatChangeDigest_(result, settings));
     } else if (options.notifyOnSuccess) {
-      sendEmail_(settings, '[T-SCHOOL] 課表同步成功', formatSyncResultMessage_(result));
+      sendEmail_(settings, '[T-SCHOOL] 行程同步成功', formatSyncResultMessage_(result));
     }
   } catch (error) {
     Logger.log('同步通知寄送失敗：' + error.message);
@@ -1262,7 +1263,7 @@ function sendSyncNotificationsSafe_(settings, result, options) {
 
 function sendFirstSetupNotificationSafe_(result) {
   try {
-    sendEmail_(loadSettings_(), '[T-SCHOOL] 課表同步設定完成', '第一次同步已完成。\\n\\n' + formatSyncResultMessage_(result) + '\\n\\n請開啟專用 Google 日曆，確認課程、日期、節次與地點正確。');
+    sendEmail_(loadSettings_(), '[T-SCHOOL] 行程同步設定完成', '第一次同步已完成。\\n\\n' + formatSyncResultMessage_(result) + '\\n\\n請開啟專用 Google 日曆，確認課程、日期、節次與地點正確。');
   } catch (error) {
     Logger.log('設定完成通知寄送失敗：' + error.message);
   }
@@ -1270,7 +1271,7 @@ function sendFirstSetupNotificationSafe_(result) {
 
 function notifySyncFailureSafe_(error) {
   try {
-    sendEmail_(loadSettings_(), '[T-SCHOOL] 課表同步失敗', userFacingError_(error) + '\\n\\n請開啟課表同步控制台查看狀態。');
+    sendEmail_(loadSettings_(), '[T-SCHOOL] 行程同步失敗', userFacingError_(error) + '\\n\\n請開啟行程同步控制台查看狀態。');
   } catch (mailError) {
     Logger.log('同步失敗通知寄送失敗：' + mailError.message);
   }

@@ -232,7 +232,7 @@
   <div class="app" id="app" hidden>
     <header class="topbar">
       <p class="eyebrow">T-SCHOOL · Control</p>
-      <h1>課表同步控制台</h1>
+      <h1>行程同步控制台</h1>
       <p class="top-status" id="top-status">尚未完成設定</p>
     </header>
 
@@ -275,7 +275,7 @@
           <label class="field"><span>同步目標</span><select id="calendar"></select></label>
           <button type="button" class="icon-button" id="create-calendar" aria-label="建立專用日曆" title="建立專用日曆">＋</button>
         </div>
-        <p class="hint">若尚未選擇，首次同步會自動建立「T-SCHOOL 課表」。</p>
+        <p class="hint">若尚未選擇，首次同步會自動建立「T-SCHOOL 課表」</p>
       </section>
 
       <section class="section">
@@ -303,7 +303,7 @@
       <section class="section">
         <div class="section-head"><h2>同步狀態</h2><span id="app-version"></span></div>
         <div class="status-grid"><div class="metric"><span>上次同步</span><strong id="last-sync">尚未同步</strong></div><div class="metric"><span>受管理事件</span><strong id="event-count">0</strong></div></div>
-        <p class="message" id="status-message">完成設定後即可開始同步。</p>
+        <p class="message" id="status-message">完成設定後即可開始同步</p>
         <div class="secondary-actions">
           <button type="button" id="run-sync">立即同步</button>
           <button type="button" id="repair-sync">強制修復</button>
@@ -378,7 +378,7 @@
         if (!model) return;
         var query = normalize(byId('course-search').value);
         var courses = (model.source.catalog.courses || []).filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
-        byId('course-list').innerHTML = courses.length ? courses.map(function (item) { return '<label class="choice"><input type="checkbox" value="' + escapeHtml(item.title) + '" ' + (selectedCourses.has(item.title) ? 'checked' : '') + '><span>' + escapeHtml(item.title) + '</span></label>'; }).join('') : '<p class="empty">找不到符合的課程。</p>';
+        byId('course-list').innerHTML = courses.length ? courses.map(function (item) { return '<label class="choice"><input type="checkbox" value="' + escapeHtml(item.title) + '" ' + (selectedCourses.has(item.title) ? 'checked' : '') + '><span>' + escapeHtml(item.title) + '</span></label>'; }).join('') : '<p class="empty">找不到符合的課程</p>';
         byId('course-count').textContent = selectedCourses.size + ' 門';
       }
 
@@ -391,7 +391,7 @@
         byId('last-sync').textContent = status && status.lastSyncLabel ? status.lastSyncLabel : '尚未同步';
         byId('event-count').textContent = status && status.eventCount != null ? String(status.eventCount) : '0';
         var message = byId('status-message');
-        message.textContent = status && status.message ? status.message : '完成設定後即可開始同步。';
+        message.textContent = status && status.message ? status.message : '完成設定後即可開始同步';
         message.classList.toggle('error', Boolean(status && status.ok === false));
       }
 
@@ -430,7 +430,7 @@
         try {
           if (runSync) {
             var preview = await server('previewSettingsImpactFromUi', settings);
-            var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響。';
+            var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
             if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
             setBusy(true, '正在儲存並同步…');
           }

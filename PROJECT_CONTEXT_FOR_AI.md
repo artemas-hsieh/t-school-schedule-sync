@@ -47,7 +47,7 @@ Grade query values are `一年級`, `二年級`, and `三年級`. Never persist 
 3. The installer generates one `Code.gs`.
 4. The user creates a blank Google Sheet, opens its bound Apps Script project,
    pastes the code, saves, and reloads the Sheet.
-5. The `課表同步` custom menu opens the settings sidebar.
+5. The `行程同步` custom menu opens the settings sidebar.
 6. `儲存並首次同步` creates or selects a dedicated non-primary Calendar,
    performs the first sync, starts triggers only after success, and sends one
    setup-complete email.
@@ -133,10 +133,11 @@ actions, and private `google.script.run` handlers used by the sidebar.
   mask the original sync failure.
 - Keep the installer CSP narrow. Add explicit origins only when required.
 
-## UI visual exploration phase
+## Current installer UI direction
 
-`UI_EXPLORATION_BRIEF.md` is the active source of truth for the next installer UI
-concept. Read it before UI changes.
+The approved visual exploration is implemented in `configurator/`. Treat the
+current interface and component patterns as the source of truth for follow-up UI
+changes. Historical planning material is archived under `archive/`.
 
 - Prior strict Material Design 3 visual rules are archived under
   `archive/visual-design-material3/` and are inactive during this concept pass.
@@ -147,8 +148,8 @@ concept. Read it before UI changes.
 - Preserve the static architecture and all current installer behavior, validation,
   data loading, code generation, safety rules, and public Apps Script functions.
 - `1Campus/` must never be used as a visual or interaction reference.
-- The concept should use one vertical narrative flow, progressive disclosure,
-  step progress, a compact code preview, and optional contextual cursor motion.
+- The installer uses one vertical narrative flow, progressive disclosure, sticky
+  stacked step cards, a separate code-output section, and contextual cursor motion.
 - Motion must not block the task. Keep touch and reduced-motion fallbacks usable.
 
 ## Deployment and cache
