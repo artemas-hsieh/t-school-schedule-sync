@@ -27,7 +27,20 @@
     <a class="brand" href="#top" data-cursor-label="回到頁首" aria-label="回到頁首">
       <span class="brand-name">T-SCHOOL Schedule Sync</span>
     </a>
-    <span class="header-status" id="header-status">準備設定</span>
+    <div class="stage-menu" id="stage-menu">
+      <button type="button" class="stage-menu-trigger" id="stage-menu-trigger" aria-label="設定階段" aria-expanded="false" aria-controls="stage-menu-panel" data-cursor-label="開啟階段選單">
+        <span class="stage-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+      </button>
+      <nav class="stage-menu-panel" id="stage-menu-panel" aria-label="設定階段" hidden>
+        <ol>
+          <li><button type="button" data-step-target="1"><span>01</span>選擇年級</button></li>
+          <li><button type="button" data-step-target="2"><span>02</span>選擇課程與活動</button></li>
+          <li><button type="button" data-step-target="3"><span>03</span>設定同步與通知</button></li>
+          <li><button type="button" data-step-target="4"><span>04</span>檢查設定</button></li>
+          <li><button type="button" data-step-target="5"><span>05</span>安裝控制臺</button></li>
+        </ol>
+      </nav>
+    </div>
   </header>
 
   <main id="top">
@@ -78,198 +91,116 @@
     </section>
 
     <section class="wizard" id="wizard" aria-label="行程同步設定">
-      <div class="wizard-progress" id="wizard-progress" aria-label="設定進度">
-        <button type="button" class="progress-nav" id="previous-step" data-cursor-label="上一步" aria-label="上一步" disabled><span aria-hidden="true">↑</span></button>
-        <span class="progress-copy">
-          <span class="progress-label">步驟</span>
-          <span class="progress-number" id="progress-number" data-previous="1"><span id="progress-current">1</span></span>
-          <span class="progress-divider">/</span>
-          <span class="progress-total">5</span>
-        </span>
-        <button type="button" class="progress-nav" id="next-step" data-cursor-label="下一步" aria-label="下一步"><span aria-hidden="true">↓</span></button>
-      </div>
-
       <form id="config-form" class="journey-form">
-        <div class="card-stack settings-stack">
         <section class="journey-step" id="step-1" data-step="1" aria-labelledby="step-1-title">
           <div class="step-card">
-            <header class="step-heading">
-              <h2 id="step-1-title">選擇年級</h2>
-              <p>選擇後會讀取目前課表，並整理可選課程</p>
+            <header class="step-heading step-heading-component">
+              <div>
+                <h2 id="step-1-title">選年級</h2>
+              </div>
+              <span class="step-position" aria-label="步驟 1，共 5 步">步驟 1/5</span>
             </header>
 
-            <div class="source-status" id="source-status" role="status" aria-live="polite" data-state="loading">
+            <div class="source-status" id="source-status" role="status" aria-live="polite" data-state="idle">
               <span class="source-status-indicator" aria-hidden="true"></span>
               <span class="source-status-copy">
-                <strong id="source-status-title">正在讀取課表</strong>
-                <span id="source-status-detail">確認目前年級與課程資料</span>
+                <strong id="source-status-title">請先選擇年級</strong>
+                <span id="source-status-detail">系統將整理出對應的課程、活動給你選擇</span>
               </span>
-              <button type="button" class="icon-button source-refresh" id="source-refresh" aria-label="重新讀取課表" data-cursor-label="重新讀取" title="重新讀取課表">↻</button>
+              <button type="button" class="icon-button source-refresh" id="source-refresh" aria-label="重新讀取課表" data-cursor-label="重新讀取" title="重新讀取課表" disabled>
+                <img src="assets/icon-refresh-cw.svg" alt="">
+              </button>
             </div>
 
             <fieldset class="segmented-field">
-              <legend>年級</legend>
+              <legend class="visually-hidden">年級</legend>
               <div class="segmented-control" role="radiogroup" aria-label="選擇年級">
-                <label data-cursor-label="選擇高一"><input type="radio" name="gradeName" value="高一" checked><span>高一</span></label>
+                <label data-cursor-label="選擇高一"><input type="radio" name="gradeName" value="高一"><span>高一</span></label>
                 <label data-cursor-label="選擇高二"><input type="radio" name="gradeName" value="高二"><span>高二</span></label>
                 <label data-cursor-label="選擇高三"><input type="radio" name="gradeName" value="高三"><span>高三</span></label>
               </div>
             </fieldset>
 
           </div>
+          <div class="step-completion step-completion-auto" aria-hidden="true"></div>
         </section>
 
         <section class="journey-step" id="step-2" data-step="2" aria-labelledby="step-2-title">
           <div class="step-card course-step-card">
-            <header class="step-heading split-heading">
+            <header class="step-heading step-heading-component">
               <div>
-                <h2 id="step-2-title">選擇課程與活動</h2>
-                <p id="course-count">已選 0 門課</p>
+                <h2 id="step-2-title">選課程和活動</h2>
+                <p id="course-count">已選 0 門課 ・ 0 項活動</p>
               </div>
-              <button type="button" class="quiet-button" id="clear-courses" data-cursor-label="清除課程">清除課程</button>
+              <span class="step-position" aria-label="步驟 2，共 5 步">步驟 2/5</span>
             </header>
 
-            <label class="field search-field" data-cursor-mode="text">
-              <span>搜尋課程</span>
-              <input id="course-search" type="search" placeholder="輸入課名、班別或線上">
-            </label>
-
-            <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="篩選課表項目">
-              <button type="button" class="filter-tab active" data-filter="全部" role="tab" aria-selected="true" tabindex="0" data-cursor-label="全部">全部</button>
-              <button type="button" class="filter-tab" data-filter="課程" role="tab" aria-selected="false" tabindex="-1" data-cursor-label="課程">課程</button>
-              <button type="button" class="filter-tab" data-filter="活動" role="tab" aria-selected="false" tabindex="-1" data-cursor-label="活動">活動</button>
-              <button type="button" class="filter-tab" data-filter="已選" role="tab" aria-selected="false" tabindex="-1" data-cursor-label="已選">已選</button>
+            <div class="search-control" role="search">
+              <label class="visually-hidden" for="course-search">搜尋課程和活動</label>
+              <input id="course-search" type="search" placeholder="輸入課名、活動名、班別等">
+              <button type="button" class="icon-button search-submit" id="course-search-submit" aria-label="搜尋課程和活動" data-cursor-label="搜尋">
+                <img src="assets/icon-search.svg" alt="">
+              </button>
             </div>
-
-            <label class="toggle-row activity-master-toggle" data-cursor-label="切換活動同步">
-              <input id="include-whole-school" name="includeWholeSchool" type="checkbox" checked>
-              <span>同步已辨識的全年級、全校活動與重要公告</span>
-            </label>
-
-            <div class="selected-summary">
-              <h3 class="selected-title">已選取課程與活動</h3>
-              <button type="button" class="selected-toggle" id="selected-toggle" aria-expanded="false" aria-controls="selected-courses" data-cursor-label="展開">展開</button>
-            </div>
-            <div class="selected-strip" id="selected-courses" aria-live="polite" hidden></div>
             <div class="course-list" id="course-list"></div>
 
+          </div>
+          <div class="step-completion">
+            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="完成選課" disabled>我選好了！</button>
           </div>
         </section>
 
         <section class="journey-step" id="step-3" data-step="3" aria-labelledby="step-3-title">
           <div class="step-card">
-            <header class="step-heading">
-              <h2 id="step-3-title">設定同步與通知</h2>
-              <p>選擇每日檢查課表的時段，並設定通知方式</p>
+            <header class="step-heading step-heading-component">
+              <div>
+                <h2 id="step-3-title">設定通知偏好</h2>
+                <p id="notification-selection-count">已選 0 門課 ・ 0 項活動</p>
+              </div>
+              <span class="step-position" aria-label="步驟 3，共 5 步">步驟 3/5</span>
             </header>
 
-            <div class="two-column">
+            <div class="two-column notification-grid">
               <label class="field validated-field" id="field-notification-email" data-cursor-mode="text">
-                <span>通知 Email</span>
+                <span>收通知的 Email</span>
                 <div class="input-wrap">
-                  <input id="notification-email" name="notificationEmail" type="email" placeholder="未填寫時使用目前 Google 帳號" aria-describedby="notification-email-hint">
+                  <input id="notification-email" name="notificationEmail" type="email" placeholder="用來收調課、同步狀態通知" aria-describedby="notification-email-hint">
                   <span class="field-icon" aria-hidden="true"></span>
                 </div>
-                <span class="field-hint" id="notification-email-hint" aria-live="polite"></span>
+                <span class="field-hint" id="notification-email-hint" aria-live="polite">通知的原理：透過程式自動「用自己的信箱寄信給自己」</span>
               </label>
 
               <label class="field" data-cursor-label="選擇時段">
-                <span>成功通知時段</span>
+                <span>通知時間</span>
                 <select id="notify-hour" name="notifyHour"></select>
+                <span class="field-hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動</span>
               </label>
             </div>
 
-            <fieldset class="check-field sync-time-field">
-              <legend class="sync-time-summary">
-                <span>每日同步時段</span>
-                <button type="button" class="inline-action" id="expand-time-btn" aria-expanded="false" aria-controls="time-grid-wrap" data-cursor-label="自訂時段">自訂時段</button>
-              </legend>
-              <div class="sync-presets" id="sync-presets"></div>
-              <div class="time-grid-wrap" id="time-grid-wrap" hidden>
-                <div class="time-grid" id="sync-hours"></div>
-              </div>
-            </fieldset>
-
+          </div>
+          <div class="step-completion">
+            <button type="button" class="step-complete-button" data-complete-step="3" data-cursor-label="完成通知設定">設定完成！</button>
           </div>
         </section>
 
         <section class="journey-step" id="step-4" data-step="4" aria-labelledby="step-4-title">
           <div class="step-card">
-            <header class="step-heading">
-              <h2 id="step-4-title">檢查設定</h2>
-              <p>確認年級、課程與通知設定，需要時再調整進階選項</p>
+            <header class="step-heading step-heading-component">
+              <div>
+                <h2 id="step-4-title">檢查設定</h2>
+                <p>想更改可以點「↗」按鈕前往設定卡片</p>
+              </div>
+              <span class="step-position" aria-label="步驟 4，共 5 步">步驟 4/5</span>
             </header>
 
             <div class="settings-summary" id="settings-summary" aria-live="polite"></div>
 
-            <details class="advanced-settings" id="advanced-settings">
-              <summary data-cursor-label="進階設定">
-                <span>進階設定</span>
-                <span aria-hidden="true">+</span>
-              </summary>
-              <div class="advanced-content">
-                <div class="two-column">
-                  <label class="field format-field" data-cursor-label="選擇格式">
-                    <span>異動通知格式</span>
-                    <select id="notification-preset" name="notificationPreset">
-                      <option value="compact">簡潔</option>
-                      <option value="standard" selected>標準</option>
-                      <option value="detailed">詳細</option>
-                      <option value="custom">進階自訂</option>
-                    </select>
-                    <span class="format-preview" id="notification-preview" aria-live="polite"></span>
-                  </label>
-
-                  <label class="field format-field" data-cursor-label="選擇格式">
-                    <span>事件說明格式</span>
-                    <select id="description-preset" name="descriptionPreset">
-                      <option value="compact">簡潔</option>
-                      <option value="standard" selected>標準</option>
-                      <option value="detailed">詳細</option>
-                      <option value="custom">進階自訂</option>
-                    </select>
-                    <span class="format-preview" id="description-preview" aria-live="polite"></span>
-                  </label>
-
-                  <label class="field" data-cursor-label="選擇提醒">
-                    <span>活動提醒</span>
-                    <select id="reminder-mode" name="reminderMode">
-                      <option value="none" selected>不提醒</option>
-                      <option value="popup">日曆彈出通知</option>
-                      <option value="email">Email 提醒</option>
-                    </select>
-                  </label>
-
-                  <label class="field reminder-minutes-field" id="reminder-minutes-field" hidden data-cursor-label="選擇時間">
-                    <span>提前時間</span>
-                    <select id="reminder-minutes" name="reminderMinutes">
-                      <option value="10">10 分鐘</option>
-                      <option value="30">30 分鐘</option>
-                      <option value="60">1 小時</option>
-                      <option value="1440">1 天</option>
-                    </select>
-                  </label>
-                </div>
-
-                <label class="field custom-template-field" id="custom-notification-field" hidden data-cursor-mode="text">
-                  <span>自訂異動通知模板</span>
-                  <textarea id="custom-notification" name="customNotification" rows="5" aria-describedby="custom-notification-hint"></textarea>
-                  <span class="field-hint" id="custom-notification-hint">可使用 {type}、{course}、{oldDate}、{newDate}、{oldPeriod}、{newPeriod}、{oldTime}、{newTime}、{oldLocation}、{newLocation}</span>
-                </label>
-
-                <label class="field custom-template-field" id="custom-template-field" hidden data-cursor-mode="text">
-                  <span>自訂說明模板</span>
-                  <textarea id="custom-description" name="customDescription" rows="5" aria-describedby="custom-template-hint"></textarea>
-                  <span class="field-hint" id="custom-template-hint">可使用 {course}、{date}、{weekday}、{week}、{period}、{startTime}、{endTime}、{location}、{sourceUpdatedAt}</span>
-                </label>
-              </div>
-            </details>
-
+          </div>
+          <div class="step-completion">
+            <button type="button" class="step-complete-button" data-complete-step="4" data-cursor-label="產生安裝程式碼">產生安裝程式碼</button>
           </div>
         </section>
-        </div>
 
-        <div class="card-stack output-stack">
         <section class="journey-step output-step" id="step-5" data-step="5" aria-labelledby="output-title">
           <div class="step-card output-card">
             <header class="step-heading output-heading">
@@ -304,7 +235,6 @@
             </div>
           </div>
         </section>
-        </div>
       </form>
     </section>
   </main>

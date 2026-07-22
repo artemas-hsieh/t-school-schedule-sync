@@ -1,8 +1,8 @@
 const DEFAULTS = {
-  gradeName: '高一',
+  gradeName: '',
   notificationEmail: '',
-  syncHours: [5, 12, 18, 22],
-  notifyHour: 5,
+  syncHours: [6],
+  notifyHour: 6,
   includeActivities: true,
   notificationPreset: 'standard',
   customNotification: [
@@ -22,42 +22,21 @@ const DEFAULTS = {
   calendarName: 'T-SCHOOL 課表'
 };
 
-const SYNC_PRESETS = [
-  { label: '05:00', hour: 5 },
-  { label: '12:00', hour: 12 },
-  { label: '18:00', hour: 18 },
-  { label: '22:00', hour: 22 }
-];
-
-// Journey tuning: releaseDelta starts at a card edge; snapTargetOffset positions the target section.
+// Journey tuning: each completed section reveals the next one in the vertical narrative.
 const MOTION_CONFIG = Object.freeze({
-  withinStack: {
-    releaseDelta: 800,
-    snapDuration: 0.48,
-    snapCooldown: 500,
-    contentScrollRearmDelay: 180,
-    edgeTolerance: 2,
-    snapTargetOffset: 0
-  },
-  betweenStacks: {
-    releaseDelta: 800,
-    snapDuration: 0.64,
-    snapCooldown: 1000,
-    contentScrollRearmDelay: 220,
-    edgeTolerance: 2,
-    snapTargetOffset: 0
-  },
-  activationLineRatio: 0.32,
-  activationLineMax: 190,
-  firstStepSettleTolerance: 3,
+  sectionTransitionDuration: 0.72,
+  boundaryReleaseDelay: 120,
+  boundaryReboundDuration: 0.52,
+  boundaryElasticDesktop: 72,
+  boundaryElasticMobile: 44,
+  activationLineRatio: 0.34,
+  activationLineMax: 240,
   homeEntryScrollDuration: 0.9,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08
 });
 
 const state = {
-  activeFilter: '全部',
-  selectedCoursesExpanded: false,
   selectedByGrade: new Map(),
   excludedActivitiesByGrade: new Map(),
   sourceByGrade: new Map(),
@@ -71,82 +50,45 @@ const elements = {
   form: document.querySelector('#config-form'),
   notificationEmail: document.querySelector('#notification-email'),
   notifyHour: document.querySelector('#notify-hour'),
-  syncHours: document.querySelector('#sync-hours'),
-  includeActivities: document.querySelector('#include-whole-school'),
   courseSearch: document.querySelector('#course-search'),
+  courseSearchSubmit: document.querySelector('#course-search-submit'),
   courseList: document.querySelector('#course-list'),
-  selectedCourses: document.querySelector('#selected-courses'),
-  selectedToggle: document.querySelector('#selected-toggle'),
   courseCount: document.querySelector('#course-count'),
+  notificationSelectionCount: document.querySelector('#notification-selection-count'),
   generatedCode: document.querySelector('#generated-code'),
   copyCode: document.querySelector('#copy-code'),
   copyCodeInline: document.querySelector('#copy-code-inline'),
-  clearCourses: document.querySelector('#clear-courses'),
   sourceStatus: document.querySelector('#source-status'),
   sourceStatusTitle: document.querySelector('#source-status-title'),
   sourceStatusDetail: document.querySelector('#source-status-detail'),
   sourceRefresh: document.querySelector('#source-refresh'),
-  notificationPreset: document.querySelector('#notification-preset'),
-  customNotification: document.querySelector('#custom-notification'),
-  customNotificationField: document.querySelector('#custom-notification-field'),
-  descriptionPreset: document.querySelector('#description-preset'),
-  customDescription: document.querySelector('#custom-description'),
-  customTemplateField: document.querySelector('#custom-template-field'),
-  reminderMode: document.querySelector('#reminder-mode'),
-  reminderMinutes: document.querySelector('#reminder-minutes'),
-  reminderMinutesField: document.querySelector('#reminder-minutes-field'),
   settingsSummary: document.querySelector('#settings-summary'),
-  progressNumber: document.querySelector('#progress-number'),
-  progressCurrent: document.querySelector('#progress-current'),
-  headerStatus: document.querySelector('#header-status'),
+  stageMenu: document.querySelector('#stage-menu'),
+  stageMenuTrigger: document.querySelector('#stage-menu-trigger'),
+  stageMenuPanel: document.querySelector('#stage-menu-panel'),
+  stageMenuItems: Array.from(document.querySelectorAll('#stage-menu-panel [data-step-target]')),
   codeWindow: document.querySelector('#code-window'),
-  fullCodeToggle: document.querySelector('#full-code-toggle'),
-  notificationPreview: document.querySelector('#notification-preview'),
-  descriptionPreview: document.querySelector('#description-preview'),
-  previousStep: document.querySelector('#previous-step'),
-  nextStep: document.querySelector('#next-step')
+  fullCodeToggle: document.querySelector('#full-code-toggle')
 };
 
-async function init() {
+function init() {
   elements.notificationEmail.value = DEFAULTS.notificationEmail;
-  elements.includeActivities.checked = DEFAULTS.includeActivities;
-  elements.notificationPreset.value = DEFAULTS.notificationPreset;
-  elements.customNotification.value = DEFAULTS.customNotification;
-  elements.descriptionPreset.value = DEFAULTS.descriptionPreset;
-  elements.customDescription.value = DEFAULTS.customDescription;
-  elements.reminderMode.value = DEFAULTS.reminderMode;
-  elements.reminderMinutes.value = String(DEFAULTS.reminderMinutes);
-
-  const defaultGradeInput = document.querySelector(
-    `input[name="gradeName"][value="${DEFAULTS.gradeName}"]`
-  );
-
-  if (defaultGradeInput) {
-    defaultGradeInput.checked = true;
-  }
-
   renderNotifyHours();
-  renderSyncHours();
-  renderSyncPresets();
   elements.notifyHour.value = String(DEFAULTS.notifyHour);
   updateNotifyHourState();
-  updateEventOptionVisibility();
-  renderFormatPreviews();
   bindEvents();
   setupValidation();
   initVisualExperience();
   renderCourses();
   updateOutput();
   renderSettingsSummary();
-  await loadGradeSchedule(DEFAULTS.gradeName);
 }
 
 function bindEvents() {
   elements.form.addEventListener('input', event => {
     if (event.target.name === 'gradeName') {
-      state.activeFilter = '全部';
-      resetFilterTabs();
       elements.courseSearch.value = '';
+      document.dispatchEvent(new CustomEvent('tschool:grade-selection-start'));
       renderSettingsSummary();
       loadGradeSchedule(event.target.value);
       return;
@@ -156,36 +98,13 @@ function bindEvents() {
       updateNotifyHourState();
     }
 
-    if (event.target === elements.includeActivities) {
-      renderCourses();
-    }
-
-    if (event.target === elements.notificationPreset || event.target === elements.descriptionPreset || event.target === elements.reminderMode) {
-      updateEventOptionVisibility();
-    }
-
-    if (
-      event.target === elements.notificationPreset ||
-      event.target === elements.descriptionPreset ||
-      event.target === elements.customNotification ||
-      event.target === elements.customDescription
-    ) {
-      renderFormatPreviews();
-    }
-
     updateOutput();
     renderSettingsSummary();
   });
 
   elements.courseSearch.addEventListener('input', renderCourses);
   elements.courseList.addEventListener('change', handleCourseSelectionChange);
-
-  elements.clearCourses.addEventListener('click', () => {
-    getSelectedCourses().clear();
-    renderCourses();
-    updateOutput();
-    renderSettingsSummary();
-  });
+  elements.courseSearchSubmit?.addEventListener('click', () => elements.courseSearch.focus());
 
   elements.copyCode.addEventListener('click', copyGeneratedCode);
 
@@ -193,17 +112,10 @@ function bindEvents() {
     elements.copyCodeInline.addEventListener('click', copyGeneratedCode);
   }
 
-  elements.selectedToggle.addEventListener('click', () => {
-    state.selectedCoursesExpanded = !state.selectedCoursesExpanded;
-    renderSelectedCourses();
-  });
-
   elements.sourceRefresh.addEventListener('click', () => {
-    loadGradeSchedule(getCurrentGrade(), { force: true });
+    const grade = getCurrentGrade();
+    if (grade) loadGradeSchedule(grade, { force: true });
   });
-
-  bindFilterTabs();
-  bindExpandTimeBtn();
 }
 
 async function loadGradeSchedule(gradeName, options) {
@@ -218,6 +130,7 @@ async function loadGradeSchedule(gradeName, options) {
     renderCourses();
     updateOutput();
     renderSettingsSummary();
+    announceGradeReady(gradeName);
     return;
   }
 
@@ -251,8 +164,15 @@ async function loadGradeSchedule(gradeName, options) {
       renderCourses();
       updateOutput();
       renderSettingsSummary();
+      if (state.sourceSummary && !state.sourceError) announceGradeReady(gradeName);
     }
   }
+}
+
+function announceGradeReady(gradeName) {
+  document.dispatchEvent(new CustomEvent('tschool:grade-ready', {
+    detail: { gradeName }
+  }));
 }
 
 function renderSourceStatus() {
@@ -275,127 +195,15 @@ function renderSourceStatus() {
 
   if (!state.sourceSummary) {
     elements.sourceStatus.dataset.state = 'idle';
-    elements.sourceStatusTitle.textContent = '尚未讀取課表';
-    elements.sourceStatusDetail.textContent = '選擇年級後會自動確認資料';
+    elements.sourceStatusTitle.textContent = '請先選擇年級';
+    elements.sourceStatusDetail.textContent = '系統將整理出對應的課程、活動給你選擇';
+    elements.sourceRefresh.disabled = true;
     return;
   }
 
-  const summary = state.sourceSummary;
   elements.sourceStatus.dataset.state = 'success';
   elements.sourceStatusTitle.textContent = `${getCurrentGrade()}課表可用`;
-  elements.sourceStatusDetail.textContent = [
-    `${formatDateLabel(summary.firstDate)}–${formatDateLabel(summary.lastDate)}`,
-    `${summary.catalog.courses.length} 門課`,
-    `${summary.catalog.activities.length} 項活動`
-  ].join(' · ');
-}
-
-function bindFilterTabs() {
-  const container = document.getElementById('filter-tabs');
-
-  if (!container) {
-    return;
-  }
-
-  container.addEventListener('click', event => {
-    const tab = event.target.closest('.filter-tab');
-
-    if (tab) {
-      selectFilterTab(tab);
-    }
-  });
-
-  container.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
-      return;
-    }
-
-    const tabs = Array.from(container.querySelectorAll('.filter-tab'));
-    const currentIndex = tabs.indexOf(document.activeElement);
-
-    if (currentIndex < 0) {
-      return;
-    }
-
-    event.preventDefault();
-    let nextIndex = currentIndex;
-
-    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
-    if (event.key === 'Home') nextIndex = 0;
-    if (event.key === 'End') nextIndex = tabs.length - 1;
-
-    tabs[nextIndex].focus();
-    selectFilterTab(tabs[nextIndex]);
-  });
-}
-
-function selectFilterTab(tab) {
-  document.querySelectorAll('.filter-tab').forEach(item => {
-    const selected = item === tab;
-    item.classList.toggle('active', selected);
-    item.setAttribute('aria-selected', String(selected));
-    item.tabIndex = selected ? 0 : -1;
-  });
-
-  state.activeFilter = tab.dataset.filter;
-  renderCourses();
-}
-
-function resetFilterTabs() {
-  document.querySelectorAll('.filter-tab').forEach(tab => {
-    const selected = tab.dataset.filter === '全部';
-    tab.classList.toggle('active', selected);
-    tab.setAttribute('aria-selected', String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-  });
-}
-
-function renderSyncPresets() {
-  const container = document.getElementById('sync-presets');
-
-  if (!container) {
-    return;
-  }
-
-  container.innerHTML = SYNC_PRESETS.map(({ label, hour }) => {
-    const checkbox = document.querySelector(`input[name="syncHour"][value="${hour}"]`);
-    const checked = checkbox ? checkbox.checked : DEFAULTS.syncHours.includes(hour);
-    return `<button type="button" class="preset-chip${checked ? ' active' : ''}" data-hour="${hour}" data-cursor-label="切換 ${escapeHtml(label)}" aria-pressed="${checked}">${escapeHtml(label)}</button>`;
-  }).join('');
-
-  container.querySelectorAll('.preset-chip').forEach(button => {
-    button.addEventListener('click', () => {
-      const checkbox = document.querySelector(
-        `input[name="syncHour"][value="${Number(button.dataset.hour)}"]`
-      );
-
-      if (checkbox) {
-        checkbox.checked = !checkbox.checked;
-        renderSyncPresets();
-        updateOutput();
-        renderSettingsSummary();
-      }
-    });
-  });
-}
-
-function bindExpandTimeBtn() {
-  const button = document.getElementById('expand-time-btn');
-  const wrap = document.getElementById('time-grid-wrap');
-
-  if (!button || !wrap) {
-    return;
-  }
-
-  button.addEventListener('click', () => {
-    const expanding = wrap.hasAttribute('hidden');
-    wrap.toggleAttribute('hidden', !expanding);
-    button.setAttribute('aria-expanded', String(expanding));
-    button.textContent = expanding ? '收合' : '自訂時段';
-  });
-
-  elements.syncHours.addEventListener('change', renderSyncPresets);
+  elements.sourceStatusDetail.textContent = '系統將整理出對應的課程、活動給你選擇';
 }
 
 function initMobileOutput() {
@@ -433,13 +241,13 @@ function validateNotificationEmail() {
 
   if (!value) {
     elements.notificationEmail.setCustomValidity('');
-    setFieldState(field, null, '未填寫時會使用目前 Google 帳號的 Email');
+    setFieldState(field, null, '通知的原理：透過程式自動「用自己的信箱寄信給自己」');
     return true;
   }
 
   if (/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(value)) {
     elements.notificationEmail.setCustomValidity('');
-    setFieldState(field, 'valid', '');
+    setFieldState(field, 'valid', '通知的原理：透過程式自動「用自己的信箱寄信給自己」');
     return true;
   }
 
@@ -472,13 +280,6 @@ function setFieldState(field, stateValue, hint) {
   }
 }
 
-function renderSyncHours() {
-  elements.syncHours.innerHTML = Array.from({ length: 24 }, (_, hour) => {
-    const checked = DEFAULTS.syncHours.includes(hour) ? 'checked' : '';
-    return `<label><input type="checkbox" name="syncHour" value="${hour}" ${checked}><span>${pad2(hour)}:00</span></label>`;
-  }).join('');
-}
-
 function renderNotifyHours() {
   elements.notifyHour.innerHTML = Array.from({ length: 24 }, (_, hour) =>
     `<option value="${hour}">${pad2(hour)}:00</option>`
@@ -488,67 +289,6 @@ function renderNotifyHours() {
 function updateNotifyHourState() {
   const hasEmail = Boolean(elements.notificationEmail.value.trim());
   elements.notifyHour.title = hasEmail ? '' : '未填寫時會使用目前 Google 帳號的 Email';
-}
-
-function updateEventOptionVisibility() {
-  elements.customNotificationField.hidden = elements.notificationPreset.value !== 'custom';
-  elements.customTemplateField.hidden = elements.descriptionPreset.value !== 'custom';
-  elements.reminderMinutesField.hidden = elements.reminderMode.value === 'none';
-}
-
-function renderFormatPreviews() {
-  const notificationTemplates = {
-    compact: '{type}｜{course}｜{newDate} {newPeriod}',
-    standard: '{type}｜{course}\n原：{oldDate} {oldPeriod} {oldLocation}\n新：{newDate} {newPeriod} {newLocation}',
-    detailed: '{type}｜{course}\n原：{oldDate} {oldPeriod}｜{oldTime}｜{oldLocation}\n新：{newDate} {newPeriod}｜{newTime}｜{newLocation}',
-    custom: elements.customNotification.value.trim() || DEFAULTS.customNotification
-  };
-  const descriptionTemplates = {
-    compact: '{week} 週｜星期{weekday}｜第 {period} 節\n{location}',
-    standard: '第 {week} 週｜星期{weekday}｜第 {period} 節\n時間：{startTime}–{endTime}\n地點：{location}\n課表更新：{sourceUpdatedAt}',
-    detailed: '{course}\n{date}（{weekday}）\n第 {period} 節｜{startTime}–{endTime}\n地點：{location}\n課表更新：{sourceUpdatedAt}',
-    custom: elements.customDescription.value.trim() || DEFAULTS.customDescription
-  };
-  const values = {
-    type: '時間調整',
-    course: '公民',
-    oldDate: '3/12（四）',
-    newDate: '3/13（五）',
-    oldPeriod: '第 3 節',
-    newPeriod: '第 4 節',
-    oldTime: '10:10–11:00',
-    newTime: '11:10–12:00',
-    oldLocation: '402 教室',
-    newLocation: '專題教室',
-    date: '2026/03/13',
-    weekday: '五',
-    week: '4',
-    period: '4',
-    startTime: '11:10',
-    endTime: '12:00',
-    location: '專題教室',
-    sourceUpdatedAt: '2026/03/10 18:00'
-  };
-
-  if (elements.notificationPreview) {
-    elements.notificationPreview.textContent = renderExampleTemplate(
-      notificationTemplates[elements.notificationPreset.value] || notificationTemplates.standard,
-      values
-    );
-  }
-
-  if (elements.descriptionPreview) {
-    elements.descriptionPreview.textContent = renderExampleTemplate(
-      descriptionTemplates[elements.descriptionPreset.value] || descriptionTemplates.standard,
-      values
-    );
-  }
-}
-
-function renderExampleTemplate(template, values) {
-  return String(template || '').replace(/\{([A-Za-z]+)\}/g, (match, key) =>
-    Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match
-  );
 }
 
 function getSelectedCourses(gradeName) {
@@ -609,61 +349,47 @@ function handleCourseSelectionChange(event) {
 function renderCourses() {
   if (state.sourceLoading) {
     elements.courseList.innerHTML = '<div class="course-loading" aria-live="polite"><span class="loading-track" aria-hidden="true"></span><p>正在整理課程與活動…</p></div>';
-    renderSelectedCourses();
+    renderSelectionCounts();
     return;
   }
 
   if (state.sourceError) {
     elements.courseList.innerHTML = '<p class="empty-course-list">課表尚未載入，請先重新讀取來源</p>';
-    renderSelectedCourses();
+    renderSelectionCounts();
     return;
   }
 
   if (!state.sourceSummary) {
     elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前課程</p>';
-    renderSelectedCourses();
+    renderSelectionCounts();
     return;
   }
 
   const query = normalizeSearchText(elements.courseSearch.value);
-  const selected = getSelectedCourses();
   const catalog = state.sourceSummary.catalog;
   const sections = [];
 
-  if (state.activeFilter === '全部' || state.activeFilter === '課程' || state.activeFilter === '已選') {
-    const courses = catalog.courses.filter(item => {
-      if (state.activeFilter === '已選' && !selected.has(item.title)) {
-        return false;
-      }
+  const courses = catalog.courses.filter(item =>
+    normalizeSearchText(item.title).includes(query)
+  );
 
-      return normalizeSearchText(item.title).includes(query);
-    });
-
-    if (courses.length > 0) {
-      sections.push(renderCourseSection('課程', courses.map(renderCourseCard).join('')));
-    }
+  if (courses.length > 0) {
+    sections.push(renderCourseSection('課程', courses.map(renderCourseCard).join('')));
   }
 
-  if (state.activeFilter === '全部' || state.activeFilter === '活動' || state.activeFilter === '已選') {
-    const activities = catalog.activities.filter(item =>
-      normalizeSearchText(item.title).includes(query) &&
-      (state.activeFilter !== '已選' || isActivitySelected(item.title))
-    );
+  const activities = catalog.activities.filter(item =>
+    normalizeSearchText(item.title).includes(query)
+  );
 
-    if (activities.length > 0) {
-      sections.push(renderCourseSection(
-        '全年級／全校活動',
-        activities.map(renderActivityCard).join(''),
-        elements.includeActivities.checked ? '預設全選，可取消個別活動' : '目前已關閉'
-      ));
-    }
+  if (activities.length > 0) {
+    sections.push(renderCourseSection('活動', activities.map(renderActivityCard).join('')));
   }
 
   elements.courseList.innerHTML = sections.length > 0
     ? sections.join('')
-    : '<p class="empty-course-list">找不到符合條件的項目，請調整搜尋文字或篩選方式</p>';
+    : '<p class="empty-course-list">找不到符合條件的項目，請調整搜尋文字</p>';
 
-  renderSelectedCourses();
+  renderSelectionCounts();
 }
 
 function renderCourseSection(title, content, note) {
@@ -684,52 +410,34 @@ function renderCourseCard(item) {
 }
 
 function renderActivityCard(item) {
-  const enabled = elements.includeActivities.checked;
   const selected = isActivitySelected(item.title);
-  return `<label class="course-card activity-card" data-cursor-label="${selected ? '取消活動' : '選取活動'}"><input type="checkbox" data-activity value="${escapeHtml(item.title)}" ${selected ? 'checked' : ''} ${enabled ? '' : 'disabled'}><span>${escapeHtml(item.title)}</span><small>${selected ? '已同步' : '未同步'}</small></label>`;
+  return `<label class="course-card activity-card" data-cursor-label="${selected ? '取消活動' : '選取活動'}"><input type="checkbox" data-activity value="${escapeHtml(item.title)}" ${selected ? 'checked' : ''}><span>${escapeHtml(item.title)}</span></label>`;
 }
 
 function isActivitySelected(title) {
-  return elements.includeActivities.checked && !getExcludedActivities().has(title);
+  return !getExcludedActivities().has(title);
 }
 
-function renderSelectedCourses() {
+function renderSelectionCounts() {
   const selected = Array.from(getSelectedCourses()).sort((a, b) =>
     a.localeCompare(b, 'zh-Hant')
   );
 
   const activities = state.sourceSummary ? state.sourceSummary.catalog.activities : [];
   const selectedActivities = activities.filter(item => isActivitySelected(item.title));
-  elements.courseCount.textContent = `已選 ${selected.length} 門課 · ${selectedActivities.length} 項活動`;
-  elements.selectedToggle.textContent = state.selectedCoursesExpanded ? '收合' : '展開';
-  elements.selectedToggle.dataset.cursorLabel = state.selectedCoursesExpanded ? '收合' : '展開';
-  elements.selectedToggle.setAttribute('aria-expanded', String(state.selectedCoursesExpanded));
-  elements.selectedCourses.hidden = !state.selectedCoursesExpanded;
-
-  const selectedItems = selected
-    .map(course => `<span class="pill">${escapeHtml(course)}</span>`)
-    .concat(selectedActivities.map(item => `<span class="pill activity-pill">${escapeHtml(item.title)}</span>`));
-  elements.selectedCourses.innerHTML = selectedItems.length === 0
-    ? '<span class="empty-selected">尚未選擇課程或活動</span>'
-    : selectedItems.join('');
+  const label = `已選 ${selected.length} 門課 ・ ${selectedActivities.length} 項活動`;
+  elements.courseCount.textContent = label;
+  if (elements.notificationSelectionCount) elements.notificationSelectionCount.textContent = label;
 }
 
 function getCurrentGrade() {
   const checked = document.querySelector('input[name="gradeName"]:checked');
-  return checked ? checked.value : DEFAULTS.gradeName;
+  return checked ? checked.value : '';
 }
 
 function getSettings() {
-  const selectedHours = Array.from(document.querySelectorAll('input[name="syncHour"]:checked'))
-    .map(input => Number(input.value))
-    .sort((a, b) => a - b);
   const notifyHour = Number(elements.notifyHour.value);
-  const autoSyncHours = selectedHours.length > 0 ? selectedHours : [notifyHour];
-
-  if (!autoSyncHours.includes(notifyHour)) {
-    autoSyncHours.push(notifyHour);
-    autoSyncHours.sort((a, b) => a - b);
-  }
+  const autoSyncHours = [notifyHour];
 
   const summary = state.sourceSummary;
 
@@ -741,19 +449,19 @@ function getSettings() {
     notificationEmail: elements.notificationEmail.value.trim(),
     autoSyncHours,
     notifySyncHour: notifyHour,
-    includeActivities: elements.includeActivities.checked,
+    includeActivities: DEFAULTS.includeActivities,
     excludedActivities: Array.from(getExcludedActivities()).sort((a, b) =>
       a.localeCompare(b, 'zh-Hant')
     ),
     selectedCourses: Array.from(getSelectedCourses()).sort((a, b) =>
       a.localeCompare(b, 'zh-Hant')
     ),
-    notificationPreset: elements.notificationPreset.value,
-    customNotification: elements.customNotification.value.trim() || DEFAULTS.customNotification,
-    descriptionPreset: elements.descriptionPreset.value,
-    customDescription: elements.customDescription.value.trim() || DEFAULTS.customDescription,
-    reminderMode: elements.reminderMode.value,
-    reminderMinutes: Number(elements.reminderMinutes.value),
+    notificationPreset: DEFAULTS.notificationPreset,
+    customNotification: DEFAULTS.customNotification,
+    descriptionPreset: DEFAULTS.descriptionPreset,
+    customDescription: DEFAULTS.customDescription,
+    reminderMode: DEFAULTS.reminderMode,
+    reminderMinutes: DEFAULTS.reminderMinutes,
     initialTermKey: summary ? summary.termKey : '',
     initialSourceFingerprint: summary ? summary.fingerprint : '',
     initialKnownTitles: summary ? summary.catalog.all.map(item => item.title) : []
@@ -763,6 +471,16 @@ function getSettings() {
 function updateOutput() {
   const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
   elements.copyCode.disabled = !ready;
+  const gradeStepComplete = document.querySelector('[data-complete-step="1"]');
+  const courseStepComplete = document.querySelector('[data-complete-step="2"]');
+
+  if (gradeStepComplete) {
+    gradeStepComplete.disabled = !getCurrentGrade() || !ready;
+  }
+
+  if (courseStepComplete) {
+    courseStepComplete.disabled = !ready;
+  }
 
   if (elements.copyCodeInline) {
     elements.copyCodeInline.disabled = !ready;
@@ -829,7 +547,11 @@ function initSmoothScroll() {
     wheelMultiplier: 1,
     syncTouch: false,
     allowNestedScroll: true,
-    anchors: true
+    anchors: true,
+    virtualScroll: payload => {
+      const boundaryHandler = window.tschoolBoundaryVirtualScroll;
+      return typeof boundaryHandler === 'function' ? boundaryHandler(payload) : true;
+    }
   });
 
   window.tschoolLenis = lenis;
@@ -902,83 +624,84 @@ function initStepJourney() {
   }
 
   let activeStep = 1;
+  let maxUnlockedStep = 1;
+  let renderedUnlockedStep = 0;
   let frameRequested = false;
-  let progressTimer = 0;
-  let releaseDirection = 0;
-  let releaseProgress = 0;
-  let cooldownDirection = 0;
-  let cooldownUntil = 0;
-  let contentScrollLockedStep = 0;
-  let contentScrollUnlockNotBefore = 0;
-  let contentScrollUnlockTimer = 0;
-  let firstStepEntryArmed = true;
+  let automatedTargetStep = 0;
+  let boundaryElasticActive = false;
+  let boundaryReboundActive = false;
+  let boundaryRawOverscroll = 0;
+  let boundaryReleaseTimer = 0;
+  let boundaryFinishTimer = 0;
+  let boundaryMotionId = 0;
 
-  steps.forEach((step, index) => {
-    step.style.setProperty('--step-index', String(index + 1));
-  });
+  function setStageMenuOpen(open, returnFocus) {
+    if (!elements.stageMenuTrigger || !elements.stageMenuPanel) {
+      return;
+    }
 
-  function getTransitionConfig(fromStepNumber, toStepNumber) {
-    const fromStep = steps[fromStepNumber - 1];
-    const toStep = steps[toStepNumber - 1];
-    const sameStack = Boolean(
-      fromStep &&
-      toStep &&
-      fromStep.closest('.card-stack') === toStep.closest('.card-stack')
-    );
-    return sameStack ? MOTION_CONFIG.withinStack : MOTION_CONFIG.betweenStacks;
+    elements.stageMenuTrigger.setAttribute('aria-expanded', String(open));
+    elements.stageMenuTrigger.dataset.cursorLabel = open ? '關閉階段選單' : '開啟階段選單';
+    elements.stageMenuPanel.hidden = !open;
+    elements.stageMenu?.classList.toggle('is-open', open);
+
+    if (open) {
+      const currentItem = elements.stageMenuItems.find(item => item.getAttribute('aria-current') === 'step');
+      (currentItem || elements.stageMenuItems[0])?.focus();
+    } else if (returnFocus) {
+      elements.stageMenuTrigger.focus();
+    }
   }
 
-  function getStepScrollTarget(target, offset) {
-    const stack = target.closest('.card-stack');
-    const stackSteps = stack ? Array.from(stack.children).filter(child => child.classList.contains('journey-step')) : [];
-    const stackIndex = Math.max(0, stackSteps.indexOf(target));
-    const stackTop = stack ? stack.getBoundingClientRect().top + window.scrollY : target.offsetTop;
-    const stickyTop = Number.parseFloat(window.getComputedStyle(target).top) || 0;
-    return stackTop + stackIndex * target.offsetHeight - stickyTop + offset;
+  function getStepScrollTarget(target, stepNumber) {
+    const offset = window.matchMedia('(max-width: 600px)').matches ? 72 : 96;
+    const naturalTarget = target.getBoundingClientRect().top + window.scrollY - offset;
+    const maximumScrollY = getMaximumScrollY();
+
+    return stepNumber === maxUnlockedStep && Number.isFinite(maximumScrollY)
+      ? Math.min(naturalTarget, maximumScrollY)
+      : naturalTarget;
   }
 
-  function scheduleContentScrollUnlock(config) {
-    clearTimeout(contentScrollUnlockTimer);
-    const delay = Math.max(
-      config.contentScrollRearmDelay,
-      contentScrollUnlockNotBefore - Date.now()
-    );
+  function focusStepHeading(step, duration) {
+    const heading = step.querySelector('h2');
 
-    contentScrollUnlockTimer = window.setTimeout(() => {
-      contentScrollLockedStep = 0;
-      contentScrollUnlockNotBefore = 0;
-    }, Math.max(0, delay));
-  }
+    if (!heading) {
+      return;
+    }
 
-  function lockContentScroll(stepNumber, config, duration) {
-    contentScrollLockedStep = stepNumber;
-    contentScrollUnlockNotBefore = Date.now() + duration * 1000;
-    scheduleContentScrollUnlock(config);
+    heading.setAttribute('tabindex', '-1');
+    window.setTimeout(() => heading.focus({ preventScroll: true }), duration);
   }
 
   function scrollToStep(stepNumber, options) {
-    const target = document.getElementById(`step-${stepNumber}`);
-    const config = getTransitionConfig(activeStep, stepNumber);
+    if (stepNumber < 1 || stepNumber > maxUnlockedStep) {
+      return;
+    }
+
+    const target = steps[stepNumber - 1];
     const duration = options && Number.isFinite(options.duration)
       ? options.duration
-      : config.snapDuration;
-    const offset = options && Number.isFinite(options.offset)
-      ? options.offset
-      : config.snapTargetOffset;
+      : MOTION_CONFIG.sectionTransitionDuration;
 
-    if (target) {
-      const scrollTarget = getStepScrollTarget(target, offset);
-      lockContentScroll(stepNumber, config, duration);
-
-      if (window.tschoolLenis && !prefersReducedMotion()) {
-        window.tschoolLenis.scrollTo(scrollTarget, { duration });
-      } else {
-        window.scrollTo({
-          top: scrollTarget,
-          behavior: prefersReducedMotion() ? 'auto' : 'smooth'
-        });
-      }
+    if (!target) {
+      return;
     }
+
+    resetBoundaryMotion();
+    setActiveStep(stepNumber);
+    const scrollTarget = getStepScrollTarget(target, stepNumber);
+
+    if (window.tschoolLenis && !prefersReducedMotion()) {
+      window.tschoolLenis.scrollTo(scrollTarget, { duration });
+    } else {
+      window.scrollTo({
+        top: scrollTarget,
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth'
+      });
+    }
+
+    focusStepHeading(target, prefersReducedMotion() ? 0 : duration * 1000);
   }
 
   function enterFirstStepWithPageScroll() {
@@ -988,9 +711,8 @@ function initStepJourney() {
       return;
     }
 
-    const config = MOTION_CONFIG.withinStack;
-    const scrollTarget = getStepScrollTarget(target, config.snapTargetOffset);
-    firstStepEntryArmed = true;
+    resetBoundaryMotion();
+    const scrollTarget = getStepScrollTarget(target, 1);
 
     if (window.tschoolLenis && !prefersReducedMotion()) {
       window.tschoolLenis.scrollTo(scrollTarget, {
@@ -1001,78 +723,84 @@ function initStepJourney() {
     }
   }
 
-  function resetReleaseProgress() {
-    releaseDirection = 0;
-    releaseProgress = 0;
-  }
-
-  function startDirectionalCooldown(direction, config) {
-    cooldownDirection = direction;
-    cooldownUntil = Date.now() + config.snapCooldown;
-  }
-
-  function isDirectionCoolingDown(direction) {
-    if (Date.now() >= cooldownUntil) {
-      cooldownDirection = 0;
-      cooldownUntil = 0;
-      return false;
-    }
-
-    return cooldownDirection === direction;
-  }
-
   function setActiveStep(stepNumber) {
-    if (stepNumber === activeStep && steps.some(step => step.classList.contains('is-current'))) {
+    const nextActiveStep = clamp(stepNumber, 1, maxUnlockedStep);
+
+    if (
+      nextActiveStep === activeStep &&
+      renderedUnlockedStep === maxUnlockedStep &&
+      steps.some(step => step.classList.contains('is-current'))
+    ) {
       return;
     }
 
-    activeStep = stepNumber;
+    activeStep = nextActiveStep;
+    renderedUnlockedStep = maxUnlockedStep;
     steps.forEach(step => {
       const number = Number(step.dataset.step);
-      const distance = activeStep - number;
+      const distance = Math.abs(activeStep - number);
       step.classList.toggle('is-current', number === activeStep);
       step.classList.toggle('is-past', number < activeStep);
-      step.classList.toggle('is-past-one', distance === 1);
-      step.classList.toggle('is-past-two', distance === 2);
-      step.classList.toggle('is-buried', distance > 2);
       step.classList.toggle('is-future', number > activeStep);
+      step.classList.toggle('is-locked', number > maxUnlockedStep);
+      step.classList.toggle('is-preview', number === maxUnlockedStep + 1);
+      step.classList.toggle('is-concealed', number > maxUnlockedStep + 1);
+      step.style.setProperty('--section-blur', `${distance === 0 ? 0 : Math.min(12, 2 + distance * 3)}px`);
+      step.style.setProperty('--section-opacity', distance === 0 ? '1' : String(Math.max(0.28, 0.76 - distance * 0.14)));
+      step.style.setProperty('--section-scale', distance === 0 ? '1' : String(Math.max(0.97, 1 - distance * 0.008)));
       step.toggleAttribute('inert', number !== activeStep);
     });
 
-    if (elements.progressCurrent && elements.progressNumber) {
-      const previous = elements.progressCurrent.textContent;
-      elements.progressNumber.dataset.previous = previous;
-      elements.progressNumber.dataset.direction = Number(previous) < activeStep ? 'next' : 'previous';
-      elements.progressCurrent.textContent = String(activeStep);
-      elements.progressNumber.classList.remove('is-changing');
-      void elements.progressNumber.offsetWidth;
-      elements.progressNumber.classList.add('is-changing');
-      clearTimeout(progressTimer);
-      progressTimer = window.setTimeout(() => elements.progressNumber.classList.remove('is-changing'), 360);
+    elements.stageMenuItems.forEach(item => {
+      const targetStep = Number(item.dataset.stepTarget);
+      const isCurrent = targetStep === activeStep;
+      item.toggleAttribute('aria-current', isCurrent);
+      if (isCurrent) item.setAttribute('aria-current', 'step');
+      item.disabled = targetStep > maxUnlockedStep;
+    });
+  }
+
+  function unlockAndScrollToStep(stepNumber) {
+    if (stepNumber < 1 || stepNumber > steps.length) {
+      return;
     }
 
-    if (elements.headerStatus) {
-      const labels = ['選擇年級', '選擇課程', '同步與通知', '檢查設定', '安裝控制臺'];
-      elements.headerStatus.textContent = labels[activeStep - 1];
-    }
-
-    if (elements.previousStep && elements.nextStep) {
-      elements.previousStep.disabled = activeStep === 1;
-      elements.nextStep.disabled = activeStep === steps.length;
-      elements.previousStep.dataset.stepTarget = String(Math.max(1, activeStep - 1));
-      elements.nextStep.dataset.stepTarget = String(Math.min(steps.length, activeStep + 1));
-    }
-
-    resetReleaseProgress();
+    resetBoundaryMotion();
+    maxUnlockedStep = Math.max(maxUnlockedStep, stepNumber);
+    const target = steps[stepNumber - 1];
+    automatedTargetStep = stepNumber;
+    target.classList.add('is-entering');
+    setActiveStep(stepNumber);
+    void target.offsetWidth;
+    requestAnimationFrame(() => {
+      window.tschoolLenis?.resize?.();
+      requestAnimationFrame(() => scrollToStep(stepNumber));
+    });
+    window.setTimeout(() => {
+      automatedTargetStep = 0;
+      target.classList.remove('is-entering');
+      requestUpdate();
+    }, MOTION_CONFIG.sectionTransitionDuration * 1000 + 160);
   }
 
   function updateFromScroll() {
     frameRequested = false;
 
+    if (enforceScrollBoundary()) return;
+
+    if (automatedTargetStep) {
+      setActiveStep(automatedTargetStep);
+      return;
+    }
+
+    const maximumScrollY = getMaximumScrollY();
+    if (Number.isFinite(maximumScrollY) && window.scrollY >= maximumScrollY - 1) {
+      setActiveStep(maxUnlockedStep);
+      return;
+    }
+
     if (wizard && wizard.getBoundingClientRect().top > window.innerHeight * 0.68) {
-      firstStepEntryArmed = true;
       setActiveStep(1);
-      updateExitProgress(Math.min(MOTION_CONFIG.activationLineMax, window.innerHeight * MOTION_CONFIG.activationLineRatio));
       return;
     }
 
@@ -1080,52 +808,208 @@ function initStepJourney() {
       MOTION_CONFIG.activationLineMax,
       window.innerHeight * MOTION_CONFIG.activationLineRatio
     );
-    const firstStepTop = steps[0].getBoundingClientRect().top;
-    const firstStepStickyTop = (Number.parseFloat(window.getComputedStyle(steps[0]).top) || 0)
-      - MOTION_CONFIG.withinStack.snapTargetOffset;
     let closestStep = 1;
 
-    if (
-      firstStepEntryArmed &&
-      firstStepTop <= firstStepStickyTop + MOTION_CONFIG.firstStepSettleTolerance
-    ) {
-      firstStepEntryArmed = false;
-      startDirectionalCooldown(1, MOTION_CONFIG.withinStack);
-    }
-
     steps.forEach(step => {
+      const number = Number(step.dataset.step);
+
+      if (number > maxUnlockedStep) {
+        return;
+      }
+
       const rect = step.getBoundingClientRect();
       if (rect.top <= targetY) {
-        closestStep = Math.max(closestStep, Number(step.dataset.step));
+        closestStep = Math.max(closestStep, number);
       }
     });
 
     setActiveStep(closestStep);
-    updateExitProgress(targetY);
   }
 
-  function updateExitProgress(targetY) {
-    const compact = window.matchMedia('(max-width: 600px)').matches;
-    const exitY = compact ? -9 : -12;
-    const exitScale = compact ? 0.986 : 0.982;
-    const exitRotate = compact ? -0.24 : -0.35;
+  function getMaximumScrollY() {
+    const boundaryStep = steps[maxUnlockedStep - 1];
+    const boundaryCard = boundaryStep?.querySelector('.step-card');
+    const boundaryElement = boundaryStep?.querySelector('.step-completion') || boundaryCard;
+    const previewCard = steps[maxUnlockedStep]?.querySelector('.step-card');
 
-    steps.forEach((step, index) => {
-      const number = Number(step.dataset.step);
-      const nextStep = steps[index + 1];
-      let progress = 0;
+    if (!boundaryElement) {
+      return Number.POSITIVE_INFINITY;
+    }
 
-      if (nextStep && number === activeStep) {
-        const nextTop = nextStep.getBoundingClientRect().top;
-        progress = clamp((window.innerHeight - nextTop) / Math.max(1, window.innerHeight - targetY), 0, 1);
+    const isNarrow = window.matchMedia('(max-width: 600px)').matches;
+    const previewPeek = isNarrow ? 72 : 112;
+    const fallbackPadding = isNarrow ? 32 : 56;
+    const boundaryBottom = getDocumentLayoutTop(boundaryElement) + boundaryElement.offsetHeight;
+    const fallbackTarget = boundaryBottom - window.innerHeight + fallbackPadding;
+    const cardCenterTarget = boundaryCard
+      ? getDocumentLayoutTop(boundaryCard) + boundaryCard.offsetHeight / 2 - window.innerHeight / 2
+      : fallbackTarget;
+    const previewTarget = previewCard
+      ? getDocumentLayoutTop(previewCard) - (window.innerHeight - previewPeek)
+      : fallbackTarget;
+
+    return Math.max(0, fallbackTarget, cardCenterTarget, previewTarget);
+  }
+
+  function getDocumentLayoutTop(element) {
+    let top = 0;
+    let current = element;
+
+    while (current) {
+      top += current.offsetTop;
+      current = current.offsetParent;
+    }
+
+    return top;
+  }
+
+  function getBoundaryElasticLimit() {
+    return window.matchMedia('(max-width: 600px)').matches
+      ? MOTION_CONFIG.boundaryElasticMobile
+      : MOTION_CONFIG.boundaryElasticDesktop;
+  }
+
+  function getBoundaryResistedOffset(rawOverscroll, elasticLimit) {
+    return elasticLimit * (1 - Math.exp(-rawOverscroll / (elasticLimit * 1.4)));
+  }
+
+  function getBoundaryRawOverscroll(offset, elasticLimit) {
+    const ratio = clamp(offset / elasticLimit, 0, 0.985);
+    return -elasticLimit * 1.4 * Math.log(1 - ratio);
+  }
+
+  function setBoundaryScrollPosition(target) {
+    if (window.tschoolLenis) {
+      window.tschoolLenis.scrollTo(target, { immediate: true, force: true });
+    } else {
+      window.scrollTo({ top: target, behavior: 'auto' });
+    }
+  }
+
+  function resetBoundaryMotion() {
+    boundaryMotionId += 1;
+    window.clearTimeout(boundaryReleaseTimer);
+    window.clearTimeout(boundaryFinishTimer);
+    boundaryReleaseTimer = 0;
+    boundaryFinishTimer = 0;
+    boundaryElasticActive = false;
+    boundaryReboundActive = false;
+    boundaryRawOverscroll = 0;
+  }
+
+  function scheduleBoundaryRebound(motionId) {
+    window.clearTimeout(boundaryReleaseTimer);
+    boundaryReleaseTimer = window.setTimeout(() => {
+      if (motionId !== boundaryMotionId) return;
+
+      const maximumScrollY = getMaximumScrollY();
+      let completed = false;
+      boundaryReboundActive = true;
+      boundaryRawOverscroll = 0;
+
+      const finish = () => {
+        if (completed || motionId !== boundaryMotionId) return;
+        completed = true;
+        boundaryElasticActive = false;
+        boundaryReboundActive = false;
+        boundaryFinishTimer = 0;
+        requestUpdate();
+      };
+
+      if (window.tschoolLenis && !prefersReducedMotion()) {
+        window.tschoolLenis.scrollTo(maximumScrollY, {
+          duration: MOTION_CONFIG.boundaryReboundDuration,
+          force: true,
+          onComplete: finish
+        });
+        boundaryFinishTimer = window.setTimeout(
+          finish,
+          MOTION_CONFIG.boundaryReboundDuration * 1000 + 120
+        );
+      } else {
+        window.scrollTo({
+          top: maximumScrollY,
+          behavior: prefersReducedMotion() ? 'auto' : 'smooth'
+        });
+        boundaryFinishTimer = window.setTimeout(
+          finish,
+          prefersReducedMotion() ? 0 : MOTION_CONFIG.boundaryReboundDuration * 1000 + 120
+        );
       }
+    }, MOTION_CONFIG.boundaryReleaseDelay);
+  }
 
-      step.classList.toggle('is-exiting', progress > 0.001);
-      step.style.setProperty('--exit-y', `${(exitY * progress).toFixed(2)}px`);
-      step.style.setProperty('--exit-scale', (1 - (1 - exitScale) * progress).toFixed(4));
-      step.style.setProperty('--exit-rotate', `${(exitRotate * progress).toFixed(3)}deg`);
-      step.style.setProperty('--exit-opacity', (1 - 0.08 * progress).toFixed(3));
-    });
+  function applyBoundaryDelta(deltaY) {
+    const maximumScrollY = getMaximumScrollY();
+
+    if (!Number.isFinite(maximumScrollY)) return false;
+
+    const elasticLimit = getBoundaryElasticLimit();
+    const currentOffset = Math.max(0, window.scrollY - maximumScrollY);
+    const observedRawOverscroll = getBoundaryRawOverscroll(currentOffset, elasticLimit);
+    boundaryRawOverscroll = Math.max(boundaryRawOverscroll, observedRawOverscroll);
+    boundaryRawOverscroll = clamp(
+      boundaryRawOverscroll + deltaY,
+      0,
+      elasticLimit * 12
+    );
+    boundaryMotionId += 1;
+    const motionId = boundaryMotionId;
+    window.clearTimeout(boundaryReleaseTimer);
+    window.clearTimeout(boundaryFinishTimer);
+    boundaryReboundActive = false;
+
+    if (boundaryRawOverscroll <= 0.5) {
+      boundaryElasticActive = false;
+      boundaryRawOverscroll = 0;
+      setBoundaryScrollPosition(maximumScrollY);
+      return true;
+    }
+
+    boundaryElasticActive = true;
+    const resistedOffset = getBoundaryResistedOffset(boundaryRawOverscroll, elasticLimit);
+    setBoundaryScrollPosition(maximumScrollY + resistedOffset);
+    scheduleBoundaryRebound(motionId);
+    return true;
+  }
+
+  function handleBoundaryVirtualScroll(payload) {
+    const event = payload?.event;
+    const deltaY = Number(payload?.deltaY) || 0;
+
+    if (automatedTargetStep || !event?.type.includes('wheel') || deltaY === 0) {
+      return true;
+    }
+
+    const maximumScrollY = getMaximumScrollY();
+    const boundaryEngaged = Number.isFinite(maximumScrollY) && (
+      window.scrollY >= maximumScrollY - 1 ||
+      boundaryElasticActive ||
+      boundaryReboundActive
+    );
+
+    if (!boundaryEngaged || (deltaY < 0 && !boundaryElasticActive && !boundaryReboundActive)) {
+      return true;
+    }
+
+    if (event.cancelable) event.preventDefault();
+    applyBoundaryDelta(deltaY > 0 ? deltaY : deltaY * 1.35);
+    return false;
+  }
+
+  function enforceScrollBoundary() {
+    if (boundaryElasticActive || boundaryReboundActive || automatedTargetStep) {
+      return false;
+    }
+
+    const maximumScrollY = getMaximumScrollY();
+
+    if (window.scrollY <= maximumScrollY + 1) {
+      return false;
+    }
+
+    applyBoundaryDelta(0);
+    return true;
   }
 
   function requestUpdate() {
@@ -1138,98 +1022,102 @@ function initStepJourney() {
   document.addEventListener('click', event => {
     const navigationButton = event.target.closest('[data-step-target]');
     const editButton = event.target.closest('[data-edit-step]');
+    const completionButton = event.target.closest('[data-complete-step]');
 
-    if (navigationButton) scrollToStep(Number(navigationButton.dataset.stepTarget));
-    if (editButton) scrollToStep(Number(editButton.dataset.editStep));
-  });
-
-  wizard.addEventListener('wheel', event => {
-    const direction = Math.sign(event.deltaY);
-
-    if (!direction) {
-      return;
+    if (navigationButton && !navigationButton.disabled) {
+      scrollToStep(Number(navigationButton.dataset.stepTarget));
+      if (elements.stageMenu?.contains(navigationButton)) setStageMenuOpen(false, false);
+    }
+    if (editButton) {
+      scrollToStep(Number(editButton.dataset.editStep));
     }
 
-    const step = steps[activeStep - 1];
-    const card = step ? step.querySelector('.step-card') : null;
+    if (completionButton) {
+      const completedStep = Number(completionButton.dataset.completeStep);
 
-    if (!step || !card) {
-      return;
-    }
-
-    const targetStepNumber = activeStep + direction;
-    const hasTargetStep = targetStepNumber >= 1 && targetStepNumber <= steps.length;
-    const config = hasTargetStep
-      ? getTransitionConfig(activeStep, targetStepNumber)
-      : MOTION_CONFIG.betweenStacks;
-    const atTop = card.scrollTop <= config.edgeTolerance;
-    const atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - config.edgeTolerance;
-    const cardCanScroll = direction > 0 ? !atBottom : !atTop;
-    const eventInsideCard = card.contains(event.target);
-
-    if (activeStep === 1 && firstStepEntryArmed) {
-      resetReleaseProgress();
-      return;
-    }
-
-    // Momentum from the snap gesture must end before the target card can scroll.
-    if (cardCanScroll) {
-      resetReleaseProgress();
-
-      if (contentScrollLockedStep === activeStep) {
-        event.preventDefault();
-        event.stopPropagation();
-        scheduleContentScrollUnlock(config);
+      if (
+        (completedStep === 1 || completedStep === 2) &&
+        (!state.sourceSummary || state.sourceLoading || state.sourceError)
+      ) {
+        showToast(state.sourceError ? '請先重新讀取課表' : '課表仍在讀取中');
         return;
       }
 
-      if (!eventInsideCard) {
-        event.preventDefault();
-        event.stopPropagation();
-        card.scrollTop += event.deltaY;
+      if (completedStep === 1 && !getCurrentGrade()) {
+        showToast('請先選擇年級');
+        return;
       }
-      return;
+
+      if (completedStep === 3 && !validateNotificationEmail()) {
+        elements.notificationEmail.reportValidity();
+        elements.notificationEmail.focus();
+        return;
+      }
+
+      unlockAndScrollToStep(completedStep + 1);
     }
 
-    if (isDirectionCoolingDown(direction)) {
+    if (
+      elements.stageMenu &&
+      !elements.stageMenu.contains(event.target) &&
+      elements.stageMenuTrigger?.getAttribute('aria-expanded') === 'true'
+    ) {
+      setStageMenuOpen(false, false);
+    }
+  });
+
+  elements.stageMenuTrigger?.addEventListener('click', () => {
+    const open = elements.stageMenuTrigger.getAttribute('aria-expanded') !== 'true';
+    setStageMenuOpen(open, false);
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && elements.stageMenuTrigger?.getAttribute('aria-expanded') === 'true') {
       event.preventDefault();
-      event.stopPropagation();
-      resetReleaseProgress();
+      setStageMenuOpen(false, true);
+    }
+  });
+
+  document.addEventListener('tschool:grade-selection-start', () => {
+    const firstStep = steps[0];
+    resetBoundaryMotion();
+    automatedTargetStep = 0;
+    maxUnlockedStep = 1;
+    setActiveStep(1);
+    firstStep.classList.add('is-advancing');
+    window.setTimeout(() => firstStep.classList.remove('is-advancing'), 760);
+  });
+
+  document.addEventListener('tschool:grade-ready', event => {
+    if (
+      event.detail?.gradeName !== getCurrentGrade() ||
+      !state.sourceSummary ||
+      state.sourceLoading ||
+      state.sourceError
+    ) {
       return;
     }
 
-    if (!hasTargetStep) {
-      resetReleaseProgress();
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (releaseDirection !== direction) {
-      releaseDirection = direction;
-      releaseProgress = 0;
-    }
-
-    const multiplier = event.deltaMode === 1 ? 16 : (event.deltaMode === 2 ? window.innerHeight : 1);
-    releaseProgress += Math.abs(event.deltaY * multiplier);
-
-    if (releaseProgress >= config.releaseDelta) {
-      resetReleaseProgress();
-      startDirectionalCooldown(direction, config);
-      scrollToStep(targetStepNumber, {
-        duration: config.snapDuration,
-        offset: config.snapTargetOffset
-      });
-    }
-  }, { passive: false, capture: true });
+    unlockAndScrollToStep(2);
+  });
 
   if (startButton) {
     startButton.addEventListener('click', enterFirstStepWithPageScroll);
   }
 
+  window.tschoolBoundaryVirtualScroll = handleBoundaryVirtualScroll;
+
+  window.addEventListener('wheel', event => {
+    if (window.tschoolLenis) return;
+    const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+    handleBoundaryVirtualScroll({ deltaY: event.deltaY * multiplier, event });
+  }, { passive: false });
+
   window.addEventListener('scroll', requestUpdate, { passive: true });
-  window.addEventListener('resize', requestUpdate);
+  window.addEventListener('resize', () => {
+    enforceScrollBoundary();
+    requestUpdate();
+  });
   setActiveStep(1);
   updateFromScroll();
 }
@@ -1257,34 +1145,49 @@ function renderSettingsSummary() {
     return;
   }
 
-  const selected = Array.from(getSelectedCourses());
-  const checkedHours = Array.from(document.querySelectorAll('input[name="syncHour"]:checked'))
-    .map(input => `${pad2(Number(input.value))}:00`)
-    .sort();
-  const email = elements.notificationEmail.value.trim() || '目前 Google 帳號';
-  const courses = selected.length > 0
-    ? `${selected.length} 門｜${selected.slice(0, 4).join('、')}${selected.length > 4 ? '…' : ''}`
-    : '尚未選擇課程';
-  const hours = checkedHours.length > 0 ? checkedHours.join('、') : `${pad2(Number(elements.notifyHour.value || 5))}:00`;
-  const activityCount = state.sourceSummary
-    ? state.sourceSummary.catalog.activities.filter(item => isActivitySelected(item.title)).length
-    : 0;
-  const activityLabel = elements.includeActivities.checked ? `包含 ${activityCount} 項年級與全校活動` : '不同步年級與全校活動';
+  const selected = Array.from(getSelectedCourses()).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const catalog = state.sourceSummary?.catalog || { courses: [], activities: [] };
+  const selectedActivities = catalog.activities
+    .filter(item => isActivitySelected(item.title))
+    .map(item => item.title);
+  const unselectedCourses = catalog.courses
+    .filter(item => !getSelectedCourses().has(item.title))
+    .map(item => item.title);
+  const unselectedActivities = catalog.activities
+    .filter(item => !isActivitySelected(item.title))
+    .map(item => item.title);
+  const selectedItems = selected.concat(selectedActivities);
+  const unselectedItems = unselectedCourses.concat(unselectedActivities);
+  const email = elements.notificationEmail.value.trim();
+  const notificationTime = `${pad2(Number(elements.notifyHour.value || DEFAULTS.notifyHour))}:00`;
 
   elements.settingsSummary.innerHTML = [
-    renderSummaryItem('年級', getCurrentGrade(), 1),
-    renderSummaryItem('課程', courses, 2),
-    renderSummaryItem('每日同步', hours, 3),
-    renderSummaryItem('通知與活動', `${email}｜${activityLabel}`, 3)
+    renderSummaryRow([
+      ['你選的年級是：', getCurrentGrade() || '尚未選擇']
+    ], 1, '修改年級'),
+    renderSummaryRow([
+      ['你選的課程與活動有：', selectedItems.length ? selectedItems.join('、') : '尚未選擇'],
+      ['你「沒」選的課程與活動有：', unselectedItems.length ? unselectedItems.join('、') : '沒有']
+    ], 2, '修改課程與活動'),
+    renderSummaryRow([
+      ['你想用來收通知的 Email 是：', email || '未填寫', email ? '' : 'is-error'],
+      ['你想收到通知的時間是：', notificationTime]
+    ], 3, '修改通知偏好')
   ].join('');
 }
 
-function renderSummaryItem(label, value, editStep) {
+function renderSummaryRow(lines, editStep, editLabel) {
   return [
-    '<section class="summary-item">',
-    `<span>${escapeHtml(label)}</span>`,
-    `<strong>${escapeHtml(value)}</strong>`,
-    `<button type="button" class="summary-edit" data-edit-step="${editStep}" data-cursor-label="修改" aria-label="修改${escapeHtml(label)}">↗</button>`,
+    '<section class="summary-row-component">',
+    '<div class="summary-row-copy">',
+    lines.map(([label, value, tone]) => [
+      '<div class="summary-line">',
+      `<strong>${escapeHtml(label)}</strong>`,
+      `<span class="summary-value${tone ? ` ${tone}` : ''}">${escapeHtml(value)}</span>`,
+      '</div>'
+    ].join('')).join(''),
+    '</div>',
+    `<button type="button" class="icon-button summary-edit" data-edit-step="${editStep}" data-cursor-label="修改" aria-label="${escapeHtml(editLabel)}"><img src="assets/icon-arrow-up-right.svg" alt=""></button>`,
     '</section>'
   ].join('');
 }
@@ -1384,10 +1287,6 @@ function normalizeSearchText(value) {
     .replace(/（/g, '(')
     .replace(/）/g, ')')
     .toLowerCase();
-}
-
-function formatDateLabel(date) {
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function escapeHtml(value) {
