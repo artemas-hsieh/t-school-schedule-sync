@@ -32,7 +32,7 @@ html {
   min-width: 320px;
   max-width: 100%;
   overflow-x: clip;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   background: var(--paper);
 }
 
@@ -1464,6 +1464,32 @@ textarea::placeholder {
   display: block;
 }
 
+.sheet-template-link {
+  display: inline-flex;
+  min-height: 36px;
+  margin-top: 14px;
+  padding: 8px 12px;
+  align-items: center;
+  border: 1px solid #79d5b8;
+  color: #dcebe5;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+}
+
+.sheet-template-link:hover {
+  background: #79d5b8;
+  color: var(--ink);
+  box-shadow: var(--shadow-action-hover);
+  transform: translate(-1px, -1px);
+}
+
+.sheet-template-link:active {
+  box-shadow: none;
+  transform: translate(1px, 1px);
+}
+
 .steps-list strong {
   margin-bottom: 6px;
   font-size: 0.84rem;
@@ -2373,6 +2399,7 @@ textarea::placeholder {
   --surface-red: #fae3df;
   --surface-loading: rgba(240, 90, 71, 0.12);
   --connector-fog-rgb: 231, 241, 237;
+  --shadow-action-hover: 4px 4px 0 rgba(20, 33, 29, 0.2);
   --radius-card: 6px;
   --radius-control: 4px;
   --control-height: 48px;
@@ -3982,6 +4009,87 @@ select,
   transform: translateY(var(--space-5)) scale(0.982);
 }
 
+/*
+ * CSS blur radii are uniform within one filter. Five masked backdrop layers
+ * cross-fade discrete radii so the fog reads as a continuous 2px -> 48px blur.
+ */
+.progressive-blur {
+  --fog-direction: to bottom;
+  position: absolute;
+  inset: 0 max(var(--space-6), calc((100vw - 1120px) / 2));
+  z-index: 6;
+  display: none;
+  overflow: hidden;
+  background: linear-gradient(
+    var(--fog-direction),
+    rgba(var(--connector-fog-rgb), 0.01) 0%,
+    rgba(var(--connector-fog-rgb), 0.22) 100%
+  );
+  pointer-events: none;
+}
+
+.journey-step.is-preview > .progressive-blur,
+.journey-step.is-past:has(+ .journey-step.is-current) > .progressive-blur {
+  display: block;
+}
+
+.journey-step.is-past:has(+ .journey-step.is-current) > .progressive-blur {
+  --fog-direction: to top;
+}
+
+.progressive-blur-layer {
+  position: absolute;
+  inset: -56px 0;
+  background: rgba(var(--connector-fog-rgb), 0.018);
+  -webkit-backdrop-filter: blur(var(--fog-blur));
+  backdrop-filter: blur(var(--fog-blur));
+  -webkit-mask-image: var(--fog-mask);
+  mask-image: var(--fog-mask);
+}
+
+.progressive-blur-layer-1 {
+  --fog-blur: 2px;
+  --fog-mask: linear-gradient(var(--fog-direction), transparent 0%, rgba(0, 0, 0, 0.46) 12%, #000 24%, #000 31%, rgba(0, 0, 0, 0.5) 42%, transparent 54%);
+}
+
+.progressive-blur-layer-2 {
+  --fog-blur: 6px;
+  --fog-mask: linear-gradient(var(--fog-direction), transparent 14%, rgba(0, 0, 0, 0.45) 28%, #000 42%, rgba(0, 0, 0, 0.52) 55%, transparent 69%);
+}
+
+.progressive-blur-layer-3 {
+  --fog-blur: 14px;
+  --fog-mask: linear-gradient(var(--fog-direction), transparent 32%, rgba(0, 0, 0, 0.5) 46%, #000 59%, rgba(0, 0, 0, 0.5) 71%, transparent 83%);
+}
+
+.progressive-blur-layer-4 {
+  --fog-blur: 28px;
+  --fog-mask: linear-gradient(var(--fog-direction), transparent 52%, rgba(0, 0, 0, 0.5) 66%, #000 78%, rgba(0, 0, 0, 0.58) 89%, transparent 100%);
+}
+
+.progressive-blur-layer-5 {
+  --fog-blur: 48px;
+  --fog-mask: linear-gradient(var(--fog-direction), transparent 72%, rgba(0, 0, 0, 0.52) 86%, #000 100%);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .journey-step.is-preview::after,
+  .journey-step.is-past:has(+ .journey-step.is-current)::after {
+    display: none;
+  }
+
+  .journey-step.is-preview .step-card,
+  .journey-step.is-past:has(+ .journey-step.is-current) .step-card {
+    filter: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .progressive-blur {
+    display: none !important;
+  }
+}
+
 .journey-step.is-entering .step-card {
   animation: section-reveal 720ms var(--ease-out) both;
 }
@@ -4113,6 +4221,12 @@ select,
 
 .journey-form {
   gap: 0;
+  transform: translate3d(0, calc(-1 * var(--boundary-pull, 0px)), 0);
+  will-change: transform;
+}
+
+.journey-form.is-boundary-rebounding {
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .journey-step {
@@ -4259,6 +4373,85 @@ select,
 .course-card:has(input:checked):active {
   box-shadow: none;
   transform: translate(1px, 1px);
+}
+
+/* Primary actions share the same quiet depth instead of complementary-color shadows. */
+.start-button:hover,
+.hero-copy .start-button:hover,
+.copy-button:hover,
+.calendar-link:hover {
+  box-shadow: var(--shadow-action-hover);
+}
+
+/* The cursor uses only ink/paper tones and switches according to the surface below it. */
+.kinetic-cursor {
+  --cursor-fill: var(--ink);
+  --cursor-contrast: var(--paper-bright);
+  color: var(--cursor-fill);
+  mix-blend-mode: normal;
+}
+
+.kinetic-cursor.is-on-dark {
+  --cursor-fill: var(--paper-bright);
+  --cursor-contrast: var(--ink);
+}
+
+.kinetic-cursor::after {
+  z-index: 1;
+  border-color: currentColor;
+  opacity: 0.38;
+}
+
+.cursor-lens {
+  position: absolute;
+  top: -22px;
+  left: -22px;
+  z-index: 0;
+  width: 44px;
+  height: 44px;
+  border: 1px solid color-mix(in srgb, currentColor 34%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  -webkit-backdrop-filter: blur(1.5px) contrast(1.06);
+  backdrop-filter: blur(1.5px) contrast(1.06);
+  -webkit-mask-image: radial-gradient(circle, #000 0 46%, rgba(0, 0, 0, 0.82) 62%, transparent 100%);
+  mask-image: radial-gradient(circle, #000 0 46%, rgba(0, 0, 0, 0.82) 62%, transparent 100%);
+  opacity: var(--cursor-lens-opacity, 0.42);
+  transform: rotate(var(--cursor-angle, 0deg)) scaleX(var(--cursor-lens-stretch, 1)) scaleY(var(--cursor-lens-squash, 1));
+  transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out);
+  will-change: opacity, transform;
+}
+
+.cursor-pointer,
+.kinetic-cursor.is-text .cursor-pointer {
+  z-index: 2;
+  background: var(--cursor-fill);
+}
+
+.cursor-pointer {
+  transition-duration: 140ms, 140ms, 120ms, 140ms, 140ms, 55ms;
+}
+
+.cursor-caption {
+  z-index: 3;
+  border-color: var(--cursor-fill);
+  background: var(--cursor-fill);
+  color: var(--cursor-contrast);
+}
+
+.kinetic-cursor.is-text .cursor-lens {
+  width: 30px;
+  height: 36px;
+  top: -18px;
+  left: -15px;
+  border-radius: 8px;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-form.is-boundary-rebounding {
+    transition: none;
+  }
 }
 
 @media (max-width: 760px) {

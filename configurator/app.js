@@ -22,18 +22,28 @@ const DEFAULTS = {
   calendarName: 'T-SCHOOL 課表'
 };
 
+// Temporary feature switch: set to true to restore Lenis and animated page scrolling.
+const ENABLE_SMOOTH_SCROLL = true;
+
+// Set this to a published Google Sheets `/copy` URL when the hosted template is ready.
+// Until then, the installation guide downloads the verified local workbook template.
+const GOOGLE_SHEETS_TEMPLATE_COPY_URL = '';
+const LOCAL_SHEETS_TEMPLATE_URL = 'assets/t-school-control-panel-template.xlsx';
+
 // Journey tuning: each completed section reveals the next one in the vertical narrative.
 const MOTION_CONFIG = Object.freeze({
   sectionTransitionDuration: 0.72,
-  boundaryReleaseDelay: 120,
-  boundaryReboundDuration: 0.52,
-  boundaryElasticDesktop: 72,
-  boundaryElasticMobile: 44,
+  boundaryReleaseDelay: 90,
+  boundaryReboundDuration: 0.36,
+  boundaryElasticDesktop: 56,
+  boundaryElasticMobile: 36,
   activationLineRatio: 0.34,
   activationLineMax: 240,
   homeEntryScrollDuration: 0.9,
   heroTileTravel: 0.72,
-  heroTileStagger: 0.08
+  heroTileStagger: 0.08,
+  cursorPositionEase: 0.38,
+  cursorAngleEase: 0.3
 });
 
 const state = {
@@ -68,7 +78,9 @@ const elements = {
   stageMenuPanel: document.querySelector('#stage-menu-panel'),
   stageMenuItems: Array.from(document.querySelectorAll('#stage-menu-panel [data-step-target]')),
   codeWindow: document.querySelector('#code-window'),
-  fullCodeToggle: document.querySelector('#full-code-toggle')
+  fullCodeToggle: document.querySelector('#full-code-toggle'),
+  sheetTemplateLink: document.querySelector('#sheet-template-link'),
+  sheetTemplateNote: document.querySelector('#sheet-template-note')
 };
 
 function init() {
@@ -76,12 +88,39 @@ function init() {
   renderNotifyHours();
   elements.notifyHour.value = String(DEFAULTS.notifyHour);
   updateNotifyHourState();
+  configureSheetTemplateLink();
   bindEvents();
   setupValidation();
   initVisualExperience();
   renderCourses();
   updateOutput();
   renderSettingsSummary();
+}
+
+function configureSheetTemplateLink() {
+  if (!elements.sheetTemplateLink || !elements.sheetTemplateNote) return;
+
+  const isGoogleCopyUrl = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[^/]+\/copy(?:[?#].*)?$/i
+    .test(GOOGLE_SHEETS_TEMPLATE_COPY_URL);
+
+  if (isGoogleCopyUrl) {
+    elements.sheetTemplateLink.href = GOOGLE_SHEETS_TEMPLATE_COPY_URL;
+    elements.sheetTemplateLink.textContent = '建立自己的控制臺副本 ↗';
+    elements.sheetTemplateLink.target = '_blank';
+    elements.sheetTemplateLink.rel = 'noopener';
+    elements.sheetTemplateLink.removeAttribute('download');
+    elements.sheetTemplateLink.dataset.cursorLabel = '建立控制臺副本';
+    elements.sheetTemplateNote.textContent = '開啟後按「建立副本」即可；不需要在儲存格中輸入資料。';
+    return;
+  }
+
+  elements.sheetTemplateLink.href = LOCAL_SHEETS_TEMPLATE_URL;
+  elements.sheetTemplateLink.textContent = '下載控制臺範本';
+  elements.sheetTemplateLink.download = 't-school-control-panel-template.xlsx';
+  elements.sheetTemplateLink.removeAttribute('target');
+  elements.sheetTemplateLink.removeAttribute('rel');
+  elements.sheetTemplateLink.dataset.cursorLabel = '下載控制臺範本';
+  elements.sheetTemplateNote.textContent = '下載後上傳至 Google Drive；設定都在安裝完成後的側欄進行，不需要編輯儲存格。';
 }
 
 function bindEvents() {
@@ -529,13 +568,32 @@ function showToast(message) {
 function initVisualExperience() {
   initSmoothScroll();
   initHeroScroll();
+  initProgressiveBlurLayers();
   initStepJourney();
   initCodeDisclosure();
   initKineticCursor();
 }
 
+function initProgressiveBlurLayers() {
+  document.querySelectorAll('.journey-step').forEach(step => {
+    if (step.querySelector(':scope > .progressive-blur')) return;
+
+    const fog = document.createElement('span');
+    fog.className = 'progressive-blur';
+    fog.setAttribute('aria-hidden', 'true');
+
+    for (let index = 0; index < 5; index += 1) {
+      const layer = document.createElement('span');
+      layer.className = `progressive-blur-layer progressive-blur-layer-${index + 1}`;
+      fog.append(layer);
+    }
+
+    step.append(fog);
+  });
+}
+
 function initSmoothScroll() {
-  const canSmooth = window.matchMedia('(pointer: fine) and (prefers-reduced-motion: no-preference)').matches;
+  const canSmooth = smoothScrollEnabled() && window.matchMedia('(pointer: fine)').matches;
 
   if (!canSmooth || typeof window.Lenis !== 'function') {
     return;
@@ -618,6 +676,7 @@ function initStepJourney() {
   const steps = Array.from(document.querySelectorAll('.journey-step'));
   const startButton = document.getElementById('start-config');
   const wizard = document.getElementById('wizard');
+  const journeyForm = elements.form;
 
   if (steps.length === 0) {
     return;
@@ -692,16 +751,16 @@ function initStepJourney() {
     setActiveStep(stepNumber);
     const scrollTarget = getStepScrollTarget(target, stepNumber);
 
-    if (window.tschoolLenis && !prefersReducedMotion()) {
+    if (window.tschoolLenis && smoothScrollEnabled()) {
       window.tschoolLenis.scrollTo(scrollTarget, { duration });
     } else {
       window.scrollTo({
         top: scrollTarget,
-        behavior: prefersReducedMotion() ? 'auto' : 'smooth'
+        behavior: smoothScrollEnabled() ? 'smooth' : 'auto'
       });
     }
 
-    focusStepHeading(target, prefersReducedMotion() ? 0 : duration * 1000);
+    focusStepHeading(target, smoothScrollEnabled() ? duration * 1000 : 0);
   }
 
   function enterFirstStepWithPageScroll() {
@@ -714,12 +773,12 @@ function initStepJourney() {
     resetBoundaryMotion();
     const scrollTarget = getStepScrollTarget(target, 1);
 
-    if (window.tschoolLenis && !prefersReducedMotion()) {
+    if (window.tschoolLenis && smoothScrollEnabled()) {
       window.tschoolLenis.scrollTo(scrollTarget, {
         duration: MOTION_CONFIG.homeEntryScrollDuration
       });
     } else {
-      window.scrollTo({ top: scrollTarget, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      window.scrollTo({ top: scrollTarget, behavior: smoothScrollEnabled() ? 'smooth' : 'auto' });
     }
   }
 
@@ -873,17 +932,37 @@ function initStepJourney() {
     return elasticLimit * (1 - Math.exp(-rawOverscroll / (elasticLimit * 1.4)));
   }
 
-  function getBoundaryRawOverscroll(offset, elasticLimit) {
-    const ratio = clamp(offset / elasticLimit, 0, 0.985);
+  function getBoundaryRawOffset(resistedOffset, elasticLimit) {
+    const ratio = clamp(resistedOffset / elasticLimit, 0, 0.999);
     return -elasticLimit * 1.4 * Math.log(1 - ratio);
   }
 
-  function setBoundaryScrollPosition(target) {
+  function getCurrentBoundaryVisualOffset() {
+    if (!journeyForm) return 0;
+
+    const transform = window.getComputedStyle(journeyForm).transform;
+    if (!transform || transform === 'none') return 0;
+
+    const values = transform.slice(transform.indexOf('(') + 1, -1)
+      .match(/-?[\d.]+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
+    const translateY = transform.startsWith('matrix3d(') ? values[13] : values[5];
+    return Number.isFinite(translateY) ? Math.max(0, -translateY) : 0;
+  }
+
+  function clampBoundaryScroll(maximumScrollY) {
+    if (Math.abs(window.scrollY - maximumScrollY) <= 0.5) return;
+
     if (window.tschoolLenis) {
-      window.tschoolLenis.scrollTo(target, { immediate: true, force: true });
+      window.tschoolLenis.scrollTo(maximumScrollY, { immediate: true, force: true });
     } else {
-      window.scrollTo({ top: target, behavior: 'auto' });
+      window.scrollTo({ top: maximumScrollY, behavior: 'auto' });
     }
+  }
+
+  function setBoundaryVisualOffset(offset, rebound) {
+    if (!journeyForm) return;
+    journeyForm.classList.toggle('is-boundary-rebounding', Boolean(rebound));
+    journeyForm.style.setProperty('--boundary-pull', `${Math.max(0, offset).toFixed(2)}px`);
   }
 
   function resetBoundaryMotion() {
@@ -895,6 +974,7 @@ function initStepJourney() {
     boundaryElasticActive = false;
     boundaryReboundActive = false;
     boundaryRawOverscroll = 0;
+    setBoundaryVisualOffset(0, false);
   }
 
   function scheduleBoundaryRebound(motionId) {
@@ -902,40 +982,23 @@ function initStepJourney() {
     boundaryReleaseTimer = window.setTimeout(() => {
       if (motionId !== boundaryMotionId) return;
 
-      const maximumScrollY = getMaximumScrollY();
-      let completed = false;
       boundaryReboundActive = true;
       boundaryRawOverscroll = 0;
+      setBoundaryVisualOffset(0, true);
 
       const finish = () => {
-        if (completed || motionId !== boundaryMotionId) return;
-        completed = true;
+        if (motionId !== boundaryMotionId) return;
         boundaryElasticActive = false;
         boundaryReboundActive = false;
         boundaryFinishTimer = 0;
+        setBoundaryVisualOffset(0, false);
         requestUpdate();
       };
 
-      if (window.tschoolLenis && !prefersReducedMotion()) {
-        window.tschoolLenis.scrollTo(maximumScrollY, {
-          duration: MOTION_CONFIG.boundaryReboundDuration,
-          force: true,
-          onComplete: finish
-        });
-        boundaryFinishTimer = window.setTimeout(
-          finish,
-          MOTION_CONFIG.boundaryReboundDuration * 1000 + 120
-        );
-      } else {
-        window.scrollTo({
-          top: maximumScrollY,
-          behavior: prefersReducedMotion() ? 'auto' : 'smooth'
-        });
-        boundaryFinishTimer = window.setTimeout(
-          finish,
-          prefersReducedMotion() ? 0 : MOTION_CONFIG.boundaryReboundDuration * 1000 + 120
-        );
-      }
+      boundaryFinishTimer = window.setTimeout(
+        finish,
+        prefersReducedMotion() ? 0 : MOTION_CONFIG.boundaryReboundDuration * 1000 + 80
+      );
     }, MOTION_CONFIG.boundaryReleaseDelay);
   }
 
@@ -945,9 +1008,19 @@ function initStepJourney() {
     if (!Number.isFinite(maximumScrollY)) return false;
 
     const elasticLimit = getBoundaryElasticLimit();
-    const currentOffset = Math.max(0, window.scrollY - maximumScrollY);
-    const observedRawOverscroll = getBoundaryRawOverscroll(currentOffset, elasticLimit);
-    boundaryRawOverscroll = Math.max(boundaryRawOverscroll, observedRawOverscroll);
+    if (boundaryReboundActive) {
+      const currentVisualOffset = getCurrentBoundaryVisualOffset();
+      boundaryReboundActive = false;
+      setBoundaryVisualOffset(currentVisualOffset, false);
+      void journeyForm.offsetWidth;
+      boundaryRawOverscroll = Math.max(
+        boundaryRawOverscroll,
+        getBoundaryRawOffset(currentVisualOffset, elasticLimit)
+      );
+    }
+
+    const observedOverscroll = Math.max(0, window.scrollY - maximumScrollY);
+    boundaryRawOverscroll = Math.max(boundaryRawOverscroll, observedOverscroll);
     boundaryRawOverscroll = clamp(
       boundaryRawOverscroll + deltaY,
       0,
@@ -958,17 +1031,18 @@ function initStepJourney() {
     window.clearTimeout(boundaryReleaseTimer);
     window.clearTimeout(boundaryFinishTimer);
     boundaryReboundActive = false;
+    clampBoundaryScroll(maximumScrollY);
 
     if (boundaryRawOverscroll <= 0.5) {
       boundaryElasticActive = false;
       boundaryRawOverscroll = 0;
-      setBoundaryScrollPosition(maximumScrollY);
+      setBoundaryVisualOffset(0, false);
       return true;
     }
 
     boundaryElasticActive = true;
     const resistedOffset = getBoundaryResistedOffset(boundaryRawOverscroll, elasticLimit);
-    setBoundaryScrollPosition(maximumScrollY + resistedOffset);
+    setBoundaryVisualOffset(prefersReducedMotion() ? 0 : resistedOffset, false);
     scheduleBoundaryRebound(motionId);
     return true;
   }
@@ -1212,7 +1286,34 @@ function initKineticCursor() {
   let previousY = targetY;
   let targetAngle = 0;
   let currentAngle = 0;
+  let cursorVelocity = 0;
+  let targetCursorVelocity = 0;
   let visible = false;
+
+  function cursorSurfaceIsDark(target) {
+    let element = target instanceof Element ? target : target?.parentElement;
+
+    while (element) {
+      const color = window.getComputedStyle(element).backgroundColor;
+      const channels = color.match(/[\d.]+/g)?.map(Number) || [];
+      const alpha = channels.length > 3 ? channels[3] : 1;
+
+      if (channels.length >= 3 && alpha > 0.08) {
+        const [red, green, blue] = channels.slice(0, 3).map(value => {
+          const normalized = value / 255;
+          return normalized <= 0.03928
+            ? normalized / 12.92
+            : Math.pow((normalized + 0.055) / 1.055, 2.4);
+        });
+        const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+        return luminance < 0.34;
+      }
+
+      element = element.parentElement;
+    }
+
+    return false;
+  }
 
   function updateCursorContext(target) {
     const labelled = target && target.closest ? target.closest('[data-cursor-label]') : null;
@@ -1222,6 +1323,7 @@ function initKineticCursor() {
 
     cursor.classList.toggle('has-label', Boolean(labelled) && !textTarget);
     cursor.classList.toggle('is-text', Boolean(textTarget));
+    cursor.classList.toggle('is-on-dark', cursorSurfaceIsDark(target));
     caption.textContent = labelled && !textTarget ? labelled.dataset.cursorLabel : '';
   }
 
@@ -1234,6 +1336,8 @@ function initKineticCursor() {
     if (Math.hypot(dx, dy) > 1.5) {
       targetAngle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
     }
+
+    targetCursorVelocity = clamp(Math.hypot(dx, dy) / 34, 0, 1);
 
     previousX = event.clientX;
     previousY = event.clientY;
@@ -1248,12 +1352,17 @@ function initKineticCursor() {
   }
 
   function animate() {
-    currentX += (targetX - currentX) * 0.24;
-    currentY += (targetY - currentY) * 0.24;
+    currentX += (targetX - currentX) * MOTION_CONFIG.cursorPositionEase;
+    currentY += (targetY - currentY) * MOTION_CONFIG.cursorPositionEase;
     let angleDelta = ((targetAngle - currentAngle + 540) % 360) - 180;
-    currentAngle += angleDelta * 0.18;
+    currentAngle += angleDelta * MOTION_CONFIG.cursorAngleEase;
+    cursorVelocity += (targetCursorVelocity - cursorVelocity) * 0.24;
+    targetCursorVelocity *= 0.82;
     cursor.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
     cursor.style.setProperty('--cursor-angle', cursor.classList.contains('is-text') ? '0deg' : `${currentAngle}deg`);
+    cursor.style.setProperty('--cursor-lens-opacity', (0.42 + cursorVelocity * 0.36).toFixed(3));
+    cursor.style.setProperty('--cursor-lens-stretch', (1 + cursorVelocity * 0.22).toFixed(3));
+    cursor.style.setProperty('--cursor-lens-squash', (1 - cursorVelocity * 0.08).toFixed(3));
     requestAnimationFrame(animate);
   }
 
@@ -1275,6 +1384,10 @@ function initKineticCursor() {
 
 function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function smoothScrollEnabled() {
+  return ENABLE_SMOOTH_SCROLL && !prefersReducedMotion();
 }
 
 function clamp(value, min, max) {
