@@ -48,44 +48,58 @@
     <section class="hero-stage" id="hero-stage" aria-labelledby="page-title">
       <div class="hero-sticky">
         <div class="hero-copy">
-          <p class="eyebrow">T-SCHOOL 行程同步控制臺產生器</p>
           <h1 id="page-title"><span>T-SCHOOL</span><span>Schedule Sync</span></h1>
-          <p class="intro">選好年級、課程與同步偏好，產生一份由你自己持有的 Apps Script。安裝後可直接在試算表控制臺調整設定、查看狀態與立即同步</p>
+          <p class="intro">省下常常找課表、看課網消耗的時間與精力！</p>
+          <ul class="hero-benefits" aria-label="行程同步功能">
+            <li>把你的課程與活動定時同步到行事曆上</li>
+            <li>告訴你每堂課要幹嘛</li>
+            <li>即時通知你新調課</li>
+          </ul>
           <button type="button" class="start-button" id="start-config" data-cursor-label="開始設定">
             <span>開始設定 ↓</span>
           </button>
         </div>
 
         <div class="hero-visual" aria-hidden="true">
-          <section class="schedule-board visual-board">
-            <div class="board-label"><span>課表</span><span>08:00–16:00</span></div>
-            <div class="schedule-grid">
-              <span></span><span></span><span></span>
-              <span></span><span></span><span></span>
-              <span></span><span></span><span></span>
-            </div>
-          </section>
+          <div class="hero-paper-track">
+            <section class="schedule-board visual-board">
+              <div class="board-label"><span>課表</span><span>08:00–16:00</span></div>
+              <div class="schedule-grid">
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+              </div>
+            </section>
 
-          <div class="transfer-path">
-            <span class="path-tick"></span>
-            <span class="path-tick"></span>
-            <span class="path-tick"></span>
-            <span class="path-tick"></span>
+            <div class="transfer-path">
+              <span class="path-tick"></span>
+              <span class="path-tick"></span>
+              <span class="path-tick"></span>
+              <span class="path-tick"></span>
+            </div>
+
+            <section class="calendar-board visual-board">
+              <div class="board-label"><span>日曆</span><span>本週</span></div>
+              <div class="calendar-grid">
+                <span class="calendar-time">09</span><span></span>
+                <span class="calendar-time">11</span><span></span>
+                <span class="calendar-time">14</span><span></span>
+              </div>
+              <span class="sync-complete">同步完成</span>
+            </section>
+
+            <span class="transfer-tile tile-one" data-tile-index="0">實體課 [吉林基地]</span>
+            <span class="transfer-tile tile-two" data-tile-index="1">線上課 [線上教室]</span>
+            <span class="transfer-tile tile-three" data-tile-index="2">活動 [吉林基地]</span>
+
+            <span class="hero-progressive-fog" aria-hidden="true">
+              <i class="hero-fog-layer hero-fog-layer-1"></i>
+              <i class="hero-fog-layer hero-fog-layer-2"></i>
+              <i class="hero-fog-layer hero-fog-layer-3"></i>
+              <i class="hero-fog-layer hero-fog-layer-4"></i>
+              <i class="hero-fog-layer hero-fog-layer-5"></i>
+            </span>
           </div>
-
-          <section class="calendar-board visual-board">
-            <div class="board-label"><span>日曆</span><span>本週</span></div>
-            <div class="calendar-grid">
-              <span class="calendar-time">09</span><span></span>
-              <span class="calendar-time">11</span><span></span>
-              <span class="calendar-time">14</span><span></span>
-            </div>
-            <span class="sync-complete">同步完成</span>
-          </section>
-
-          <span class="transfer-tile tile-one" data-tile-index="0">課程</span>
-          <span class="transfer-tile tile-two" data-tile-index="1">選修</span>
-          <span class="transfer-tile tile-three" data-tile-index="2">活動</span>
         </div>
 
       </div>
@@ -147,7 +161,7 @@
 
           </div>
           <div class="step-completion">
-            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="完成選課" disabled>我選好了！</button>
+            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="確認選課" aria-keyshortcuts="Enter" aria-pressed="false" disabled>選好了 ↵</button>
           </div>
         </section>
 
@@ -180,7 +194,7 @@
 
           </div>
           <div class="step-completion">
-            <button type="button" class="step-complete-button" data-complete-step="3" data-cursor-label="完成通知設定">設定完成！</button>
+            <button type="button" class="step-complete-button" data-complete-step="3" data-cursor-label="確認通知設定" aria-keyshortcuts="Enter" aria-pressed="false">Email 和通知時間都沒錯 ↵</button>
           </div>
         </section>
 
@@ -198,7 +212,7 @@
 
           </div>
           <div class="step-completion">
-            <button type="button" class="step-complete-button" data-complete-step="4" data-cursor-label="產生安裝程式碼">產生安裝程式碼</button>
+            <button type="button" class="step-complete-button" data-complete-step="4" data-cursor-label="產生安裝程式碼" aria-keyshortcuts="Enter" aria-pressed="false">產生安裝程式碼 ↵</button>
           </div>
         </section>
 
@@ -217,7 +231,7 @@
                 <span>Code.gs</span>
                 <button type="button" id="full-code-toggle" aria-expanded="false" aria-controls="generated-code" data-cursor-label="查看完整程式碼">查看完整程式碼</button>
               </div>
-              <textarea id="generated-code" spellcheck="false" readonly aria-label="產生的 Code.gs" data-cursor-mode="text"></textarea>
+              <textarea id="generated-code" spellcheck="false" readonly aria-label="產生的 Code.gs" data-cursor-mode="text" data-lenis-prevent></textarea>
             </div>
 
             <section class="install-steps" aria-labelledby="steps-title">

@@ -31,17 +31,28 @@ const GOOGLE_SHEETS_TEMPLATE_COPY_URL = '';
 const LOCAL_SHEETS_TEMPLATE_URL = 'assets/t-school-control-panel-template.xlsx';
 
 // Journey tuning: each completed section reveals the next one in the vertical narrative.
+// Scroll feel: raise lerp/multipliers for a faster response; lower them for a softer glide.
+// Boundary feel: distance starts the slowdown, exponent shapes its curve, and
+// minimumFactor keeps the last part moving before it settles exactly on the limit.
 const MOTION_CONFIG = Object.freeze({
   sectionTransitionDuration: 0.72,
-  boundaryReleaseDelay: 90,
-  boundaryReboundDuration: 0.36,
-  boundaryElasticDesktop: 56,
-  boundaryElasticMobile: 36,
+  completionPressDuration: 150,
+  scrollLerpDesktop: 0.2,
+  scrollLerpTouch: 0.2,
+  scrollWheelMultiplier: 1,
+  scrollTouchMultiplier: 0.9,
+  scrollTouchInertiaExponent: 1.35,
+  boundarySlowdownDistanceDesktop: 200,
+  boundarySlowdownDistanceMobile: 96,
+  boundarySlowdownExponent: 1.8,
+  boundaryMinimumFactor: 0.01,
+  boundarySnapDistance: 1.5,
   activationLineRatio: 0.34,
   activationLineMax: 240,
   homeEntryScrollDuration: 0.9,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
+  heroMobilePaperTravelRatio: 0.24,
   cursorPositionEase: 0.38,
   cursorAngleEase: 0.3
 });
@@ -135,6 +146,12 @@ function bindEvents() {
 
     if (event.target === elements.notificationEmail) {
       updateNotifyHourState();
+    }
+
+    if (event.target === elements.notificationEmail || event.target === elements.notifyHour) {
+      document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
+        detail: { step: 3 }
+      }));
     }
 
     updateOutput();
@@ -366,6 +383,9 @@ function handleCourseSelectionChange(event) {
       excluded.add(input.value);
     }
 
+    document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
+      detail: { step: 2 }
+    }));
     renderCourses();
     updateOutput();
     renderSettingsSummary();
@@ -380,6 +400,9 @@ function handleCourseSelectionChange(event) {
     selected.delete(input.value);
   }
 
+  document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
+    detail: { step: 2 }
+  }));
   renderCourses();
   updateOutput();
   renderSettingsSummary();
@@ -576,35 +599,45 @@ function initVisualExperience() {
 
 function initProgressiveBlurLayers() {
   document.querySelectorAll('.journey-step').forEach(step => {
-    if (step.querySelector(':scope > .progressive-blur')) return;
+    const createFog = (className, layerClassName) => {
+      if (step.querySelector(`:scope > .${className}`)) return;
 
-    const fog = document.createElement('span');
-    fog.className = 'progressive-blur';
-    fog.setAttribute('aria-hidden', 'true');
+      const fog = document.createElement('span');
+      fog.className = className;
+      fog.setAttribute('aria-hidden', 'true');
 
-    for (let index = 0; index < 5; index += 1) {
-      const layer = document.createElement('span');
-      layer.className = `progressive-blur-layer progressive-blur-layer-${index + 1}`;
-      fog.append(layer);
-    }
+      for (let index = 0; index < 5; index += 1) {
+        const layer = document.createElement('span');
+        layer.className = `${layerClassName} ${layerClassName}-${index + 1}`;
+        fog.append(layer);
+      }
 
-    step.append(fog);
+      step.append(fog);
+    };
+
+    createFog('progressive-blur', 'progressive-blur-layer');
+    createFog('past-progressive-blur', 'past-progressive-blur-layer');
   });
 }
 
 function initSmoothScroll() {
-  const canSmooth = smoothScrollEnabled() && window.matchMedia('(pointer: fine)').matches;
+  const canSmooth = smoothScrollEnabled();
 
   if (!canSmooth || typeof window.Lenis !== 'function') {
     return;
   }
 
+  const touchInput = window.matchMedia('(pointer: coarse)').matches;
+
   const lenis = new window.Lenis({
-    lerp: 0.14,
+    lerp: touchInput ? MOTION_CONFIG.scrollLerpTouch : MOTION_CONFIG.scrollLerpDesktop,
     smoothWheel: true,
-    wheelMultiplier: 1,
-    syncTouch: false,
-    allowNestedScroll: true,
+    wheelMultiplier: MOTION_CONFIG.scrollWheelMultiplier,
+    touchMultiplier: MOTION_CONFIG.scrollTouchMultiplier,
+    syncTouch: touchInput,
+    syncTouchLerp: MOTION_CONFIG.scrollLerpTouch,
+    touchInertiaExponent: MOTION_CONFIG.scrollTouchInertiaExponent,
+    overscroll: false,
     anchors: true,
     virtualScroll: payload => {
       const boundaryHandler = window.tschoolBoundaryVirtualScroll;
@@ -625,8 +658,9 @@ function initSmoothScroll() {
 function initHeroScroll() {
   const stage = document.getElementById('hero-stage');
   const tiles = Array.from(document.querySelectorAll('.transfer-tile'));
+  const paperTrack = stage?.querySelector('.hero-paper-track');
 
-  if (!stage || tiles.length === 0) {
+  if (!stage || !paperTrack || tiles.length === 0) {
     return;
   }
 
@@ -642,6 +676,11 @@ function initHeroScroll() {
     const calendarBoard = stage.querySelector('.calendar-board');
     const width = visual ? visual.clientWidth : window.innerWidth;
     const isNarrow = window.matchMedia('(max-width: 600px)').matches;
+    const reducedMotion = prefersReducedMotion();
+    const paperProgress = reducedMotion ? 0 : progress;
+    const paperTravel = isNarrow
+      ? width * MOTION_CONFIG.heroMobilePaperTravelRatio * paperProgress
+      : 0;
     const measuredDistance = scheduleBoard && calendarBoard
       ? calendarBoard.offsetLeft - scheduleBoard.offsetLeft
       : 0;
@@ -649,15 +688,20 @@ function initHeroScroll() {
       ? measuredDistance * (isNarrow ? 0.92 : 1)
       : width * (isNarrow ? 0.48 : 0.55);
 
+    paperTrack.style.transform = `translate3d(${-paperTravel}px, 0, 0)`;
+
     tiles.forEach((tile, index) => {
-      const localProgress = clamp((progress - index * MOTION_CONFIG.heroTileStagger) / MOTION_CONFIG.heroTileTravel, 0, 1);
+      const localProgress = reducedMotion
+        ? 0
+        : clamp((progress - index * MOTION_CONFIG.heroTileStagger) / MOTION_CONFIG.heroTileTravel, 0, 1);
       const eased = localProgress * localProgress * localProgress * (localProgress * (localProgress * 6 - 15) + 10);
       const arc = Math.sin(Math.PI * eased) * (isNarrow ? -15 : -30);
       const settleY = (index + 1) * (isNarrow ? 2 : 5);
-      tile.style.transform = `translate3d(${distanceX * eased}px, ${arc + settleY * eased}px, 0)`;
+      const paperCompensation = isNarrow ? paperTravel : 0;
+      tile.style.transform = `translate3d(${distanceX * eased + paperCompensation}px, ${arc + settleY * eased}px, 0)`;
     });
 
-    stage.classList.toggle('is-complete', progress > 0.82);
+    stage.classList.toggle('is-complete', !reducedMotion && progress > 0.82);
   }
 
   function requestUpdate() {
@@ -676,7 +720,6 @@ function initStepJourney() {
   const steps = Array.from(document.querySelectorAll('.journey-step'));
   const startButton = document.getElementById('start-config');
   const wizard = document.getElementById('wizard');
-  const journeyForm = elements.form;
 
   if (steps.length === 0) {
     return;
@@ -687,12 +730,135 @@ function initStepJourney() {
   let renderedUnlockedStep = 0;
   let frameRequested = false;
   let automatedTargetStep = 0;
-  let boundaryElasticActive = false;
-  let boundaryReboundActive = false;
-  let boundaryRawOverscroll = 0;
-  let boundaryReleaseTimer = 0;
-  let boundaryFinishTimer = 0;
-  let boundaryMotionId = 0;
+  let compositionActive = false;
+  const completionActivations = new Map();
+  const completionStates = new Map([
+    [2, 'initial'],
+    [3, 'initial'],
+    [4, 'initial']
+  ]);
+  const completionCopy = {
+    2: {
+      initial: '選好了 ↵',
+      review: '再檢查一遍確認沒問題 ↵',
+      confirmed: '再檢查一遍確認沒問題 ↵'
+    },
+    3: {
+      initial: 'Email 和通知時間都沒錯 ↵',
+      confirmed: 'Email 和通知時間都沒錯 ↵'
+    },
+    4: {
+      initial: '產生安裝程式碼 ↵',
+      confirmed: '產生安裝程式碼 ↵'
+    }
+  };
+
+  function getCompletionButton(stepNumber) {
+    return document.querySelector(`[data-complete-step="${stepNumber}"]`);
+  }
+
+  function setCompletionState(stepNumber, nextState) {
+    const button = getCompletionButton(stepNumber);
+    const labels = completionCopy[stepNumber];
+
+    if (!button || !labels || !labels[nextState]) return;
+
+    completionStates.set(stepNumber, nextState);
+    button.textContent = labels[nextState];
+    button.classList.toggle('is-confirmed', nextState === 'confirmed');
+    button.setAttribute('aria-pressed', String(nextState === 'confirmed'));
+    button.dataset.cursorLabel = nextState === 'review'
+      ? '再次確認選課'
+      : stepNumber === 2
+        ? '確認選課'
+        : stepNumber === 3
+          ? '確認通知設定'
+          : '產生安裝程式碼';
+  }
+
+  function runCompletionPress(button, callback) {
+    if (completionActivations.has(button)) return;
+
+    button.classList.add('is-activating');
+    button.setAttribute('aria-busy', 'true');
+
+    const duration = prefersReducedMotion() ? 0 : MOTION_CONFIG.completionPressDuration;
+    const timer = window.setTimeout(() => {
+      button.classList.remove('is-activating');
+      button.removeAttribute('aria-busy');
+      completionActivations.delete(button);
+      callback();
+    }, duration);
+    completionActivations.set(button, timer);
+  }
+
+  function cancelCompletionPress(stepNumber) {
+    const button = getCompletionButton(stepNumber);
+    const timer = completionActivations.get(button);
+
+    if (!button || timer === undefined) return;
+
+    window.clearTimeout(timer);
+    completionActivations.delete(button);
+    button.classList.remove('is-activating');
+    button.removeAttribute('aria-busy');
+  }
+
+  function activateCompletionButton(button) {
+    if (!button || button.disabled || completionActivations.has(button)) return;
+
+    const completedStep = Number(button.dataset.completeStep);
+
+    if (
+      completedStep === 2 &&
+      (!state.sourceSummary || state.sourceLoading || state.sourceError)
+    ) {
+      showToast(state.sourceError ? '請先重新讀取課表' : '課表仍在讀取中');
+      return;
+    }
+
+    if (completedStep === 3 && !validateNotificationEmail()) {
+      elements.notificationEmail.reportValidity();
+      elements.notificationEmail.focus();
+      return;
+    }
+
+    if (completedStep === 2 && completionStates.get(2) === 'initial') {
+      runCompletionPress(button, () => setCompletionState(2, 'review'));
+      return;
+    }
+
+    runCompletionPress(button, () => {
+      setCompletionState(completedStep, 'confirmed');
+      unlockAndScrollToStep(completedStep + 1);
+    });
+  }
+
+  function resetCompletionAfterChange(changedStep) {
+    if (changedStep === 2) {
+      cancelCompletionPress(2);
+      cancelCompletionPress(4);
+      setCompletionState(2, 'initial');
+      setCompletionState(4, 'initial');
+    } else if (changedStep === 3) {
+      cancelCompletionPress(3);
+      cancelCompletionPress(4);
+      setCompletionState(3, 'initial');
+      setCompletionState(4, 'initial');
+    } else {
+      return;
+    }
+
+    if (maxUnlockedStep <= changedStep) return;
+
+    resetScrollMomentum();
+    automatedTargetStep = 0;
+    maxUnlockedStep = changedStep;
+    setActiveStep(Math.min(activeStep, changedStep));
+    window.tschoolLenis?.resize?.();
+    clampToCurrentBoundary();
+    requestUpdate();
+  }
 
   function setStageMenuOpen(open, returnFocus) {
     if (!elements.stageMenuTrigger || !elements.stageMenuPanel) {
@@ -747,7 +913,7 @@ function initStepJourney() {
       return;
     }
 
-    resetBoundaryMotion();
+    resetScrollMomentum();
     setActiveStep(stepNumber);
     const scrollTarget = getStepScrollTarget(target, stepNumber);
 
@@ -770,7 +936,7 @@ function initStepJourney() {
       return;
     }
 
-    resetBoundaryMotion();
+    resetScrollMomentum();
     const scrollTarget = getStepScrollTarget(target, 1);
 
     if (window.tschoolLenis && smoothScrollEnabled()) {
@@ -824,7 +990,7 @@ function initStepJourney() {
       return;
     }
 
-    resetBoundaryMotion();
+    resetScrollMomentum();
     maxUnlockedStep = Math.max(maxUnlockedStep, stepNumber);
     const target = steps[stepNumber - 1];
     automatedTargetStep = stepNumber;
@@ -845,7 +1011,7 @@ function initStepJourney() {
   function updateFromScroll() {
     frameRequested = false;
 
-    if (enforceScrollBoundary()) return;
+    if (clampToCurrentBoundary()) return;
 
     if (automatedTargetStep) {
       setActiveStep(automatedTargetStep);
@@ -886,6 +1052,12 @@ function initStepJourney() {
   }
 
   function getMaximumScrollY() {
+    const documentMaximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+
+    if (maxUnlockedStep >= steps.length) {
+      return documentMaximum;
+    }
+
     const boundaryStep = steps[maxUnlockedStep - 1];
     const boundaryCard = boundaryStep?.querySelector('.step-card');
     const boundaryElement = boundaryStep?.querySelector('.step-completion') || boundaryCard;
@@ -907,7 +1079,7 @@ function initStepJourney() {
       ? getDocumentLayoutTop(previewCard) - (window.innerHeight - previewPeek)
       : fallbackTarget;
 
-    return Math.max(0, fallbackTarget, cardCenterTarget, previewTarget);
+    return Math.min(documentMaximum, Math.max(0, fallbackTarget, cardCenterTarget, previewTarget));
   }
 
   function getDocumentLayoutTop(element) {
@@ -922,128 +1094,44 @@ function initStepJourney() {
     return top;
   }
 
-  function getBoundaryElasticLimit() {
+  function getBoundarySlowdownDistance() {
     return window.matchMedia('(max-width: 600px)').matches
-      ? MOTION_CONFIG.boundaryElasticMobile
-      : MOTION_CONFIG.boundaryElasticDesktop;
+      ? MOTION_CONFIG.boundarySlowdownDistanceMobile
+      : MOTION_CONFIG.boundarySlowdownDistanceDesktop;
   }
 
-  function getBoundaryResistedOffset(rawOverscroll, elasticLimit) {
-    return elasticLimit * (1 - Math.exp(-rawOverscroll / (elasticLimit * 1.4)));
+  function resetScrollMomentum() {
+    const lenis = window.tschoolLenis;
+    if (!lenis || !Number.isFinite(lenis.animatedScroll)) return;
+    lenis.scrollTo(lenis.animatedScroll, { immediate: true, force: true });
   }
 
-  function getBoundaryRawOffset(resistedOffset, elasticLimit) {
-    const ratio = clamp(resistedOffset / elasticLimit, 0, 0.999);
-    return -elasticLimit * 1.4 * Math.log(1 - ratio);
+  function getConfiguredScrollLerp() {
+    return window.matchMedia('(pointer: coarse)').matches
+      ? MOTION_CONFIG.scrollLerpTouch
+      : MOTION_CONFIG.scrollLerpDesktop;
   }
 
-  function getCurrentBoundaryVisualOffset() {
-    if (!journeyForm) return 0;
-
-    const transform = window.getComputedStyle(journeyForm).transform;
-    if (!transform || transform === 'none') return 0;
-
-    const values = transform.slice(transform.indexOf('(') + 1, -1)
-      .match(/-?[\d.]+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
-    const translateY = transform.startsWith('matrix3d(') ? values[13] : values[5];
-    return Number.isFinite(translateY) ? Math.max(0, -translateY) : 0;
-  }
-
-  function clampBoundaryScroll(maximumScrollY) {
-    if (Math.abs(window.scrollY - maximumScrollY) <= 0.5) return;
-
-    if (window.tschoolLenis) {
-      window.tschoolLenis.scrollTo(maximumScrollY, { immediate: true, force: true });
-    } else {
-      window.scrollTo({ top: maximumScrollY, behavior: 'auto' });
-    }
-  }
-
-  function setBoundaryVisualOffset(offset, rebound) {
-    if (!journeyForm) return;
-    journeyForm.classList.toggle('is-boundary-rebounding', Boolean(rebound));
-    journeyForm.style.setProperty('--boundary-pull', `${Math.max(0, offset).toFixed(2)}px`);
-  }
-
-  function resetBoundaryMotion() {
-    boundaryMotionId += 1;
-    window.clearTimeout(boundaryReleaseTimer);
-    window.clearTimeout(boundaryFinishTimer);
-    boundaryReleaseTimer = 0;
-    boundaryFinishTimer = 0;
-    boundaryElasticActive = false;
-    boundaryReboundActive = false;
-    boundaryRawOverscroll = 0;
-    setBoundaryVisualOffset(0, false);
-  }
-
-  function scheduleBoundaryRebound(motionId) {
-    window.clearTimeout(boundaryReleaseTimer);
-    boundaryReleaseTimer = window.setTimeout(() => {
-      if (motionId !== boundaryMotionId) return;
-
-      boundaryReboundActive = true;
-      boundaryRawOverscroll = 0;
-      setBoundaryVisualOffset(0, true);
-
-      const finish = () => {
-        if (motionId !== boundaryMotionId) return;
-        boundaryElasticActive = false;
-        boundaryReboundActive = false;
-        boundaryFinishTimer = 0;
-        setBoundaryVisualOffset(0, false);
-        requestUpdate();
-      };
-
-      boundaryFinishTimer = window.setTimeout(
-        finish,
-        prefersReducedMotion() ? 0 : MOTION_CONFIG.boundaryReboundDuration * 1000 + 80
-      );
-    }, MOTION_CONFIG.boundaryReleaseDelay);
-  }
-
-  function applyBoundaryDelta(deltaY) {
+  function clampToCurrentBoundary(options = {}) {
     const maximumScrollY = getMaximumScrollY();
+    const lenis = window.tschoolLenis;
 
-    if (!Number.isFinite(maximumScrollY)) return false;
+    if (lenis) {
+      const isPastBoundary = lenis.targetScroll > maximumScrollY + MOTION_CONFIG.boundarySnapDistance ||
+        lenis.animatedScroll > maximumScrollY + MOTION_CONFIG.boundarySnapDistance;
 
-    const elasticLimit = getBoundaryElasticLimit();
-    if (boundaryReboundActive) {
-      const currentVisualOffset = getCurrentBoundaryVisualOffset();
-      boundaryReboundActive = false;
-      setBoundaryVisualOffset(currentVisualOffset, false);
-      void journeyForm.offsetWidth;
-      boundaryRawOverscroll = Math.max(
-        boundaryRawOverscroll,
-        getBoundaryRawOffset(currentVisualOffset, elasticLimit)
-      );
-    }
+      if (!isPastBoundary) return false;
 
-    const observedOverscroll = Math.max(0, window.scrollY - maximumScrollY);
-    boundaryRawOverscroll = Math.max(boundaryRawOverscroll, observedOverscroll);
-    boundaryRawOverscroll = clamp(
-      boundaryRawOverscroll + deltaY,
-      0,
-      elasticLimit * 12
-    );
-    boundaryMotionId += 1;
-    const motionId = boundaryMotionId;
-    window.clearTimeout(boundaryReleaseTimer);
-    window.clearTimeout(boundaryFinishTimer);
-    boundaryReboundActive = false;
-    clampBoundaryScroll(maximumScrollY);
-
-    if (boundaryRawOverscroll <= 0.5) {
-      boundaryElasticActive = false;
-      boundaryRawOverscroll = 0;
-      setBoundaryVisualOffset(0, false);
+      lenis.scrollTo(maximumScrollY, {
+        immediate: options.immediate === true,
+        lerp: getConfiguredScrollLerp(),
+        force: true
+      });
       return true;
     }
 
-    boundaryElasticActive = true;
-    const resistedOffset = getBoundaryResistedOffset(boundaryRawOverscroll, elasticLimit);
-    setBoundaryVisualOffset(prefersReducedMotion() ? 0 : resistedOffset, false);
-    scheduleBoundaryRebound(motionId);
+    if (window.scrollY <= maximumScrollY + 1) return false;
+    window.scrollTo({ top: maximumScrollY, behavior: 'auto' });
     return true;
   }
 
@@ -1051,38 +1139,56 @@ function initStepJourney() {
     const event = payload?.event;
     const deltaY = Number(payload?.deltaY) || 0;
 
-    if (automatedTargetStep || !event?.type.includes('wheel') || deltaY === 0) {
+    if (automatedTargetStep) {
+      if (event?.cancelable) event.preventDefault();
+      return false;
+    }
+
+    if (deltaY === 0) {
       return true;
     }
 
     const maximumScrollY = getMaximumScrollY();
-    const boundaryEngaged = Number.isFinite(maximumScrollY) && (
-      window.scrollY >= maximumScrollY - 1 ||
-      boundaryElasticActive ||
-      boundaryReboundActive
-    );
-
-    if (!boundaryEngaged || (deltaY < 0 && !boundaryElasticActive && !boundaryReboundActive)) {
+    if (!Number.isFinite(maximumScrollY)) {
       return true;
     }
 
-    if (event.cancelable) event.preventDefault();
-    applyBoundaryDelta(deltaY > 0 ? deltaY : deltaY * 1.35);
-    return false;
-  }
+    const lenis = window.tschoolLenis;
+    const currentTarget = Number.isFinite(lenis?.targetScroll) ? lenis.targetScroll : window.scrollY;
+    const boundary = deltaY > 0 ? maximumScrollY : 0;
+    const remaining = deltaY > 0 ? boundary - currentTarget : currentTarget - boundary;
+    const slowdownDistance = getBoundarySlowdownDistance();
 
-  function enforceScrollBoundary() {
-    if (boundaryElasticActive || boundaryReboundActive || automatedTargetStep) {
+    function settleAtBoundary() {
+      if (event?.cancelable) event.preventDefault();
+      lenis?.scrollTo(boundary, {
+        lerp: getConfiguredScrollLerp(),
+        force: true
+      });
       return false;
     }
 
-    const maximumScrollY = getMaximumScrollY();
-
-    if (window.scrollY <= maximumScrollY + 1) {
-      return false;
+    if (remaining <= MOTION_CONFIG.boundarySnapDistance) {
+      return settleAtBoundary();
     }
 
-    applyBoundaryDelta(0);
+    let dampingFactor = 1;
+
+    if (remaining < slowdownDistance) {
+      const normalizedDistance = clamp(remaining / slowdownDistance, 0, 1);
+      const shapedDistance = Math.pow(normalizedDistance, MOTION_CONFIG.boundarySlowdownExponent);
+      const smoothDistance = shapedDistance * shapedDistance * (3 - 2 * shapedDistance);
+      dampingFactor = MOTION_CONFIG.boundaryMinimumFactor +
+        (1 - MOTION_CONFIG.boundaryMinimumFactor) * smoothDistance;
+    }
+
+    const dampedDelta = Math.abs(deltaY) * dampingFactor;
+
+    if (dampedDelta >= remaining - MOTION_CONFIG.boundarySnapDistance) {
+      return settleAtBoundary();
+    }
+
+    payload.deltaY = Math.sign(deltaY) * dampedDelta;
     return true;
   }
 
@@ -1107,28 +1213,7 @@ function initStepJourney() {
     }
 
     if (completionButton) {
-      const completedStep = Number(completionButton.dataset.completeStep);
-
-      if (
-        (completedStep === 1 || completedStep === 2) &&
-        (!state.sourceSummary || state.sourceLoading || state.sourceError)
-      ) {
-        showToast(state.sourceError ? '請先重新讀取課表' : '課表仍在讀取中');
-        return;
-      }
-
-      if (completedStep === 1 && !getCurrentGrade()) {
-        showToast('請先選擇年級');
-        return;
-      }
-
-      if (completedStep === 3 && !validateNotificationEmail()) {
-        elements.notificationEmail.reportValidity();
-        elements.notificationEmail.focus();
-        return;
-      }
-
-      unlockAndScrollToStep(completedStep + 1);
+      activateCompletionButton(completionButton);
     }
 
     if (
@@ -1145,19 +1230,76 @@ function initStepJourney() {
     setStageMenuOpen(open, false);
   });
 
+  document.addEventListener('compositionstart', () => {
+    compositionActive = true;
+  });
+
+  document.addEventListener('compositionend', () => {
+    compositionActive = false;
+  });
+
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && elements.stageMenuTrigger?.getAttribute('aria-expanded') === 'true') {
       event.preventDefault();
       setStageMenuOpen(false, true);
+      return;
     }
+
+    if (
+      event.key !== 'Enter' ||
+      event.defaultPrevented ||
+      event.repeat ||
+      event.isComposing ||
+      compositionActive ||
+      event.keyCode === 229 ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    const interactiveTarget = target?.closest([
+      'input',
+      'textarea',
+      'select',
+      'button',
+      'a',
+      'label',
+      'summary',
+      '[contenteditable]:not([contenteditable="false"])',
+      '[role="button"]',
+      '[role="link"]',
+      '[role="textbox"]',
+      '[role="combobox"]'
+    ].join(','));
+
+    if (interactiveTarget) return;
+
+    const completionButton = steps[activeStep - 1]?.querySelector('[data-complete-step]');
+    if (!completionButton || completionButton.disabled || completionActivations.has(completionButton)) {
+      return;
+    }
+
+    event.preventDefault();
+    completionButton.click();
+  });
+
+  document.addEventListener('tschool:configuration-change', event => {
+    resetCompletionAfterChange(Number(event.detail?.step));
   });
 
   document.addEventListener('tschool:grade-selection-start', () => {
     const firstStep = steps[0];
-    resetBoundaryMotion();
+    resetScrollMomentum();
     automatedTargetStep = 0;
     maxUnlockedStep = 1;
+    setCompletionState(2, 'initial');
+    setCompletionState(4, 'initial');
     setActiveStep(1);
+    clampToCurrentBoundary();
     firstStep.classList.add('is-advancing');
     window.setTimeout(() => firstStep.classList.remove('is-advancing'), 760);
   });
@@ -1181,15 +1323,10 @@ function initStepJourney() {
 
   window.tschoolBoundaryVirtualScroll = handleBoundaryVirtualScroll;
 
-  window.addEventListener('wheel', event => {
-    if (window.tschoolLenis) return;
-    const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
-    handleBoundaryVirtualScroll({ deltaY: event.deltaY * multiplier, event });
-  }, { passive: false });
-
   window.addEventListener('scroll', requestUpdate, { passive: true });
   window.addEventListener('resize', () => {
-    enforceScrollBoundary();
+    window.tschoolLenis?.resize?.();
+    clampToCurrentBoundary({ immediate: true });
     requestUpdate();
   });
   setActiveStep(1);
@@ -1360,7 +1497,6 @@ function initKineticCursor() {
     targetCursorVelocity *= 0.82;
     cursor.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
     cursor.style.setProperty('--cursor-angle', cursor.classList.contains('is-text') ? '0deg' : `${currentAngle}deg`);
-    cursor.style.setProperty('--cursor-lens-opacity', (0.42 + cursorVelocity * 0.36).toFixed(3));
     cursor.style.setProperty('--cursor-lens-stretch', (1 + cursorVelocity * 0.22).toFixed(3));
     cursor.style.setProperty('--cursor-lens-squash', (1 - cursorVelocity * 0.08).toFixed(3));
     requestAnimationFrame(animate);
