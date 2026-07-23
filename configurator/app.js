@@ -29,6 +29,21 @@ const ENABLE_SMOOTH_SCROLL = true;
 // Until then, the installation guide downloads the verified local workbook template.
 const GOOGLE_SHEETS_TEMPLATE_COPY_URL = '';
 const LOCAL_SHEETS_TEMPLATE_URL = 'assets/t-school-control-panel-template.xlsx';
+const COURSE_SEARCH_ICON_URL = 'assets/icon-search.svg';
+const COURSE_SEARCH_CANCEL_ICON_URL = 'assets/icon-x.svg';
+const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
+  try {
+    return new Intl.Collator('zh-Hant-u-co-stroke', {
+      numeric: true,
+      sensitivity: 'base'
+    });
+  } catch {
+    return new Intl.Collator('zh-Hant', {
+      numeric: true,
+      sensitivity: 'base'
+    });
+  }
+})();
 
 // Journey tuning: each completed section reveals the next one in the vertical narrative.
 // Scroll feel: raise lerp/multipliers for a faster response; lower them for a softer glide.
@@ -73,6 +88,7 @@ const elements = {
   notifyHour: document.querySelector('#notify-hour'),
   courseSearch: document.querySelector('#course-search'),
   courseSearchSubmit: document.querySelector('#course-search-submit'),
+  courseSearchIcon: document.querySelector('#course-search-icon'),
   courseList: document.querySelector('#course-list'),
   courseCount: document.querySelector('#course-count'),
   notificationSelectionCount: document.querySelector('#notification-selection-count'),
@@ -101,6 +117,7 @@ function init() {
   updateNotifyHourState();
   configureSheetTemplateLink();
   bindEvents();
+  updateCourseSearchAction();
   setupValidation();
   initVisualExperience();
   renderCourses();
@@ -138,6 +155,7 @@ function bindEvents() {
   elements.form.addEventListener('input', event => {
     if (event.target.name === 'gradeName') {
       elements.courseSearch.value = '';
+      updateCourseSearchAction();
       document.dispatchEvent(new CustomEvent('tschool:grade-selection-start'));
       renderSettingsSummary();
       loadGradeSchedule(event.target.value);
@@ -158,9 +176,32 @@ function bindEvents() {
     renderSettingsSummary();
   });
 
-  elements.courseSearch.addEventListener('input', renderCourses);
+  elements.courseSearch.addEventListener('input', () => {
+    updateCourseSearchAction();
+    renderCourses();
+  });
+  elements.courseSearch.addEventListener('keydown', event => {
+    if (
+      event.key !== 'Escape' ||
+      event.isComposing ||
+      event.keyCode === 229 ||
+      !elements.courseSearch.value
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    cancelCourseSearch();
+  });
   elements.courseList.addEventListener('change', handleCourseSelectionChange);
-  elements.courseSearchSubmit?.addEventListener('click', () => elements.courseSearch.focus());
+  elements.courseSearchSubmit?.addEventListener('click', () => {
+    if (elements.courseSearch.value) {
+      cancelCourseSearch();
+      return;
+    }
+
+    elements.courseSearch.focus();
+  });
 
   elements.copyCode.addEventListener('click', copyGeneratedCode);
 
@@ -172,6 +213,33 @@ function bindEvents() {
     const grade = getCurrentGrade();
     if (grade) loadGradeSchedule(grade, { force: true });
   });
+}
+
+function updateCourseSearchAction() {
+  const isSearching = Boolean(elements.courseSearch.value);
+
+  elements.courseSearchSubmit?.classList.toggle('is-cancel', isSearching);
+  elements.courseSearchSubmit?.setAttribute(
+    'aria-label',
+    isSearching ? '取消搜尋' : '搜尋課程和活動'
+  );
+
+  if (elements.courseSearchSubmit) {
+    elements.courseSearchSubmit.dataset.cursorLabel = isSearching ? '取消搜尋' : '搜尋';
+  }
+
+  if (elements.courseSearchIcon) {
+    elements.courseSearchIcon.src = isSearching
+      ? COURSE_SEARCH_CANCEL_ICON_URL
+      : COURSE_SEARCH_ICON_URL;
+  }
+}
+
+function cancelCourseSearch() {
+  elements.courseSearch.value = '';
+  updateCourseSearchAction();
+  renderCourses();
+  elements.courseSearch.focus({ preventScroll: true });
 }
 
 async function loadGradeSchedule(gradeName, options) {
@@ -431,17 +499,17 @@ function renderCourses() {
   const catalog = state.sourceSummary.catalog;
   const sections = [];
 
-  const courses = catalog.courses.filter(item =>
-    normalizeSearchText(item.title).includes(query)
-  );
+  const courses = catalog.courses
+    .filter(item => normalizeSearchText(item.title).includes(query))
+    .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
 
   if (courses.length > 0) {
     sections.push(renderCourseSection('課程', courses.map(renderCourseCard).join('')));
   }
 
-  const activities = catalog.activities.filter(item =>
-    normalizeSearchText(item.title).includes(query)
-  );
+  const activities = catalog.activities
+    .filter(item => normalizeSearchText(item.title).includes(query))
+    .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
 
   if (activities.length > 0) {
     sections.push(renderCourseSection('活動', activities.map(renderActivityCard).join('')));
@@ -972,7 +1040,6 @@ function initStepJourney() {
       step.classList.toggle('is-concealed', number > maxUnlockedStep + 1);
       step.style.setProperty('--section-blur', `${distance === 0 ? 0 : Math.min(12, 2 + distance * 3)}px`);
       step.style.setProperty('--section-opacity', distance === 0 ? '1' : String(Math.max(0.28, 0.76 - distance * 0.14)));
-      step.style.setProperty('--section-scale', distance === 0 ? '1' : String(Math.max(0.97, 1 - distance * 0.008)));
       step.toggleAttribute('inert', number !== activeStep);
     });
 
@@ -1292,7 +1359,6 @@ function initStepJourney() {
   });
 
   document.addEventListener('tschool:grade-selection-start', () => {
-    const firstStep = steps[0];
     resetScrollMomentum();
     automatedTargetStep = 0;
     maxUnlockedStep = 1;
@@ -1300,8 +1366,6 @@ function initStepJourney() {
     setCompletionState(4, 'initial');
     setActiveStep(1);
     clampToCurrentBoundary();
-    firstStep.classList.add('is-advancing');
-    window.setTimeout(() => firstStep.classList.remove('is-advancing'), 760);
   });
 
   document.addEventListener('tschool:grade-ready', event => {
@@ -1356,19 +1420,22 @@ function renderSettingsSummary() {
     return;
   }
 
-  const selected = Array.from(getSelectedCourses()).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const selected = Array.from(getSelectedCourses()).sort(compareByTraditionalStroke);
   const catalog = state.sourceSummary?.catalog || { courses: [], activities: [] };
   const selectedActivities = catalog.activities
     .filter(item => isActivitySelected(item.title))
-    .map(item => item.title);
+    .map(item => item.title)
+    .sort(compareByTraditionalStroke);
   const unselectedCourses = catalog.courses
     .filter(item => !getSelectedCourses().has(item.title))
-    .map(item => item.title);
+    .map(item => item.title)
+    .sort(compareByTraditionalStroke);
   const unselectedActivities = catalog.activities
     .filter(item => !isActivitySelected(item.title))
-    .map(item => item.title);
-  const selectedItems = selected.concat(selectedActivities);
-  const unselectedItems = unselectedCourses.concat(unselectedActivities);
+    .map(item => item.title)
+    .sort(compareByTraditionalStroke);
+  const selectedItems = selected.concat(selectedActivities).sort(compareByTraditionalStroke);
+  const unselectedItems = unselectedCourses.concat(unselectedActivities).sort(compareByTraditionalStroke);
   const email = elements.notificationEmail.value.trim();
   const notificationTime = `${pad2(Number(elements.notifyHour.value || DEFAULTS.notifyHour))}:00`;
 
@@ -1377,8 +1444,8 @@ function renderSettingsSummary() {
       ['你選的年級是：', getCurrentGrade() || '尚未選擇']
     ], 1, '修改年級'),
     renderSummaryRow([
-      ['你選的課程與活動有：', selectedItems.length ? selectedItems.join('、') : '尚未選擇'],
-      ['你「沒」選的課程與活動有：', unselectedItems.length ? unselectedItems.join('、') : '沒有']
+      ['你選的課程與活動有：', selectedItems.length ? selectedItems : '尚未選擇'],
+      ['你「沒」選的課程與活動有：', unselectedItems.length ? unselectedItems : '沒有']
     ], 2, '修改課程與活動'),
     renderSummaryRow([
       ['你想用來收通知的 Email 是：', email || '未填寫', email ? '' : 'is-error'],
@@ -1394,13 +1461,25 @@ function renderSummaryRow(lines, editStep, editLabel) {
     lines.map(([label, value, tone]) => [
       '<div class="summary-line">',
       `<strong>${escapeHtml(label)}</strong>`,
-      `<span class="summary-value${tone ? ` ${tone}` : ''}">${escapeHtml(value)}</span>`,
+      renderSummaryValue(value, tone),
       '</div>'
     ].join('')).join(''),
     '</div>',
     `<button type="button" class="icon-button summary-edit" data-edit-step="${editStep}" data-cursor-label="修改" aria-label="${escapeHtml(editLabel)}"><img src="assets/icon-arrow-up-right.svg" alt=""></button>`,
     '</section>'
   ].join('');
+}
+
+function renderSummaryValue(value, tone) {
+  if (Array.isArray(value)) {
+    return [
+      '<span class="summary-value summary-tag-list">',
+      value.map(item => `<span class="summary-item-tag">${escapeHtml(item)}</span>`).join(''),
+      '</span>'
+    ].join('');
+  }
+
+  return `<span class="summary-value${tone ? ` ${tone}` : ''}">${escapeHtml(value)}</span>`;
 }
 
 function initKineticCursor() {
@@ -1536,6 +1615,13 @@ function normalizeSearchText(value) {
     .replace(/（/g, '(')
     .replace(/）/g, ')')
     .toLowerCase();
+}
+
+function compareByTraditionalStroke(first, second) {
+  return TRADITIONAL_CHINESE_STROKE_COLLATOR.compare(
+    String(first || ''),
+    String(second || '')
+  );
 }
 
 function escapeHtml(value) {

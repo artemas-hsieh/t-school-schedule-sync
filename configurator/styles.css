@@ -2138,6 +2138,18 @@ textarea::placeholder {
   font-size: 1rem;
 }
 
+.search-control input[type='search'] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search-control input[type='search']::-webkit-search-cancel-button,
+.search-control input[type='search']::-webkit-search-decoration {
+  display: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .search-submit {
   position: absolute;
   right: var(--space-2);
@@ -2415,19 +2427,28 @@ textarea::placeholder {
   --fog-blur-5: 48px;
   /*
    * Previous-section fog tuning:
-   * height expands the covered tail upward; entry-end ends the clear-to-fog ramp;
+   * height caps the bottom-anchored transition so long cards cannot dilute it;
+   * entry-end ends the clear-to-fog ramp;
    * boundary-clear-start delays the final clearing near the current connector;
-   * blur-1..5 set the five progressive radii; opacity only changes the fog tint.
+   * layer-1..5-end set where each radius clears (weakest -> strongest);
+   * keep them close to 100% to blur the used button but reveal the final connector.
+   * opacity only changes the fog tint.
    */
-  --past-fog-height: 100%;
-  --past-fog-entry-end: 22%;
+  --past-fog-height: min(100%, 720px);
+  --past-fog-entry-end: 1%;
   --past-fog-boundary-clear-start: 96%;
+  --past-fog-direction: to bottom;
   --past-fog-blur-1: 2px;
   --past-fog-blur-2: 6px;
   --past-fog-blur-3: 14px;
   --past-fog-blur-4: 28px;
   --past-fog-blur-5: 48px;
-  --past-fog-opacity: 0.22;
+  --past-fog-layer-1-end: 99%;
+  --past-fog-layer-2-end: 89%;
+  --past-fog-layer-3-end: 80%;
+  --past-fog-layer-4-end: 70%;
+  --past-fog-layer-5-end: 64%;
+  --past-fog-opacity: 0.01;
   /* Desktop Hero fog: placement, travel and five progressive radii. */
   --hero-fog-desktop-width: 46%;
   --hero-fog-desktop-offset-x: -2%;
@@ -2445,11 +2466,11 @@ textarea::placeholder {
   --hero-fog-mobile-left-bleed: 0px;
   --hero-fog-mobile-vertical-bleed: 32svh;
   --hero-fog-mobile-fade-end: 96%;
-  --hero-fog-mobile-blur-1: 2px;
-  --hero-fog-mobile-blur-2: 6px;
-  --hero-fog-mobile-blur-3: 14px;
-  --hero-fog-mobile-blur-4: 28px;
-  --hero-fog-mobile-blur-5: 48px;
+  --hero-fog-mobile-blur-1: 1px;
+  --hero-fog-mobile-blur-2: 1px;
+  --hero-fog-mobile-blur-3: 1px;
+  --hero-fog-mobile-blur-4: 1px;
+  --hero-fog-mobile-blur-5: 2px;
   --shadow-action-hover: 4px 4px 0 rgba(20, 33, 29, 0.2);
   --radius-card: 6px;
   --radius-control: 4px;
@@ -4012,7 +4033,7 @@ select,
   scrollbar-gutter: auto;
   opacity: var(--section-opacity, 1);
   filter: blur(var(--section-blur, 0));
-  transform: scale(var(--section-scale, 1));
+  transform: none;
   transform-origin: center top;
   transition:
     filter 560ms var(--ease-out),
@@ -4032,7 +4053,7 @@ select,
   overflow: visible;
   opacity: var(--section-opacity, 1);
   filter: blur(var(--section-blur, 0));
-  transform: scale(var(--section-scale, 1));
+  transform: none;
 }
 
 .journey-step:not(.is-current)::after {
@@ -4088,12 +4109,13 @@ select,
 
 .past-progressive-blur {
   position: absolute;
-  top: calc(100% - var(--past-fog-height));
+  top: auto;
   right: calc(-1 * var(--fog-layer-bleed));
   bottom: 0;
   left: calc(-1 * var(--fog-layer-bleed));
   z-index: 12;
   display: none;
+  height: var(--past-fog-height);
   overflow: hidden;
   background: linear-gradient(
     to bottom,
@@ -4101,20 +4123,6 @@ select,
     rgba(var(--connector-fog-rgb), var(--past-fog-opacity)) var(--past-fog-entry-end),
     rgba(var(--connector-fog-rgb), var(--past-fog-opacity)) var(--past-fog-boundary-clear-start),
     rgba(var(--connector-fog-rgb), 0) 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    #000 var(--past-fog-entry-end),
-    #000 var(--past-fog-boundary-clear-start),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    #000 var(--past-fog-entry-end),
-    #000 var(--past-fog-boundary-clear-start),
-    transparent 100%
   );
   pointer-events: none;
 }
@@ -4135,27 +4143,27 @@ select,
 
 .past-progressive-blur-layer-1 {
   --past-fog-blur: var(--past-fog-blur-1);
-  --past-fog-mask: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.46) 12%, #000 24%, #000 31%, rgba(0, 0, 0, 0.5) 42%, transparent 54%);
+  --past-fog-mask: linear-gradient(var(--past-fog-direction), #000 0%, #000 calc(var(--past-fog-layer-1-end) - 24%), rgba(0, 0, 0, 0.55) calc(var(--past-fog-layer-1-end) - 12%), transparent var(--past-fog-layer-1-end));
 }
 
 .past-progressive-blur-layer-2 {
   --past-fog-blur: var(--past-fog-blur-2);
-  --past-fog-mask: linear-gradient(to bottom, transparent 14%, rgba(0, 0, 0, 0.45) 28%, #000 42%, rgba(0, 0, 0, 0.52) 55%, transparent 69%);
+  --past-fog-mask: linear-gradient(var(--past-fog-direction), #000 0%, #000 calc(var(--past-fog-layer-2-end) - 24%), rgba(0, 0, 0, 0.55) calc(var(--past-fog-layer-2-end) - 12%), transparent var(--past-fog-layer-2-end));
 }
 
 .past-progressive-blur-layer-3 {
   --past-fog-blur: var(--past-fog-blur-3);
-  --past-fog-mask: linear-gradient(to bottom, transparent 32%, rgba(0, 0, 0, 0.5) 46%, #000 59%, rgba(0, 0, 0, 0.5) 71%, transparent 83%);
+  --past-fog-mask: linear-gradient(var(--past-fog-direction), #000 0%, #000 calc(var(--past-fog-layer-3-end) - 24%), rgba(0, 0, 0, 0.55) calc(var(--past-fog-layer-3-end) - 12%), transparent var(--past-fog-layer-3-end));
 }
 
 .past-progressive-blur-layer-4 {
   --past-fog-blur: var(--past-fog-blur-4);
-  --past-fog-mask: linear-gradient(to bottom, transparent 52%, rgba(0, 0, 0, 0.5) 66%, #000 78%, rgba(0, 0, 0, 0.58) 89%, transparent 100%);
+  --past-fog-mask: linear-gradient(var(--past-fog-direction), #000 0%, #000 calc(var(--past-fog-layer-4-end) - 24%), rgba(0, 0, 0, 0.55) calc(var(--past-fog-layer-4-end) - 12%), transparent var(--past-fog-layer-4-end));
 }
 
 .past-progressive-blur-layer-5 {
   --past-fog-blur: var(--past-fog-blur-5);
-  --past-fog-mask: linear-gradient(to bottom, transparent 72%, rgba(0, 0, 0, 0.52) 86%, #000 100%);
+  --past-fog-mask: linear-gradient(var(--past-fog-direction), #000 0%, #000 calc(var(--past-fog-layer-5-end) - 24%), rgba(0, 0, 0, 0.55) calc(var(--past-fog-layer-5-end) - 12%), transparent var(--past-fog-layer-5-end));
 }
 
 .progressive-blur-layer {
@@ -4214,10 +4222,6 @@ select,
 
 .journey-step.is-entering .step-card {
   animation: section-reveal 720ms var(--ease-out) both;
-}
-
-.journey-step.is-advancing .segmented-control {
-  animation: grade-confirm 760ms var(--ease-out) both;
 }
 
 .step-completion {
@@ -4298,18 +4302,11 @@ select,
   from {
     opacity: 0.42;
     filter: blur(8px);
-    transform: translateY(44px) scale(0.982);
   }
   to {
     opacity: 1;
     filter: blur(0);
-    transform: translateY(0) scale(1);
   }
-}
-
-@keyframes grade-confirm {
-  0%, 100% { box-shadow: none; }
-  45% { box-shadow: 0 0 0 var(--space-2) rgba(0, 166, 118, 0.14); }
 }
 
 @media (max-width: 600px) {
@@ -4348,8 +4345,7 @@ select,
     transition: none;
   }
 
-  .journey-step.is-entering .step-card,
-  .journey-step.is-advancing .segmented-control {
+  .journey-step.is-entering .step-card {
     animation: none;
   }
 }
@@ -4372,6 +4368,7 @@ select,
 .output-card {
   width: min(1120px, calc(100vw - var(--space-12)));
   padding: 48px 52px;
+  transform: none;
 }
 
 .journey-step.is-preview {
@@ -4381,6 +4378,7 @@ select,
 
 .journey-step.is-preview .step-card {
   margin-top: 0;
+  transform: none;
 }
 
 .step-completion {
@@ -4395,8 +4393,8 @@ select,
 
 .step-completion::before {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: -1px;
+  bottom: -1px;
   z-index: 0;
   width: 1px;
   height: auto;
@@ -4405,7 +4403,7 @@ select,
 }
 
 .journey-step:has(+ .journey-step.is-preview) .step-completion::before {
-  bottom: calc(-1 * var(--space-5));
+  bottom: -1px;
 }
 
 .step-completion::after {
@@ -4465,6 +4463,24 @@ select,
   font-weight: 800;
 }
 
+.summary-tag-list {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.summary-line .summary-item-tag {
+  display: inline-flex;
+  width: auto;
+  padding: 5px 10px 6px;
+  border: 1px solid rgba(79, 93, 87, 0.32);
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .step-card button {
   text-align: center;
 }
@@ -4483,17 +4499,42 @@ select,
   text-align: center;
 }
 
+.segmented-control label:hover input:not(:checked) + span,
 .course-card:hover:not(:has(input:checked)) {
-  border-color: var(--sync-dark);
-  background: var(--surface-soft);
-  box-shadow: var(--space-1) var(--space-1) 0 rgba(0, 121, 87, 0.32);
-  transform: translate(-2px, -2px);
+  border-color: var(--ink);
+  background: var(--paper-bright);
+  box-shadow: 3px 3px 0 rgba(20, 33, 29, 0.16);
+  transform: translate(-1px, -1px);
 }
 
 .course-card:active,
 .course-card:has(input:checked):active {
   box-shadow: none;
   transform: translate(1px, 1px);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .segmented-control label:hover input:not(:checked) + span,
+  .course-card:hover:not(:has(input:checked)) {
+    border-color: var(--line-dark);
+    background: var(--paper-bright);
+    box-shadow: none;
+    transform: none;
+  }
+
+  .course-card:has(input:checked):hover {
+    border-color: var(--sync-dark);
+    background: var(--surface-green);
+    box-shadow: var(--space-1) var(--space-1) 0 var(--sync-dark);
+    transform: none;
+  }
+
+  .segmented-control label:active span,
+  .course-card:active,
+  .course-card:has(input:checked):active {
+    box-shadow: none;
+    transform: translate(1px, 1px);
+  }
 }
 
 /* Primary actions share the same quiet depth instead of complementary-color shadows. */
