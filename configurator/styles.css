@@ -170,7 +170,8 @@ summary:focus-visible {
   height: 100vh;
   min-height: 720px;
   margin: 0 auto;
-  padding: 96px 52px 48px;
+  padding: 96px 52px;
+  ;
   overflow: hidden;
 }
 
@@ -2466,6 +2467,13 @@ textarea::placeholder {
   --past-fog-layer-4-clear-distance: 216px;
   --past-fog-layer-5-clear-distance: 259px;
   --past-fog-opacity: 0.01;
+  /*
+   * Transition blur-layer opacity at the fixed 28% and 55% keyframe stops.
+   * Raise the early value for faster blur buildup; keep the mid value <= 1.
+   */
+  --past-transition-blur-early-opacity: 0.76;
+  --past-transition-blur-mid-opacity: 1;
+  --past-transition-blur-easing: linear;
   /* Desktop Hero fog: placement, travel and five progressive radii. */
   --hero-fog-desktop-width: 46%;
   --hero-fog-desktop-offset-x: -2%;
@@ -4153,10 +4161,28 @@ select,
   display: block;
 }
 
-.journey-step.is-transitioning-to-past > .past-progressive-blur .past-progressive-blur-layer {
-  animation: past-section-blur-in var(--section-transition-duration, 720ms) var(--ease-out) both;
+.journey-step.is-transitioning-to-past > .past-progressive-blur,
+.has-blur-visibility-observer
+  .journey-step.is-transitioning-to-past
+  > .past-progressive-blur {
+  visibility: visible;
 }
 
+.journey-step.is-transitioning-to-past
+  > .past-progressive-blur
+  > .past-progressive-blur-layer {
+  animation:
+    past-section-blur-layer-in
+    var(--section-transition-duration, 720ms)
+    var(--past-transition-blur-easing)
+    both;
+}
+
+/*
+ * Keep the shared fog container fully opaque so it does not become a Backdrop
+ * Root that isolates its children. Each final blur layer fades itself in while
+ * its backdrop radius and pixel-based mask stay fixed.
+ */
 .past-progressive-blur-layer {
   --past-fog-clear-distance: 0px;
   position: absolute;
@@ -4364,16 +4390,21 @@ select,
   }
 }
 
-@keyframes past-section-blur-in {
-  from {
-    background-color: rgba(var(--connector-fog-rgb), 0);
-    -webkit-backdrop-filter: blur(0);
-    backdrop-filter: blur(0);
+@keyframes past-section-blur-layer-in {
+  0% {
+    opacity: 0;
   }
-  to {
-    background-color: rgba(var(--connector-fog-rgb), 0.018);
-    -webkit-backdrop-filter: blur(var(--past-fog-blur));
-    backdrop-filter: blur(var(--past-fog-blur));
+
+  28% {
+    opacity: var(--past-transition-blur-early-opacity);
+  }
+
+  55% {
+    opacity: var(--past-transition-blur-mid-opacity);
+  }
+
+  100% {
+    opacity: 1;
   }
 }
 
@@ -4414,7 +4445,9 @@ select,
   }
 
   .journey-step.is-entering .step-card,
-  .journey-step.is-transitioning-to-past > .past-progressive-blur .past-progressive-blur-layer {
+  .journey-step.is-transitioning-to-past
+    > .past-progressive-blur
+    > .past-progressive-blur-layer {
     animation: none;
   }
 }

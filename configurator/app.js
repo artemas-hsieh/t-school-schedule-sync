@@ -55,7 +55,7 @@ const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
 // Boundary feel: distance starts the slowdown, exponent shapes its curve, and
 // minimumFactor keeps the last part moving before it settles exactly on the limit.
 const MOTION_CONFIG = Object.freeze({
-  sectionTransitionDuration: 10,
+  sectionTransitionDuration: 1,
   scrollLerpDesktop: 0.2,
   scrollLerpTouch: 0.2,
   scrollWheelMultiplier: 1,
@@ -1227,6 +1227,7 @@ function initStepJourney() {
   let compositionActive = false;
   let journeyGeometryDirty = true;
   let journeyGeometry = null;
+  let activeSectionTransition = null;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -1247,6 +1248,31 @@ function initStepJourney() {
       confirmed: '產生安裝程式碼 ↵'
     }
   };
+
+  function clearActiveSectionTransition(options = {}) {
+    const transition = activeSectionTransition;
+
+    if (!transition) {
+      return;
+    }
+
+    if (transition.timerId) {
+      clearTimeout(transition.timerId);
+    }
+
+    transition.previous?.classList.remove('is-transitioning-to-past');
+    transition.target?.classList.remove('is-entering');
+
+    if (automatedTargetStep === transition.targetStep) {
+      automatedTargetStep = 0;
+    }
+
+    activeSectionTransition = null;
+
+    if (options.requestUpdate !== false) {
+      requestUpdate();
+    }
+  }
 
   function getCompletionButton(stepNumber) {
     return document.querySelector(`[data-complete-step="${stepNumber}"]`);
@@ -1313,6 +1339,7 @@ function initStepJourney() {
 
     if (maxUnlockedStep <= changedStep) return;
 
+    clearActiveSectionTransition({ requestUpdate: false });
     resetScrollMomentum();
     automatedTargetStep = 0;
     maxUnlockedStep = changedStep;
@@ -1376,6 +1403,10 @@ function initStepJourney() {
 
     if (!target) {
       return;
+    }
+
+    if (options?.preserveTransition !== true) {
+      clearActiveSectionTransition({ requestUpdate: false });
     }
 
     resetScrollMomentum();
@@ -1459,25 +1490,50 @@ function initStepJourney() {
       return;
     }
 
+    clearActiveSectionTransition({ requestUpdate: false });
     resetScrollMomentum();
     maxUnlockedStep = Math.max(maxUnlockedStep, stepNumber);
     const target = steps[stepNumber - 1];
     const previous = steps[activeStep - 1];
+    const shouldAnimatePastFog = Boolean(previous) && !prefersReducedMotion();
     automatedTargetStep = stepNumber;
-    previous?.classList.add('is-transitioning-to-past');
+
+    if (shouldAnimatePastFog) {
+      previous.classList.add('is-transitioning-to-past');
+    }
+
     target.classList.add('is-entering');
     setActiveStep(stepNumber);
+    const transition = {
+      previous,
+      target,
+      targetStep: stepNumber,
+      timerId: 0
+    };
+    activeSectionTransition = transition;
     void target.offsetWidth;
+
     requestAnimationFrame(() => {
+      if (activeSectionTransition !== transition) {
+        return;
+      }
+
       window.tschoolLenis?.resize?.();
-      requestAnimationFrame(() => scrollToStep(stepNumber));
+      requestAnimationFrame(() => {
+        if (activeSectionTransition === transition) {
+          scrollToStep(stepNumber, { preserveTransition: true });
+        }
+      });
     });
-    window.setTimeout(() => {
-      automatedTargetStep = 0;
-      previous?.classList.remove('is-transitioning-to-past');
-      target.classList.remove('is-entering');
-      requestUpdate();
-    }, MOTION_CONFIG.sectionTransitionDuration * 1000 + 160);
+
+    const cleanupDelay = shouldAnimatePastFog
+      ? MOTION_CONFIG.sectionTransitionDuration * 1000 + 40
+      : 80;
+    transition.timerId = window.setTimeout(() => {
+      if (activeSectionTransition === transition) {
+        clearActiveSectionTransition();
+      }
+    }, cleanupDelay);
   }
 
   function updateFromScroll() {
@@ -1790,6 +1846,7 @@ function initStepJourney() {
   });
 
   document.addEventListener('tschool:grade-selection-start', () => {
+    clearActiveSectionTransition({ requestUpdate: false });
     resetScrollMomentum();
     automatedTargetStep = 0;
     maxUnlockedStep = 1;
