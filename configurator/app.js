@@ -931,14 +931,14 @@ function initProgressiveBlurLayers() {
   const steps = Array.from(document.querySelectorAll('.journey-step'));
 
   steps.forEach(step => {
-    const createFog = (className, layerClassName, layerCount = 5) => {
+    const createFog = (className, layerClassName) => {
       if (step.querySelector(`:scope > .${className}`)) return;
 
       const fog = document.createElement('span');
       fog.className = className;
       fog.setAttribute('aria-hidden', 'true');
 
-      for (let index = 0; index < layerCount; index += 1) {
+      for (let index = 0; index < 5; index += 1) {
         const layer = document.createElement('span');
         layer.className = `${layerClassName} ${layerClassName}-${index + 1}`;
         fog.append(layer);
@@ -948,7 +948,7 @@ function initProgressiveBlurLayers() {
     };
 
     createFog('progressive-blur', 'progressive-blur-layer');
-    createFog('past-progressive-blur', 'past-progressive-blur-layer', 1);
+    createFog('past-progressive-blur', 'past-progressive-blur-layer');
   });
 
   if ('IntersectionObserver' in window) {
@@ -960,8 +960,8 @@ function initProgressiveBlurLayers() {
         entry.target.classList.toggle('is-blur-rendering-active', entry.isIntersecting);
       });
     }, {
-      // Prepare the effect half a viewport early without painting distant fog.
-      rootMargin: '50% 0px'
+      // Keep the effect ready before it can enter the visible viewport.
+      rootMargin: '100% 0px'
     });
 
     steps.forEach(step => observer.observe(step));

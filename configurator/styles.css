@@ -2442,10 +2442,41 @@ textarea::placeholder {
   --fog-blur-3: 14px;
   --fog-blur-4: 28px;
   --fog-blur-5: 48px;
-  /* One animated radius replaces five composited layers on unlocked sections. */
-  --unlocked-section-blur: 14px;
-  --unlocked-fog-opacity: 0.01;
-  --fog-transition-easing: cubic-bezier(0.22, 0.72, 0.24, 1);
+  /*
+   * Previous-section fog tuning:
+   * height covers the complete previous section; pixel-based stops prevent dilution;
+   * entry-fade-length and boundary-clear-distance keep the tint ramps fixed;
+   * mask-fade-length/midpoint keep every blur cross-fade the same physical size;
+   * layer-1..5-clear-distance set how far above the bottom each radius clears.
+   * opacity only changes the fog tint.
+   */
+  --past-fog-height: 100%;
+  --past-fog-entry-fade-length: 8px;
+  --past-fog-boundary-clear-distance: 29px;
+  /* Soften the blur's leading (top) edge so a past section sitting near the
+     fixed header dissolves into blur instead of showing a hard seam. */
+  --past-fog-top-fade: 132px;
+  --past-fog-direction: to bottom;
+  --past-fog-blur-1: 2px;
+  --past-fog-blur-2: 6px;
+  --past-fog-blur-3: 14px;
+  --past-fog-blur-4: 28px;
+  --past-fog-blur-5: 48px;
+  --past-fog-mask-fade-length: 173px;
+  --past-fog-mask-fade-midpoint: 86px;
+  --past-fog-layer-1-clear-distance: 7px;
+  --past-fog-layer-2-clear-distance: 79px;
+  --past-fog-layer-3-clear-distance: 144px;
+  --past-fog-layer-4-clear-distance: 216px;
+  --past-fog-layer-5-clear-distance: 259px;
+  --past-fog-opacity: 0.01;
+  /*
+   * Transition blur-layer opacity at the fixed 28% and 55% keyframe stops.
+   * Raise the early value for faster blur buildup; keep the mid value <= 1.
+   */
+  --past-transition-blur-early-opacity: 0.76;
+  --past-transition-blur-mid-opacity: 1;
+  --past-transition-blur-easing: linear;
   /* Desktop Hero fog: placement, travel and five progressive radii. */
   --hero-fog-desktop-width: 46%;
   --hero-fog-desktop-offset-x: -2%;
@@ -3988,7 +4019,14 @@ select,
 .journey-form {
   display: grid;
   gap: var(--space-8);
-  overflow: clip;
+  /*
+   * Clip only vertically. Horizontal must stay visible so the past-section fog
+   * can bleed to the viewport edge (where body's overflow-x: clip trims it)
+   * instead of being cut at the wizard's content width, which left a hard
+   * vertical seam beside the strong blur.
+   */
+  overflow-x: visible;
+  overflow-y: clip;
 }
 
 .journey-step {
@@ -4089,34 +4127,18 @@ select,
   position: absolute;
   inset: 0;
   z-index: 6;
-  display: block;
+  display: none;
   overflow: hidden;
-  visibility: hidden;
-  transition: visibility 0s linear var(--section-transition-duration, 1s);
-  pointer-events: none;
-}
-
-.progressive-blur::before {
-  position: absolute;
-  inset: 0;
   background: linear-gradient(
     var(--fog-direction),
     rgba(var(--connector-fog-rgb), 0.01) 0%,
     rgba(var(--connector-fog-rgb), 0.22) 100%
   );
-  opacity: 0;
-  transition: opacity var(--section-transition-duration, 1s) var(--fog-transition-easing);
-  content: '';
+  pointer-events: none;
 }
 
 .journey-step.is-preview > .progressive-blur {
-  visibility: visible;
-  transition-delay: 0s;
-}
-
-.journey-step.is-preview > .progressive-blur::before,
-.journey-step.is-preview > .progressive-blur > .progressive-blur-layer {
-  opacity: 1;
+  display: block;
 }
 
 .has-blur-visibility-observer
@@ -4127,94 +4149,124 @@ select,
 
 .past-progressive-blur {
   position: absolute;
-  top: 0;
+  top: auto;
   right: calc(-1 * var(--fog-layer-bleed));
   bottom: 0;
   left: calc(-1 * var(--fog-layer-bleed));
   z-index: 12;
-  display: block;
+  display: none;
+  height: var(--past-fog-height);
   overflow: hidden;
-  visibility: hidden;
-  transition: visibility 0s linear var(--section-transition-duration, 1s);
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--connector-fog-rgb), 0) 0%,
+    rgba(var(--connector-fog-rgb), var(--past-fog-opacity)) var(--past-fog-entry-fade-length),
+    rgba(var(--connector-fog-rgb), var(--past-fog-opacity)) calc(100% - var(--past-fog-boundary-clear-distance)),
+    rgba(var(--connector-fog-rgb), 0) 100%
+  );
   pointer-events: none;
 }
 
-.past-progressive-blur::before {
-  position: absolute;
-  inset: 0;
-  background: rgba(var(--connector-fog-rgb), var(--unlocked-fog-opacity));
-  opacity: 0;
-  transition: opacity var(--section-transition-duration, 1s) var(--fog-transition-easing);
-  content: '';
+.journey-step.is-past:has(+ .journey-step.is-current) > .past-progressive-blur {
+  display: block;
 }
 
-.journey-step.is-past > .past-progressive-blur,
-.journey-step.is-future:not(.is-locked) > .past-progressive-blur,
 .journey-step.is-transitioning-to-past > .past-progressive-blur,
 .has-blur-visibility-observer
   .journey-step.is-transitioning-to-past
   > .past-progressive-blur {
   visibility: visible;
-  transition-delay: 0s;
 }
 
-.journey-step.is-past > .past-progressive-blur::before,
-.journey-step.is-future:not(.is-locked) > .past-progressive-blur::before,
-.journey-step.is-transitioning-to-past > .past-progressive-blur::before {
-  opacity: 1;
-}
-
-.journey-step.is-past
-  > .past-progressive-blur
-  > .past-progressive-blur-layer,
-.journey-step.is-future:not(.is-locked)
-  > .past-progressive-blur
-  > .past-progressive-blur-layer,
 .journey-step.is-transitioning-to-past
   > .past-progressive-blur
   > .past-progressive-blur-layer {
-  --unlocked-section-blur-radius: var(--unlocked-section-blur);
+  animation:
+    past-section-blur-layer-in
+    var(--section-transition-duration, 720ms)
+    var(--past-transition-blur-easing)
+    both;
 }
 
 /*
- * Unlocked, non-current sections use one full-section backdrop layer. Changing
- * only its radius preserves the gradual focus change while avoiding five
- * simultaneous filtered surfaces during fast reverse scrolling.
+ * Keep the shared fog container fully opaque so it does not become a Backdrop
+ * Root that isolates its children. Each final blur layer fades itself in while
+ * its backdrop radius and pixel-based mask stay fixed.
  */
 .past-progressive-blur-layer {
-  --unlocked-section-blur-radius: 0px;
+  --past-fog-clear-distance: 0px;
   position: absolute;
   inset: calc(-1 * var(--fog-layer-bleed));
   background: rgba(var(--connector-fog-rgb), 0.018);
-  -webkit-backdrop-filter: blur(var(--unlocked-section-blur-radius));
-  backdrop-filter: blur(var(--unlocked-section-blur-radius));
-  transition:
-    -webkit-backdrop-filter var(--section-transition-duration, 1s) var(--fog-transition-easing),
-    backdrop-filter var(--section-transition-duration, 1s) var(--fog-transition-easing);
+  -webkit-backdrop-filter: blur(var(--past-fog-blur));
+  backdrop-filter: blur(var(--past-fog-blur));
   -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 var(--fog-layer-bleed),
-    #000 calc(100% - var(--fog-layer-bleed)),
-    transparent 100%
+    var(--past-fog-direction),
+    transparent var(--fog-layer-bleed),
+    #000 calc(var(--fog-layer-bleed) + var(--past-fog-top-fade)),
+    #000 max(
+      var(--fog-layer-bleed),
+      calc(100% - var(--fog-layer-bleed) - var(--past-fog-clear-distance) - var(--past-fog-mask-fade-length))
+    ),
+    rgba(0, 0, 0, 0.55) max(
+      var(--fog-layer-bleed),
+      calc(100% - var(--fog-layer-bleed) - var(--past-fog-clear-distance) - var(--past-fog-mask-fade-midpoint))
+    ),
+    transparent max(
+      var(--fog-layer-bleed),
+      calc(100% - var(--fog-layer-bleed) - var(--past-fog-clear-distance))
+    )
   );
   mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 var(--fog-layer-bleed),
-    #000 calc(100% - var(--fog-layer-bleed)),
-    transparent 100%
+    var(--past-fog-direction),
+    transparent var(--fog-layer-bleed),
+    #000 calc(var(--fog-layer-bleed) + var(--past-fog-top-fade)),
+    #000 max(
+      var(--fog-layer-bleed),
+      calc(100% - var(--fog-layer-bleed) - var(--past-fog-clear-distance) - var(--past-fog-mask-fade-length))
+    ),
+    rgba(0, 0, 0, 0.55) max(
+      var(--fog-layer-bleed),
+      calc(100% - var(--fog-layer-bleed) - var(--past-fog-clear-distance) - var(--past-fog-mask-fade-midpoint))
+    ),
+    transparent max(
+      var(--fog-layer-bleed),
+      calc(100% - var(--fog-layer-bleed) - var(--past-fog-clear-distance))
+    )
   );
+}
+
+.past-progressive-blur-layer-1 {
+  --past-fog-blur: var(--past-fog-blur-1);
+  --past-fog-clear-distance: var(--past-fog-layer-1-clear-distance);
+}
+
+.past-progressive-blur-layer-2 {
+  --past-fog-blur: var(--past-fog-blur-2);
+  --past-fog-clear-distance: var(--past-fog-layer-2-clear-distance);
+}
+
+.past-progressive-blur-layer-3 {
+  --past-fog-blur: var(--past-fog-blur-3);
+  --past-fog-clear-distance: var(--past-fog-layer-3-clear-distance);
+}
+
+.past-progressive-blur-layer-4 {
+  --past-fog-blur: var(--past-fog-blur-4);
+  --past-fog-clear-distance: var(--past-fog-layer-4-clear-distance);
+}
+
+.past-progressive-blur-layer-5 {
+  --past-fog-blur: var(--past-fog-blur-5);
+  --past-fog-clear-distance: var(--past-fog-layer-5-clear-distance);
 }
 
 .progressive-blur-layer {
   position: absolute;
-  inset: calc(-1 * var(--fog-layer-bleed));
+  inset: calc(-1 * var(--fog-layer-bleed)) 0;
   background: rgba(var(--connector-fog-rgb), 0.018);
-  opacity: 0;
   -webkit-backdrop-filter: blur(var(--fog-blur));
   backdrop-filter: blur(var(--fog-blur));
-  transition: opacity var(--section-transition-duration, 1s) var(--fog-transition-easing);
   -webkit-mask-image: var(--fog-mask);
   mask-image: var(--fog-mask);
 }
@@ -4246,14 +4298,12 @@ select,
 
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .journey-step.is-preview::after,
-  .journey-step.is-future:not(.is-locked)::after,
-  .journey-step.is-past::after {
+  .journey-step.is-past:has(+ .journey-step.is-current)::after {
     display: none;
   }
 
   .journey-step.is-preview .step-card,
-  .journey-step.is-future:not(.is-locked) .step-card,
-  .journey-step.is-past .step-card {
+  .journey-step.is-past:has(+ .journey-step.is-current) .step-card {
     filter: none;
   }
 }
@@ -4361,6 +4411,24 @@ select,
   }
 }
 
+@keyframes past-section-blur-layer-in {
+  0% {
+    opacity: 0;
+  }
+
+  28% {
+    opacity: var(--past-transition-blur-early-opacity);
+  }
+
+  55% {
+    opacity: var(--past-transition-blur-mid-opacity);
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
 @media (max-width: 600px) {
   .journey-form {
     gap: var(--space-5);
@@ -4398,12 +4466,10 @@ select,
   }
 
   .journey-step.is-entering .step-card,
-  .progressive-blur::before,
-  .past-progressive-blur::before,
-  .progressive-blur-layer,
-  .past-progressive-blur-layer {
+  .journey-step.is-transitioning-to-past
+    > .past-progressive-blur
+    > .past-progressive-blur-layer {
     animation: none;
-    transition: none;
   }
 }
 
@@ -4819,15 +4885,22 @@ select,
 .hero-copy .start-button {
   position: absolute;
   bottom: 54px;
-  left: 50%;
+  left: 0;
+  right: 0;
   z-index: 20;
+  width: max-content;
   min-height: 64px;
+  margin-inline: auto;
   padding: 0 28px;
-  transform: translateX(-50%);
+  /*
+   * Centre with auto margins, not translateX(-50%), so the shared press/hover
+   * transforms below do not overwrite the centring and shift the button.
+   */
+  transform: none;
 }
 
 .hero-copy .start-button:hover {
-  transform: translate(calc(-50% - 2px), -2px);
+  transform: translate(-2px, -2px);
 }
 
 .hero-visual {
@@ -4837,6 +4910,14 @@ select,
   width: 100%;
   height: min(66svh, 690px);
   min-height: 520px;
+  /*
+   * Keep overflow visible: the Hero fog is a tall vertical band whose hard top
+   * and bottom edges are pushed off-screen by its 40svh vertical bleed, and it
+   * fades horizontally through its own mask. Clipping this box (either axis)
+   * pulls those hard edges back onto the visible board area and creates seams,
+   * so containment must not be done here. The header seam is handled by
+   * isolating the fog (isolation below) and flattening the header instead.
+   */
   overflow: visible;
   container-type: normal;
   isolation: isolate;
@@ -4944,6 +5025,21 @@ select,
   --hero-fog-blur-3: var(--hero-fog-desktop-blur-3);
   --hero-fog-blur-4: var(--hero-fog-desktop-blur-4);
   --hero-fog-blur-5: var(--hero-fog-desktop-blur-5);
+  /*
+   * Fade the whole fog to transparent just above the boards so its
+   * backdrop-filter never composites across the fixed header (which produced a
+   * Chrome-only seam at the top-left). The fog's own top sits one vertical bleed
+   * above the boards, so the transparent stop lands above the header while the
+   * fog reaches full strength a little into the boards. Intersected per layer
+   * with each layer's horizontal mask so the left bleed is preserved.
+   */
+  --hero-fog-vertical-mask: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--hero-fog-vertical-bleed) - 16px),
+    #000 calc(var(--hero-fog-vertical-bleed) + 48px),
+    #000 100%
+  );
   position: absolute;
   top: calc(-1 * var(--hero-fog-vertical-bleed));
   bottom: calc(-1 * var(--hero-fog-vertical-bleed));
@@ -4964,8 +5060,10 @@ select,
   background: rgba(var(--connector-fog-rgb), 0.001);
   -webkit-backdrop-filter: blur(var(--hero-fog-blur));
   backdrop-filter: blur(var(--hero-fog-blur));
-  -webkit-mask-image: var(--hero-fog-mask);
-  mask-image: var(--hero-fog-mask);
+  -webkit-mask-image: var(--hero-fog-mask), var(--hero-fog-vertical-mask);
+  -webkit-mask-composite: source-in;
+  mask-image: var(--hero-fog-mask), var(--hero-fog-vertical-mask);
+  mask-composite: intersect;
 }
 
 .hero-fog-layer-1 {
