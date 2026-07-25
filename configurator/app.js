@@ -3,7 +3,6 @@ const DEFAULTS = {
   notificationEmail: '',
   syncHours: [6],
   notifyHour: 6,
-  includeActivities: true,
   notificationPreset: 'standard',
   customNotification: [
     '{type}｜{course}',
@@ -19,18 +18,24 @@ const DEFAULTS = {
   ].join('\n'),
   reminderMode: 'none',
   reminderMinutes: 10,
-  calendarName: 'T-SCHOOL 課表'
+  calendarNameSuffix: '行程｜T-SCHOOL Schedule Sync'
 };
 
 // Temporary feature switch: set to true to restore Lenis and animated page scrolling.
 const ENABLE_SMOOTH_SCROLL = true;
 
-// Set this to a published Google Sheets `/copy` URL when the hosted template is ready.
-// Until then, the installation guide downloads the verified local workbook template.
-const GOOGLE_SHEETS_TEMPLATE_COPY_URL = '';
+// Developer-only high-load test generator.
+// Set this to false before publishing if the dedicated test build should be completely unavailable.
+// Even while true, regular visitors do not receive test code unless the URL contains ?highLoadTest=1.
+const ENABLE_HIGH_LOAD_TEST_FEATURE = true;
+const HIGH_LOAD_TEST_QUERY_PARAMETER = 'highLoadTest';
+
+const GOOGLE_SHEETS_TEMPLATE_COPY_URL =
+  'https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy';
 const LOCAL_SHEETS_TEMPLATE_URL = 'assets/t-school-control-panel-template.xlsx';
 const COURSE_SEARCH_ICON_URL = 'assets/icon-search.svg';
 const COURSE_SEARCH_CANCEL_ICON_URL = 'assets/icon-x.svg';
+const MAX_NOTIFY_HOURS = 4;
 const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
   try {
     return new Intl.Collator('zh-Hant-u-co-stroke', {
@@ -50,8 +55,7 @@ const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
 // Boundary feel: distance starts the slowdown, exponent shapes its curve, and
 // minimumFactor keeps the last part moving before it settles exactly on the limit.
 const MOTION_CONFIG = Object.freeze({
-  sectionTransitionDuration: 0.72,
-  completionPressDuration: 150,
+  sectionTransitionDuration: 10,
   scrollLerpDesktop: 0.2,
   scrollLerpTouch: 0.2,
   scrollWheelMultiplier: 1,
@@ -67,10 +71,16 @@ const MOTION_CONFIG = Object.freeze({
   homeEntryScrollDuration: 0.9,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
-  heroMobilePaperTravelRatio: 0.24,
+  heroDesktopPaperTravelRatio: 0.06,
+  heroMobilePaperTravelRatio: 0.13,
   cursorPositionEase: 0.38,
   cursorAngleEase: 0.3
 });
+
+document.documentElement.style.setProperty(
+  '--section-transition-duration',
+  `${MOTION_CONFIG.sectionTransitionDuration}s`
+);
 
 const state = {
   selectedByGrade: new Map(),
@@ -84,8 +94,9 @@ const state = {
 
 const elements = {
   form: document.querySelector('#config-form'),
+  highLoadTestBanner: document.querySelector('#high-load-test-banner'),
   notificationEmail: document.querySelector('#notification-email'),
-  notifyHour: document.querySelector('#notify-hour'),
+  notifyHoursList: document.querySelector('#notify-hours-list'),
   courseSearch: document.querySelector('#course-search'),
   courseSearchSubmit: document.querySelector('#course-search-submit'),
   courseSearchIcon: document.querySelector('#course-search-icon'),
@@ -94,7 +105,8 @@ const elements = {
   notificationSelectionCount: document.querySelector('#notification-selection-count'),
   generatedCode: document.querySelector('#generated-code'),
   copyCode: document.querySelector('#copy-code'),
-  copyCodeInline: document.querySelector('#copy-code-inline'),
+  copyCodeInline: Array.from(document.querySelectorAll('[data-copy-code-inline]')),
+  outputEmail: document.querySelector('#output-email'),
   sourceStatus: document.querySelector('#source-status'),
   sourceStatusTitle: document.querySelector('#source-status-title'),
   sourceStatusDetail: document.querySelector('#source-status-detail'),
@@ -111,9 +123,14 @@ const elements = {
 };
 
 function init() {
+  initViewportMetrics();
+  const highLoadTestGenerationEnabled = isHighLoadTestGenerationEnabled();
+  document.body.classList.toggle('is-high-load-test-build', highLoadTestGenerationEnabled);
+  if (elements.highLoadTestBanner) {
+    elements.highLoadTestBanner.hidden = !highLoadTestGenerationEnabled;
+  }
   elements.notificationEmail.value = DEFAULTS.notificationEmail;
-  renderNotifyHours();
-  elements.notifyHour.value = String(DEFAULTS.notifyHour);
+  renderNotifyHours(DEFAULTS.syncHours);
   updateNotifyHourState();
   configureSheetTemplateLink();
   bindEvents();
@@ -125,30 +142,42 @@ function init() {
   renderSettingsSummary();
 }
 
+function initViewportMetrics() {
+  const update = () => {
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    document.documentElement.style.setProperty(
+      '--visual-viewport-height',
+      `${Math.round(viewportHeight)}px`
+    );
+  };
+
+  update();
+  window.addEventListener('resize', update, { passive: true });
+  window.visualViewport?.addEventListener('resize', update, { passive: true });
+}
+
 function configureSheetTemplateLink() {
-  if (!elements.sheetTemplateLink || !elements.sheetTemplateNote) return;
+  if (!elements.sheetTemplateLink) return;
 
   const isGoogleCopyUrl = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[^/]+\/copy(?:[?#].*)?$/i
     .test(GOOGLE_SHEETS_TEMPLATE_COPY_URL);
 
   if (isGoogleCopyUrl) {
     elements.sheetTemplateLink.href = GOOGLE_SHEETS_TEMPLATE_COPY_URL;
-    elements.sheetTemplateLink.textContent = '建立自己的控制臺副本 ↗';
+    elements.sheetTemplateLink.textContent = '模板連結';
     elements.sheetTemplateLink.target = '_blank';
     elements.sheetTemplateLink.rel = 'noopener';
     elements.sheetTemplateLink.removeAttribute('download');
-    elements.sheetTemplateLink.dataset.cursorLabel = '建立控制臺副本';
-    elements.sheetTemplateNote.textContent = '開啟後按「建立副本」即可；不需要在儲存格中輸入資料。';
+    elements.sheetTemplateLink.dataset.cursorLabel = '開啟模板連結';
     return;
   }
 
   elements.sheetTemplateLink.href = LOCAL_SHEETS_TEMPLATE_URL;
-  elements.sheetTemplateLink.textContent = '下載控制臺範本';
+  elements.sheetTemplateLink.textContent = '模板連結';
   elements.sheetTemplateLink.download = 't-school-control-panel-template.xlsx';
   elements.sheetTemplateLink.removeAttribute('target');
   elements.sheetTemplateLink.removeAttribute('rel');
-  elements.sheetTemplateLink.dataset.cursorLabel = '下載控制臺範本';
-  elements.sheetTemplateNote.textContent = '下載後上傳至 Google Drive；設定都在安裝完成後的側欄進行，不需要編輯儲存格。';
+  elements.sheetTemplateLink.dataset.cursorLabel = '下載模板連結';
 }
 
 function bindEvents() {
@@ -162,14 +191,31 @@ function bindEvents() {
       return;
     }
 
+    // Search text is presentation-only, while course/activity changes are
+    // finalized by the course-list change handler. Avoid rebuilding the large
+    // generated Apps Script once (or twice) for these unrelated input events.
+    if (
+      event.target === elements.courseSearch ||
+      event.target.matches('[data-course], [data-activity]')
+    ) {
+      return;
+    }
+
     if (event.target === elements.notificationEmail) {
       updateNotifyHourState();
     }
 
-    if (event.target === elements.notificationEmail || event.target === elements.notifyHour) {
+    if (
+      event.target === elements.notificationEmail ||
+      event.target.matches('[data-notify-hour]')
+    ) {
       document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
         detail: { step: 3 }
       }));
+    }
+
+    if (event.target.matches('[data-notify-hour]')) {
+      updateNotifyHourOptions();
     }
 
     updateOutput();
@@ -202,12 +248,18 @@ function bindEvents() {
 
     elements.courseSearch.focus();
   });
+  elements.notifyHoursList?.addEventListener('click', handleNotifyHourAction);
+
+  [elements.copyCode, ...elements.copyCodeInline].forEach(button => {
+    if (!button) return;
+    button.dataset.cursorDefaultLabel = button.dataset.cursorLabel || '複製程式碼';
+  });
 
   elements.copyCode.addEventListener('click', copyGeneratedCode);
 
-  if (elements.copyCodeInline) {
-    elements.copyCodeInline.addEventListener('click', copyGeneratedCode);
-  }
+  elements.copyCodeInline.forEach(button => {
+    button.addEventListener('click', copyGeneratedCode);
+  });
 
   elements.sourceRefresh.addEventListener('click', () => {
     const grade = getCurrentGrade();
@@ -404,15 +456,139 @@ function setFieldState(field, stateValue, hint) {
   }
 }
 
-function renderNotifyHours() {
-  elements.notifyHour.innerHTML = Array.from({ length: 24 }, (_, hour) =>
-    `<option value="${hour}">${pad2(hour)}:00</option>`
-  ).join('');
+function renderNotifyHours(hours) {
+  const normalizedHours = Array.from(new Set(hours))
+    .filter(hour => Number.isInteger(hour) && hour >= 0 && hour <= 23)
+    .slice(0, MAX_NOTIFY_HOURS);
+  const initialHours = normalizedHours.length ? normalizedHours : [DEFAULTS.notifyHour];
+
+  elements.notifyHoursList.innerHTML = '';
+  initialHours.forEach(hour => appendNotifyHourRow(hour));
+  updateNotifyHourOptions();
 }
 
 function updateNotifyHourState() {
   const hasEmail = Boolean(elements.notificationEmail.value.trim());
-  elements.notifyHour.title = hasEmail ? '' : '未填寫時會使用目前 Google 帳號的 Email';
+  getNotifyHourSelects().forEach(select => {
+    select.title = hasEmail ? '' : '未填寫時會使用目前 Google 帳號的 Email';
+  });
+}
+
+function appendNotifyHourRow(hour) {
+  const index = getNotifyHourSelects().length;
+  const row = document.createElement('div');
+  row.className = 'notification-time-row';
+
+  const label = document.createElement('label');
+  label.className = 'notification-time-select';
+
+  const accessibleLabel = document.createElement('span');
+  accessibleLabel.className = 'visually-hidden';
+  accessibleLabel.textContent = `通知時間 ${index + 1}`;
+
+  const select = document.createElement('select');
+  select.name = 'notifyHours[]';
+  select.dataset.notifyHour = '';
+  select.dataset.cursorLabel = '選擇時段';
+  select.innerHTML = Array.from({ length: 24 }, (_, optionHour) =>
+    `<option value="${optionHour}">${pad2(optionHour)}:00</option>`
+  ).join('');
+  select.value = String(hour);
+
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.className = `icon-button notification-time-action ${index === 0 ? 'is-add' : 'is-remove'}`;
+  action.dataset.cursorLabel = index === 0 ? '新增通知時間' : '移除通知時間';
+  action.setAttribute('aria-label', index === 0 ? '新增通知時間' : `移除通知時間 ${index + 1}`);
+  action.dataset[index === 0 ? 'addNotifyHour' : 'removeNotifyHour'] = '';
+  action.textContent = index === 0 ? '+' : '−';
+
+  label.append(accessibleLabel, select);
+  row.append(label, action);
+  elements.notifyHoursList.append(row);
+}
+
+function handleNotifyHourAction(event) {
+  const addButton = event.target.closest('[data-add-notify-hour]');
+  const removeButton = event.target.closest('[data-remove-notify-hour]');
+
+  if (addButton) {
+    if (getNotifyHourSelects().length >= MAX_NOTIFY_HOURS) return;
+    appendNotifyHourRow(getNextNotifyHour());
+    updateNotifyHourOptions();
+    notifyStepConfigurationChanged();
+    getNotifyHourSelects().at(-1)?.focus({ preventScroll: true });
+    return;
+  }
+
+  if (!removeButton) return;
+
+  const row = removeButton.closest('.notification-time-row');
+  const nextFocus = row?.previousElementSibling?.querySelector('select') ||
+    row?.nextElementSibling?.querySelector('select') ||
+    getNotifyHourSelects()[0];
+  row?.remove();
+  updateNotifyHourOptions();
+  notifyStepConfigurationChanged();
+  nextFocus?.focus({ preventScroll: true });
+}
+
+function getNotifyHourSelects() {
+  return Array.from(elements.notifyHoursList?.querySelectorAll('[data-notify-hour]') || []);
+}
+
+function getSelectedNotifyHours() {
+  return getNotifyHourSelects()
+    .map(select => Number(select.value))
+    .filter((hour, index, hours) =>
+      Number.isInteger(hour) &&
+      hour >= 0 &&
+      hour <= 23 &&
+      hours.indexOf(hour) === index
+    );
+}
+
+function getNextNotifyHour() {
+  const selected = getSelectedNotifyHours();
+  const preferred = ((selected.at(-1) ?? DEFAULTS.notifyHour) + 6) % 24;
+
+  for (let offset = 0; offset < 24; offset += 1) {
+    const candidate = (preferred + offset) % 24;
+    if (!selected.includes(candidate)) return candidate;
+  }
+
+  return DEFAULTS.notifyHour;
+}
+
+function updateNotifyHourOptions() {
+  const selects = getNotifyHourSelects();
+  const selectedHours = selects.map(select => Number(select.value));
+
+  selects.forEach((select, selectIndex) => {
+    Array.from(select.options).forEach(option => {
+      const optionHour = Number(option.value);
+      option.disabled = selectedHours.some((selectedHour, selectedIndex) =>
+        selectedIndex !== selectIndex && selectedHour === optionHour
+      );
+    });
+  });
+
+  const addButton = elements.notifyHoursList?.querySelector('[data-add-notify-hour]');
+  if (addButton) {
+    const maximumReached = selects.length >= MAX_NOTIFY_HOURS;
+    addButton.disabled = maximumReached;
+    addButton.title = maximumReached ? `最多可設定 ${MAX_NOTIFY_HOURS} 個通知時間` : '';
+  }
+
+  updateNotifyHourState();
+}
+
+function notifyStepConfigurationChanged() {
+  document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
+    detail: { step: 3 }
+  }));
+  updateOutput();
+  renderSettingsSummary();
 }
 
 function getSelectedCourses(gradeName) {
@@ -565,22 +741,40 @@ function getCurrentGrade() {
   return checked ? checked.value : '';
 }
 
+function getDefaultCalendarName(gradeName) {
+  return `${gradeName || '高一'}${DEFAULTS.calendarNameSuffix}`;
+}
+
+function isHighLoadTestGenerationEnabled() {
+  if (!ENABLE_HIGH_LOAD_TEST_FEATURE) return false;
+
+  try {
+    return new URLSearchParams(window.location.search)
+      .get(HIGH_LOAD_TEST_QUERY_PARAMETER) === '1';
+  } catch (error) {
+    return false;
+  }
+}
+
 function getSettings() {
-  const notifyHour = Number(elements.notifyHour.value);
-  const autoSyncHours = [notifyHour];
+  const autoSyncHours = getSelectedNotifyHours();
+  const notifyHour = autoSyncHours[0] ?? DEFAULTS.notifyHour;
 
   const summary = state.sourceSummary;
+  const activityTitles = summary ? summary.catalog.activities.map(item => item.title) : [];
+  const excludedActivities = getExcludedActivities();
+  const includeActivities = activityTitles.some(title => !excludedActivities.has(title));
 
   return {
     appVersion: '2.0.0-mvp',
     sourceApiUrl: window.TSchoolScheduleData.API_URL,
     gradeName: getCurrentGrade(),
-    calendarName: DEFAULTS.calendarName,
+    calendarName: getDefaultCalendarName(getCurrentGrade()),
     notificationEmail: elements.notificationEmail.value.trim(),
     autoSyncHours,
     notifySyncHour: notifyHour,
-    includeActivities: DEFAULTS.includeActivities,
-    excludedActivities: Array.from(getExcludedActivities()).sort((a, b) =>
+    includeActivities,
+    excludedActivities: Array.from(excludedActivities).sort((a, b) =>
       a.localeCompare(b, 'zh-Hant')
     ),
     selectedCourses: Array.from(getSelectedCourses()).sort((a, b) =>
@@ -592,6 +786,7 @@ function getSettings() {
     customDescription: DEFAULTS.customDescription,
     reminderMode: DEFAULTS.reminderMode,
     reminderMinutes: DEFAULTS.reminderMinutes,
+    highLoadTestingEnabled: isHighLoadTestGenerationEnabled(),
     initialTermKey: summary ? summary.termKey : '',
     initialSourceFingerprint: summary ? summary.fingerprint : '',
     initialKnownTitles: summary ? summary.catalog.all.map(item => item.title) : []
@@ -601,6 +796,9 @@ function getSettings() {
 function updateOutput() {
   const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
   elements.copyCode.disabled = !ready;
+  if (elements.outputEmail) {
+    elements.outputEmail.textContent = elements.notificationEmail.value.trim() || '---@---.---';
+  }
   const gradeStepComplete = document.querySelector('[data-complete-step="1"]');
   const courseStepComplete = document.querySelector('[data-complete-step="2"]');
 
@@ -612,25 +810,52 @@ function updateOutput() {
     courseStepComplete.disabled = !ready;
   }
 
-  if (elements.copyCodeInline) {
-    elements.copyCodeInline.disabled = !ready;
-  }
+  elements.copyCodeInline.forEach(button => {
+    button.disabled = !ready;
+  });
 
   if (!ready || typeof window.buildAppsScriptCode !== 'function') {
-    elements.generatedCode.value = state.sourceError
+    setGeneratedCode(state.sourceError
       ? '// 課表來源目前無法讀取，請重新嘗試後再複製。'
-      : '// 正在準備控制臺程式碼…';
+      : '// 正在準備控制臺程式碼…');
     return;
   }
 
-  elements.generatedCode.value = window.buildAppsScriptCode(getSettings());
+  setGeneratedCode(window.buildAppsScriptCode(getSettings()));
 }
 
-async function copyGeneratedCode() {
+function setGeneratedCode(nextCode) {
+  if (elements.generatedCode.value === nextCode) {
+    return;
+  }
+
+  elements.copyCode.classList.remove('is-copied');
+  elements.copyCode.textContent = '複製程式碼 ↵';
+  elements.copyCode.setAttribute('aria-label', '複製程式碼');
+  [elements.copyCode, ...elements.copyCodeInline].forEach(button => {
+    if (!button) return;
+    button.dataset.cursorLabel = button.dataset.cursorDefaultLabel || '複製程式碼';
+    delete button.dataset.cursorTone;
+  });
+  elements.generatedCode.value = nextCode;
+}
+
+function updateCopyCursorSuccess(trigger) {
+  if (!trigger) return;
+  trigger.dataset.cursorLabel = '複製完成！';
+  trigger.dataset.cursorTone = 'success';
+  document.dispatchEvent(new CustomEvent('tschool:cursor-context-change', {
+    detail: { target: trigger }
+  }));
+}
+
+async function copyGeneratedCode(event) {
   if (!state.sourceSummary || !validateNotificationEmail()) {
     elements.notificationEmail.reportValidity();
     return;
   }
+
+  const trigger = event?.currentTarget || elements.copyCode;
 
   try {
     await navigator.clipboard.writeText(elements.generatedCode.value);
@@ -640,7 +865,10 @@ async function copyGeneratedCode() {
     document.execCommand('copy');
   }
 
-  showToast('已複製控制臺程式碼');
+  elements.copyCode.classList.add('is-copied');
+  elements.copyCode.textContent = '複製完成！';
+  elements.copyCode.setAttribute('aria-label', '程式碼已複製，再次按下可重新複製');
+  updateCopyCursorSuccess(trigger);
 }
 
 function showToast(message) {
@@ -666,7 +894,9 @@ function initVisualExperience() {
 }
 
 function initProgressiveBlurLayers() {
-  document.querySelectorAll('.journey-step').forEach(step => {
+  const steps = Array.from(document.querySelectorAll('.journey-step'));
+
+  steps.forEach(step => {
     const createFog = (className, layerClassName) => {
       if (step.querySelector(`:scope > .${className}`)) return;
 
@@ -686,6 +916,22 @@ function initProgressiveBlurLayers() {
     createFog('progressive-blur', 'progressive-blur-layer');
     createFog('past-progressive-blur', 'past-progressive-blur-layer');
   });
+
+  if ('IntersectionObserver' in window) {
+    document.documentElement.classList.add('has-blur-visibility-observer');
+    steps.forEach(step => step.classList.add('is-blur-rendering-active'));
+
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        entry.target.classList.toggle('is-blur-rendering-active', entry.isIntersecting);
+      });
+    }, {
+      // Keep the effect ready before it can enter the visible viewport.
+      rootMargin: '100% 0px'
+    });
+
+    steps.forEach(step => observer.observe(step));
+  }
 }
 
 function initSmoothScroll() {
@@ -715,72 +961,252 @@ function initSmoothScroll() {
 
   window.tschoolLenis = lenis;
 
-  function raf(time) {
-    lenis.raf(time);
-    requestAnimationFrame(raf);
+  let frameId = 0;
+  let frameLoopActive = false;
+
+  function requestLenisFrame() {
+    if (frameId || document.hidden) {
+      return;
+    }
+
+    if (!frameLoopActive) {
+      // Lenis derives its delta from the previous timestamp. Reset the clock
+      // when waking from idle so the first frame cannot jump by the idle time.
+      lenis.time = performance.now();
+      frameLoopActive = true;
+    }
+
+    frameId = requestAnimationFrame(raf);
   }
 
-  requestAnimationFrame(raf);
+  function raf(time) {
+    frameId = 0;
+    lenis.raf(time);
+
+    if (lenis.isScrolling === 'smooth') {
+      frameId = requestAnimationFrame(raf);
+      return;
+    }
+
+    frameLoopActive = false;
+  }
+
+  // A wheel/touch gesture reaches this event before Lenis creates its smooth
+  // animation, so one requested frame is enough to start the event-driven loop.
+  lenis.on('virtual-scroll', requestLenisFrame);
+
+  // Programmatic navigation does not emit virtual-scroll. Keep the public
+  // instance API intact while ensuring those animations also wake the loop.
+  const scrollTo = lenis.scrollTo.bind(lenis);
+  lenis.scrollTo = (...args) => {
+    const result = scrollTo(...args);
+    requestLenisFrame();
+    return result;
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = 0;
+      frameLoopActive = false;
+      return;
+    }
+
+    if (lenis.isScrolling === 'smooth') {
+      requestLenisFrame();
+    }
+  });
 }
 
 function initHeroScroll() {
   const stage = document.getElementById('hero-stage');
   const tiles = Array.from(document.querySelectorAll('.transfer-tile'));
   const paperTrack = stage?.querySelector('.hero-paper-track');
+  const visual = stage?.querySelector('.hero-visual');
+  const scheduleBoard = stage?.querySelector('.schedule-board');
+  const calendarBoard = stage?.querySelector('.calendar-board');
+  const mobileTileAnchors = [
+    { x: 0.12, y: 0.3 },
+    { x: 0.18, y: 0.56 },
+    { x: 0.1, y: 0.82 }
+  ];
 
-  if (!stage || !paperTrack || tiles.length === 0) {
+  if (!stage || !visual || !paperTrack || tiles.length === 0) {
     return;
   }
 
+  const narrowQuery = window.matchMedia('(max-width: 760px)');
+  const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
   let frameRequested = false;
+  let renderingActive = true;
+  let layoutDirty = true;
+  let layout = null;
+  let previousProgress = Number.NaN;
+
+  function measureLayout() {
+    const width = visual.clientWidth || window.innerWidth;
+    const isNarrow = narrowQuery.matches;
+    const reducedMotion = reducedMotionQuery.matches;
+    const animationEnd = Math.min(
+      1,
+      MOTION_CONFIG.heroTileTravel + MOTION_CONFIG.heroTileStagger * (tiles.length - 1)
+    );
+    const scheduleMetrics = scheduleBoard
+      ? {
+          left: scheduleBoard.offsetLeft,
+          top: scheduleBoard.offsetTop,
+          width: scheduleBoard.offsetWidth,
+          height: scheduleBoard.offsetHeight
+        }
+      : null;
+    const calendarMetrics = calendarBoard
+      ? {
+          left: calendarBoard.offsetLeft,
+          width: calendarBoard.offsetWidth
+        }
+      : null;
+    const tileSizes = tiles.map(tile => ({
+      width: tile.offsetWidth,
+      height: tile.offsetHeight
+    }));
+    const measuredDistance = scheduleMetrics && calendarMetrics
+      ? calendarMetrics.left - scheduleMetrics.left
+      : 0;
+    const desktopDistanceX = measuredDistance > 0 ? measuredDistance : width * 0.55;
+    const tileDistances = tiles.map((tile, index) => {
+      const mobileAnchor = mobileTileAnchors[index];
+      const tileSize = tileSizes[index];
+
+      if (isNarrow && scheduleMetrics && calendarMetrics && mobileAnchor) {
+        const startInsetX = Math.min(
+          scheduleMetrics.width * mobileAnchor.x,
+          Math.max(4, scheduleMetrics.width - tileSize.width - 4)
+        );
+        const startInsetY = Math.min(
+          scheduleMetrics.height * mobileAnchor.y,
+          Math.max(4, scheduleMetrics.height - tileSize.height - 4)
+        );
+        const startLeft = scheduleMetrics.left + startInsetX;
+        const endInset = Math.min(
+          calendarMetrics.width * mobileAnchor.x,
+          Math.max(4, calendarMetrics.width - tileSize.width - 4)
+        );
+
+        tile.style.left = `${startLeft}px`;
+        tile.style.top = `${scheduleMetrics.top + startInsetY}px`;
+
+        return {
+          x: calendarMetrics.left + endInset - startLeft,
+          y: 0
+        };
+      }
+
+      tile.style.removeProperty('left');
+      tile.style.removeProperty('top');
+      return {
+        x: desktopDistanceX,
+        y: (index + 1) * 5
+      };
+    });
+
+    layout = {
+      animationEnd,
+      isNarrow,
+      paperTravelRatio: isNarrow
+        ? MOTION_CONFIG.heroMobilePaperTravelRatio
+        : MOTION_CONFIG.heroDesktopPaperTravelRatio,
+      reducedMotion,
+      tileDistances,
+      viewportHeight: window.visualViewport?.height || window.innerHeight,
+      width
+    };
+    layoutDirty = false;
+  }
 
   function update() {
     frameRequested = false;
-    const rect = stage.getBoundingClientRect();
-    const distance = Math.max(1, rect.height - window.innerHeight);
-    const progress = clamp(-rect.top / distance, 0, 1);
-    const visual = stage.querySelector('.hero-visual');
-    const scheduleBoard = stage.querySelector('.schedule-board');
-    const calendarBoard = stage.querySelector('.calendar-board');
-    const width = visual ? visual.clientWidth : window.innerWidth;
-    const isNarrow = window.matchMedia('(max-width: 600px)').matches;
-    const reducedMotion = prefersReducedMotion();
-    const paperProgress = reducedMotion ? 0 : progress;
-    const paperTravel = isNarrow
-      ? width * MOTION_CONFIG.heroMobilePaperTravelRatio * paperProgress
-      : 0;
-    const measuredDistance = scheduleBoard && calendarBoard
-      ? calendarBoard.offsetLeft - scheduleBoard.offsetLeft
-      : 0;
-    const distanceX = measuredDistance > 0
-      ? measuredDistance * (isNarrow ? 0.92 : 1)
-      : width * (isNarrow ? 0.48 : 0.55);
 
+    if (!renderingActive) {
+      return;
+    }
+
+    const rect = stage.getBoundingClientRect();
+    const needsLayout = layoutDirty || !layout;
+
+    if (needsLayout) {
+      measureLayout();
+    }
+
+    const distance = Math.max(1, rect.height - layout.viewportHeight);
+    const progress = clamp(-rect.top / distance, 0, 1);
+
+    if (!needsLayout && Math.abs(progress - previousProgress) < 0.0001) {
+      return;
+    }
+
+    previousProgress = progress;
+    const paperProgress = layout.reducedMotion
+      ? 0
+      : clamp(progress / layout.animationEnd, 0, 1);
+    const paperTravel = layout.width * layout.paperTravelRatio * paperProgress;
     paperTrack.style.transform = `translate3d(${-paperTravel}px, 0, 0)`;
 
     tiles.forEach((tile, index) => {
-      const localProgress = reducedMotion
+      const localProgress = layout.reducedMotion
         ? 0
         : clamp((progress - index * MOTION_CONFIG.heroTileStagger) / MOTION_CONFIG.heroTileTravel, 0, 1);
       const eased = localProgress * localProgress * localProgress * (localProgress * (localProgress * 6 - 15) + 10);
-      const arc = Math.sin(Math.PI * eased) * (isNarrow ? -15 : -30);
-      const settleY = (index + 1) * (isNarrow ? 2 : 5);
-      const paperCompensation = isNarrow ? paperTravel : 0;
-      tile.style.transform = `translate3d(${distanceX * eased + paperCompensation}px, ${arc + settleY * eased}px, 0)`;
+      const arc = Math.sin(Math.PI * eased) * (layout.isNarrow ? 0 : -30);
+      const tileDistance = layout.tileDistances[index];
+      tile.style.transform = `translate3d(${tileDistance.x * eased}px, ${arc + tileDistance.y * eased}px, 0)`;
     });
 
-    stage.classList.toggle('is-complete', !reducedMotion && progress > 0.82);
+    stage.classList.toggle(
+      'is-complete',
+      !layout.reducedMotion && progress >= layout.animationEnd
+    );
   }
 
   function requestUpdate() {
-    if (!frameRequested) {
+    if (renderingActive && !frameRequested) {
       frameRequested = true;
       requestAnimationFrame(update);
     }
   }
 
+  function invalidateLayout() {
+    layoutDirty = true;
+    requestUpdate();
+  }
+
   window.addEventListener('scroll', requestUpdate, { passive: true });
-  window.addEventListener('resize', requestUpdate);
+  window.addEventListener('resize', invalidateLayout, { passive: true });
+  window.visualViewport?.addEventListener('resize', invalidateLayout, { passive: true });
+  narrowQuery.addEventListener?.('change', invalidateLayout);
+  reducedMotionQuery.addEventListener?.('change', invalidateLayout);
+
+  if ('ResizeObserver' in window) {
+    const resizeObserver = new ResizeObserver(invalidateLayout);
+    resizeObserver.observe(stage);
+    resizeObserver.observe(visual);
+  }
+
+  if ('IntersectionObserver' in window) {
+    const intersectionObserver = new IntersectionObserver(entries => {
+      renderingActive = entries[0]?.isIntersecting ?? true;
+      stage.classList.toggle('is-rendering-paused', !renderingActive);
+
+      if (renderingActive) {
+        layoutDirty = true;
+        requestUpdate();
+      }
+    }, {
+      // Start rendering one viewport before the Hero can become visible.
+      rootMargin: '100% 0px'
+    });
+    intersectionObserver.observe(stage);
+  }
+
   update();
 }
 
@@ -799,7 +1225,8 @@ function initStepJourney() {
   let frameRequested = false;
   let automatedTargetStep = 0;
   let compositionActive = false;
-  const completionActivations = new Map();
+  let journeyGeometryDirty = true;
+  let journeyGeometry = null;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -833,6 +1260,7 @@ function initStepJourney() {
 
     completionStates.set(stepNumber, nextState);
     button.textContent = labels[nextState];
+    button.classList.toggle('is-review', nextState === 'review');
     button.classList.toggle('is-confirmed', nextState === 'confirmed');
     button.setAttribute('aria-pressed', String(nextState === 'confirmed'));
     button.dataset.cursorLabel = nextState === 'review'
@@ -844,36 +1272,8 @@ function initStepJourney() {
           : '產生安裝程式碼';
   }
 
-  function runCompletionPress(button, callback) {
-    if (completionActivations.has(button)) return;
-
-    button.classList.add('is-activating');
-    button.setAttribute('aria-busy', 'true');
-
-    const duration = prefersReducedMotion() ? 0 : MOTION_CONFIG.completionPressDuration;
-    const timer = window.setTimeout(() => {
-      button.classList.remove('is-activating');
-      button.removeAttribute('aria-busy');
-      completionActivations.delete(button);
-      callback();
-    }, duration);
-    completionActivations.set(button, timer);
-  }
-
-  function cancelCompletionPress(stepNumber) {
-    const button = getCompletionButton(stepNumber);
-    const timer = completionActivations.get(button);
-
-    if (!button || timer === undefined) return;
-
-    window.clearTimeout(timer);
-    completionActivations.delete(button);
-    button.classList.remove('is-activating');
-    button.removeAttribute('aria-busy');
-  }
-
   function activateCompletionButton(button) {
-    if (!button || button.disabled || completionActivations.has(button)) return;
+    if (!button || button.disabled) return;
 
     const completedStep = Number(button.dataset.completeStep);
 
@@ -892,25 +1292,19 @@ function initStepJourney() {
     }
 
     if (completedStep === 2 && completionStates.get(2) === 'initial') {
-      runCompletionPress(button, () => setCompletionState(2, 'review'));
+      setCompletionState(2, 'review');
       return;
     }
 
-    runCompletionPress(button, () => {
-      setCompletionState(completedStep, 'confirmed');
-      unlockAndScrollToStep(completedStep + 1);
-    });
+    setCompletionState(completedStep, 'confirmed');
+    unlockAndScrollToStep(completedStep + 1);
   }
 
   function resetCompletionAfterChange(changedStep) {
     if (changedStep === 2) {
-      cancelCompletionPress(2);
-      cancelCompletionPress(4);
       setCompletionState(2, 'initial');
       setCompletionState(4, 'initial');
     } else if (changedStep === 3) {
-      cancelCompletionPress(3);
-      cancelCompletionPress(4);
       setCompletionState(3, 'initial');
       setCompletionState(4, 'initial');
     } else {
@@ -948,7 +1342,10 @@ function initStepJourney() {
 
   function getStepScrollTarget(target, stepNumber) {
     const offset = window.matchMedia('(max-width: 600px)').matches ? 72 : 96;
-    const naturalTarget = target.getBoundingClientRect().top + window.scrollY - offset;
+    const stepTop = getJourneyGeometry().stepTops[stepNumber - 1];
+    const naturalTarget = Number.isFinite(stepTop)
+      ? stepTop - offset
+      : target.getBoundingClientRect().top + window.scrollY - offset;
     const maximumScrollY = getMaximumScrollY();
 
     return stepNumber === maxUnlockedStep && Number.isFinite(maximumScrollY)
@@ -1018,6 +1415,7 @@ function initStepJourney() {
 
   function setActiveStep(stepNumber) {
     const nextActiveStep = clamp(stepNumber, 1, maxUnlockedStep);
+    const unlockedLayoutChanged = renderedUnlockedStep !== maxUnlockedStep;
 
     if (
       nextActiveStep === activeStep &&
@@ -1050,6 +1448,10 @@ function initStepJourney() {
       if (isCurrent) item.setAttribute('aria-current', 'step');
       item.disabled = targetStep > maxUnlockedStep;
     });
+
+    if (unlockedLayoutChanged) {
+      invalidateJourneyGeometry();
+    }
   }
 
   function unlockAndScrollToStep(stepNumber) {
@@ -1060,7 +1462,9 @@ function initStepJourney() {
     resetScrollMomentum();
     maxUnlockedStep = Math.max(maxUnlockedStep, stepNumber);
     const target = steps[stepNumber - 1];
+    const previous = steps[activeStep - 1];
     automatedTargetStep = stepNumber;
+    previous?.classList.add('is-transitioning-to-past');
     target.classList.add('is-entering');
     setActiveStep(stepNumber);
     void target.offsetWidth;
@@ -1070,6 +1474,7 @@ function initStepJourney() {
     });
     window.setTimeout(() => {
       automatedTargetStep = 0;
+      previous?.classList.remove('is-transitioning-to-past');
       target.classList.remove('is-entering');
       requestUpdate();
     }, MOTION_CONFIG.sectionTransitionDuration * 1000 + 160);
@@ -1077,21 +1482,25 @@ function initStepJourney() {
 
   function updateFromScroll() {
     frameRequested = false;
+    const geometry = getJourneyGeometry();
+    const maximumScrollY = geometry.maximumScrollY;
 
-    if (clampToCurrentBoundary()) return;
+    if (clampToCurrentBoundary({}, maximumScrollY)) return;
 
     if (automatedTargetStep) {
       setActiveStep(automatedTargetStep);
       return;
     }
 
-    const maximumScrollY = getMaximumScrollY();
     if (Number.isFinite(maximumScrollY) && window.scrollY >= maximumScrollY - 1) {
       setActiveStep(maxUnlockedStep);
       return;
     }
 
-    if (wizard && wizard.getBoundingClientRect().top > window.innerHeight * 0.68) {
+    if (
+      wizard &&
+      geometry.wizardTop - window.scrollY > window.innerHeight * 0.68
+    ) {
       setActiveStep(1);
       return;
     }
@@ -1102,15 +1511,14 @@ function initStepJourney() {
     );
     let closestStep = 1;
 
-    steps.forEach(step => {
+    steps.forEach((step, index) => {
       const number = Number(step.dataset.step);
 
       if (number > maxUnlockedStep) {
         return;
       }
 
-      const rect = step.getBoundingClientRect();
-      if (rect.top <= targetY) {
+      if (geometry.stepTops[index] - window.scrollY <= targetY) {
         closestStep = Math.max(closestStep, number);
       }
     });
@@ -1118,35 +1526,59 @@ function initStepJourney() {
     setActiveStep(closestStep);
   }
 
-  function getMaximumScrollY() {
+  function getJourneyGeometry() {
+    if (!journeyGeometryDirty && journeyGeometry) {
+      return journeyGeometry;
+    }
+
     const documentMaximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const stepTops = steps.map(getDocumentLayoutTop);
+    const wizardTop = wizard ? getDocumentLayoutTop(wizard) : Number.POSITIVE_INFINITY;
+    let maximumScrollY = documentMaximum;
 
-    if (maxUnlockedStep >= steps.length) {
-      return documentMaximum;
+    if (maxUnlockedStep < steps.length) {
+      const boundaryStep = steps[maxUnlockedStep - 1];
+      const boundaryCard = boundaryStep?.querySelector('.step-card');
+      const boundaryElement = boundaryStep?.querySelector('.step-completion') || boundaryCard;
+      const previewCard = steps[maxUnlockedStep]?.querySelector('.step-card');
+
+      if (!boundaryElement) {
+        maximumScrollY = Number.POSITIVE_INFINITY;
+      } else {
+        const isNarrow = window.matchMedia('(max-width: 600px)').matches;
+        const previewPeek = isNarrow ? 72 : 112;
+        const fallbackPadding = isNarrow ? 32 : 56;
+        const boundaryBottom = getDocumentLayoutTop(boundaryElement) + boundaryElement.offsetHeight;
+        const fallbackTarget = boundaryBottom - window.innerHeight + fallbackPadding;
+        const cardCenterTarget = boundaryCard
+          ? getDocumentLayoutTop(boundaryCard) + boundaryCard.offsetHeight / 2 - window.innerHeight / 2
+          : fallbackTarget;
+        const previewTarget = previewCard
+          ? getDocumentLayoutTop(previewCard) - (window.innerHeight - previewPeek)
+          : fallbackTarget;
+
+        maximumScrollY = Math.min(
+          documentMaximum,
+          Math.max(0, fallbackTarget, cardCenterTarget, previewTarget)
+        );
+      }
     }
 
-    const boundaryStep = steps[maxUnlockedStep - 1];
-    const boundaryCard = boundaryStep?.querySelector('.step-card');
-    const boundaryElement = boundaryStep?.querySelector('.step-completion') || boundaryCard;
-    const previewCard = steps[maxUnlockedStep]?.querySelector('.step-card');
+    journeyGeometry = {
+      maximumScrollY,
+      stepTops,
+      wizardTop
+    };
+    journeyGeometryDirty = false;
+    return journeyGeometry;
+  }
 
-    if (!boundaryElement) {
-      return Number.POSITIVE_INFINITY;
-    }
+  function getMaximumScrollY() {
+    return getJourneyGeometry().maximumScrollY;
+  }
 
-    const isNarrow = window.matchMedia('(max-width: 600px)').matches;
-    const previewPeek = isNarrow ? 72 : 112;
-    const fallbackPadding = isNarrow ? 32 : 56;
-    const boundaryBottom = getDocumentLayoutTop(boundaryElement) + boundaryElement.offsetHeight;
-    const fallbackTarget = boundaryBottom - window.innerHeight + fallbackPadding;
-    const cardCenterTarget = boundaryCard
-      ? getDocumentLayoutTop(boundaryCard) + boundaryCard.offsetHeight / 2 - window.innerHeight / 2
-      : fallbackTarget;
-    const previewTarget = previewCard
-      ? getDocumentLayoutTop(previewCard) - (window.innerHeight - previewPeek)
-      : fallbackTarget;
-
-    return Math.min(documentMaximum, Math.max(0, fallbackTarget, cardCenterTarget, previewTarget));
+  function invalidateJourneyGeometry() {
+    journeyGeometryDirty = true;
   }
 
   function getDocumentLayoutTop(element) {
@@ -1179,8 +1611,7 @@ function initStepJourney() {
       : MOTION_CONFIG.scrollLerpDesktop;
   }
 
-  function clampToCurrentBoundary(options = {}) {
-    const maximumScrollY = getMaximumScrollY();
+  function clampToCurrentBoundary(options = {}, maximumScrollY = getMaximumScrollY()) {
     const lenis = window.tschoolLenis;
 
     if (lenis) {
@@ -1346,7 +1777,7 @@ function initStepJourney() {
     if (interactiveTarget) return;
 
     const completionButton = steps[activeStep - 1]?.querySelector('[data-complete-step]');
-    if (!completionButton || completionButton.disabled || completionActivations.has(completionButton)) {
+    if (!completionButton || completionButton.disabled) {
       return;
     }
 
@@ -1390,9 +1821,19 @@ function initStepJourney() {
   window.addEventListener('scroll', requestUpdate, { passive: true });
   window.addEventListener('resize', () => {
     window.tschoolLenis?.resize?.();
+    invalidateJourneyGeometry();
     clampToCurrentBoundary({ immediate: true });
     requestUpdate();
   });
+
+  if ('ResizeObserver' in window) {
+    const resizeObserver = new ResizeObserver(() => {
+      invalidateJourneyGeometry();
+      requestUpdate();
+    });
+    resizeObserver.observe(document.body);
+  }
+
   setActiveStep(1);
   updateFromScroll();
 }
@@ -1437,19 +1878,21 @@ function renderSettingsSummary() {
   const selectedItems = selected.concat(selectedActivities).sort(compareByTraditionalStroke);
   const unselectedItems = unselectedCourses.concat(unselectedActivities).sort(compareByTraditionalStroke);
   const email = elements.notificationEmail.value.trim();
-  const notificationTime = `${pad2(Number(elements.notifyHour.value || DEFAULTS.notifyHour))}:00`;
+  const notificationTimes = getSelectedNotifyHours()
+    .map(hour => `${pad2(hour)}:00`);
+  const grade = getCurrentGrade();
 
   elements.settingsSummary.innerHTML = [
     renderSummaryRow([
-      ['你選的年級是：', getCurrentGrade() || '尚未選擇']
+      ['你選的年級是：', grade ? [grade] : ['尚未選擇'], grade ? '' : 'is-error']
     ], 1, '修改年級'),
     renderSummaryRow([
       ['你選的課程與活動有：', selectedItems.length ? selectedItems : '尚未選擇'],
       ['你「沒」選的課程與活動有：', unselectedItems.length ? unselectedItems : '沒有']
     ], 2, '修改課程與活動'),
     renderSummaryRow([
-      ['你想用來收通知的 Email 是：', email || '未填寫', email ? '' : 'is-error'],
-      ['你想收到通知的時間是：', notificationTime]
+      ['你想用來收通知的 Email 是：', [email || '未填寫'], email ? '' : 'is-error'],
+      ['你想收到通知的時間是：', notificationTimes]
     ], 3, '修改通知偏好')
   ].join('');
 }
@@ -1471,15 +1914,12 @@ function renderSummaryRow(lines, editStep, editLabel) {
 }
 
 function renderSummaryValue(value, tone) {
-  if (Array.isArray(value)) {
-    return [
-      '<span class="summary-value summary-tag-list">',
-      value.map(item => `<span class="summary-item-tag">${escapeHtml(item)}</span>`).join(''),
-      '</span>'
-    ].join('');
-  }
-
-  return `<span class="summary-value${tone ? ` ${tone}` : ''}">${escapeHtml(value)}</span>`;
+  const items = Array.isArray(value) ? value : [value];
+  return [
+    `<span class="summary-value summary-tag-list${tone ? ` ${tone}` : ''}">`,
+    items.map(item => `<span class="summary-item-tag">${escapeHtml(item)}</span>`).join(''),
+    '</span>'
+  ].join('');
 }
 
 function initKineticCursor() {
@@ -1505,6 +1945,8 @@ function initKineticCursor() {
   let cursorVelocity = 0;
   let targetCursorVelocity = 0;
   let visible = false;
+  let frameId = 0;
+  let contextTarget = null;
 
   function cursorSurfaceIsDark(target) {
     let element = target instanceof Element ? target : target?.parentElement;
@@ -1531,7 +1973,12 @@ function initKineticCursor() {
     return false;
   }
 
-  function updateCursorContext(target) {
+  function updateCursorContext(target, force = false) {
+    if (!force && target === contextTarget) {
+      return;
+    }
+
+    contextTarget = target;
     const labelled = target && target.closest ? target.closest('[data-cursor-label]') : null;
     const textTarget = target && target.closest
       ? target.closest('input:not([type="radio"]):not([type="checkbox"]), textarea, [contenteditable="true"], [data-cursor-mode="text"]')
@@ -1540,6 +1987,10 @@ function initKineticCursor() {
     cursor.classList.toggle('has-label', Boolean(labelled) && !textTarget);
     cursor.classList.toggle('is-text', Boolean(textTarget));
     cursor.classList.toggle('is-on-dark', cursorSurfaceIsDark(target));
+    cursor.classList.toggle(
+      'has-success-label',
+      Boolean(labelled) && !textTarget && labelled.dataset.cursorTone === 'success'
+    );
     caption.textContent = labelled && !textTarget ? labelled.dataset.cursorLabel : '';
   }
 
@@ -1565,9 +2016,18 @@ function initKineticCursor() {
       currentX = targetX;
       currentY = targetY;
     }
+
+    requestCursorFrame();
+  }
+
+  function requestCursorFrame() {
+    if (!frameId && visible && !document.hidden) {
+      frameId = requestAnimationFrame(animate);
+    }
   }
 
   function animate() {
+    frameId = 0;
     currentX += (targetX - currentX) * MOTION_CONFIG.cursorPositionEase;
     currentY += (targetY - currentY) * MOTION_CONFIG.cursorPositionEase;
     let angleDelta = ((targetAngle - currentAngle + 540) % 360) - 180;
@@ -1578,23 +2038,49 @@ function initKineticCursor() {
     cursor.style.setProperty('--cursor-angle', cursor.classList.contains('is-text') ? '0deg' : `${currentAngle}deg`);
     cursor.style.setProperty('--cursor-lens-stretch', (1 + cursorVelocity * 0.22).toFixed(3));
     cursor.style.setProperty('--cursor-lens-squash', (1 - cursorVelocity * 0.08).toFixed(3));
-    requestAnimationFrame(animate);
+
+    angleDelta = ((targetAngle - currentAngle + 540) % 360) - 180;
+    const motionPending =
+      Math.hypot(targetX - currentX, targetY - currentY) > 0.08 ||
+      Math.abs(angleDelta) > 0.08 ||
+      Math.abs(cursorVelocity) > 0.004 ||
+      Math.abs(targetCursorVelocity) > 0.004;
+
+    if (motionPending) {
+      requestCursorFrame();
+    }
   }
 
   window.addEventListener('mousemove', updateTarget, { passive: true });
   window.addEventListener('scroll', () => {
     updateCursorContext(document.elementFromPoint(targetX, targetY));
   }, { passive: true });
+  document.addEventListener('tschool:cursor-context-change', event => {
+    updateCursorContext(
+      event.detail?.target || document.elementFromPoint(targetX, targetY),
+      true
+    );
+  });
   document.addEventListener('mouseleave', () => {
     visible = false;
     cursor.style.opacity = '0';
+    if (frameId) cancelAnimationFrame(frameId);
+    frameId = 0;
   });
   document.addEventListener('mouseenter', () => {
     if (visible) cursor.style.opacity = '1';
   });
   document.addEventListener('mousedown', () => cursor.style.setProperty('--cursor-scale', '0.76'));
   document.addEventListener('mouseup', () => cursor.style.setProperty('--cursor-scale', '1'));
-  animate();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = 0;
+      return;
+    }
+
+    requestCursorFrame();
+  });
 }
 
 function prefersReducedMotion() {

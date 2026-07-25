@@ -160,7 +160,16 @@
       font-weight: 800;
       transition: background 150ms var(--ease-out), color 150ms var(--ease-out), transform 150ms var(--ease-out);
     }
-    .small-button:hover, .icon-button:hover { background: var(--ink); color: var(--paper-bright); transform: translateY(-1px); }
+    .small-button:hover, .icon-button:hover {
+      border-color: var(--sync-dark);
+      background: var(--surface-green);
+      box-shadow: 3px 3px 0 rgba(0, 127, 91, .28);
+      transform: translate(-1px, -1px);
+    }
+    .small-button:active, .icon-button:active {
+      box-shadow: none;
+      transform: translate(1px, 1px);
+    }
     .small-button { padding: 0 var(--space-3); }
     .icon-button { width: 44px; padding: 0; font-size: 18px; }
     .course-list { display: grid; gap: var(--space-2); max-height: 320px; margin-top: var(--space-3); padding-right: var(--space-1); overflow-y: auto; overscroll-behavior: contain; }
@@ -193,11 +202,20 @@
     .pending-actions .keep { background: var(--ink); color: var(--paper-bright); }
     .pending-actions .remove { border-color: var(--shift); background: var(--paper-bright); color: var(--error); }
 
-    .calendar-row { display: grid; grid-template-columns: 1fr 44px; gap: var(--space-2); align-items: end; }
-    .hours { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-2); }
-    .hour { position: relative; }
-    .hour span { display: grid; min-height: 40px; place-items: center; border: 1px solid var(--line-dark); border-radius: var(--radius-control); background: var(--paper-bright); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 800; cursor: pointer; }
-    .hour input:checked + span { border-color: var(--ink); background: var(--sync); color: var(--paper-bright); }
+    .calendar-picker { display: grid; gap: var(--space-3); }
+    .calendar-create {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: var(--space-2);
+      align-items: end;
+      padding: var(--space-3);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--sync);
+      border-radius: var(--radius-panel);
+      background: var(--surface-green);
+    }
+    .calendar-create .field { margin-top: 0; }
+    .calendar-create .small-button { min-width: 76px; padding-inline: var(--space-3); }
 
     .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
     .metric { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper-bright); }
@@ -209,7 +227,25 @@
 
     .secondary-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3); }
     .secondary-actions button { min-height: 40px; padding: 0 var(--space-2); border: 1px solid var(--ink); border-radius: var(--radius-control); background: var(--paper-bright); color: var(--ink); cursor: pointer; font-size: 11px; font-weight: 800; }
-    .secondary-actions button:hover { background: var(--ink); color: var(--paper-bright); }
+    .secondary-actions button {
+      transition: background 150ms var(--ease-out), box-shadow 150ms var(--ease-out), transform 150ms var(--ease-out);
+    }
+    .secondary-actions button:hover {
+      border-color: var(--sync-dark);
+      background: var(--surface-green);
+      box-shadow: 3px 3px 0 rgba(0, 127, 91, .28);
+      transform: translate(-1px, -1px);
+    }
+    .secondary-actions button:active {
+      box-shadow: none;
+      transform: translate(1px, 1px);
+    }
+    .sync-estimate {
+      margin: var(--space-3) 0 0;
+      color: var(--ink-soft);
+      font-size: 10px;
+      line-height: 16px;
+    }
 
     .footer {
       position: fixed;
@@ -226,15 +262,21 @@
       backdrop-filter: blur(12px);
     }
     .footer button { min-height: 48px; border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 12px; font-weight: 850; transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
-    .footer button:hover { box-shadow: 3px 3px 0 var(--shift); transform: translate(-1px, -1px); }
+    .footer button:hover { box-shadow: 3px 3px 0 rgba(20, 33, 29, .22); transform: translate(-1px, -1px); }
+    .footer button:active { box-shadow: none; transform: translate(1px, 1px); }
     .save { padding: 0 var(--space-4); background: var(--paper-bright); color: var(--ink); }
     .sync { padding: 0 var(--space-4); background: var(--sync); color: var(--paper-bright); }
     button:disabled { opacity: .48; cursor: wait; }
 
     .loading { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(244, 247, 242, .96); }
-    .loader { display: grid; gap: var(--space-3); justify-items: center; color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .loader { display: grid; width: min(224px, calc(100vw - 48px)); gap: var(--space-3); justify-items: center; color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-align: center; }
     .loader-track { position: relative; width: 152px; height: var(--space-1); overflow: hidden; background: var(--line); }
     .loader-track::after { content: ""; position: absolute; inset: 0; width: 44%; background: var(--sync); animation: scan 1s var(--ease-out) infinite; }
+    .sync-progress { display: grid; width: 100%; gap: var(--space-2); }
+    .sync-progress-head { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--ink); font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif; font-size: 11px; font-weight: 800; text-align: left; }
+    .sync-progress-track { height: var(--space-2); overflow: hidden; border: 1px solid var(--line-dark); background: var(--paper-bright); }
+    .sync-progress-track span { display: block; width: 0; height: 100%; background: var(--sync); transition: width 280ms var(--ease-out); }
+    .sync-progress-detail { color: var(--ink-soft); font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif; font-size: 10px; line-height: 16px; text-align: left; }
     .toast { position: fixed; right: var(--space-3); bottom: 76px; left: var(--space-3); z-index: 60; padding: var(--space-3); border: 1px solid var(--paper-bright); border-radius: var(--radius-control); background: var(--ink); color: var(--paper-bright); font-size: 11px; line-height: 16px; opacity: 0; pointer-events: none; transform: translateY(var(--space-2)); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
     .toast.show { opacity: 1; transform: translateY(0); }
     .app.is-ready .section { animation: section-in 360ms var(--ease-out) both; }
@@ -251,7 +293,7 @@
       .topbar { padding: var(--space-3); }
       .content { padding-inline: var(--space-2); }
       .section { padding-block: var(--space-4); }
-      .course-toolbar, .calendar-row, .status-grid, .secondary-actions { grid-template-columns: 1fr; }
+      .course-toolbar, .calendar-create, .status-grid, .secondary-actions { grid-template-columns: 1fr; }
       .icon-button { width: 100%; }
       .pending-actions { grid-template-columns: 1fr; }
       .footer { grid-template-columns: 1fr 1.35fr; padding: var(--space-2); }
@@ -264,7 +306,17 @@
   </style>
 </head>
 <body>
-  <div class="loading" id="loading"><div class="loader"><span class="loader-track"></span><span id="loading-label">正在讀取控制臺…</span></div></div>
+  <div class="loading" id="loading">
+    <div class="loader">
+      <span class="loader-track" id="loader-track"></span>
+      <span id="loading-label">正在讀取控制臺…</span>
+      <div class="sync-progress" id="sync-progress" role="progressbar" aria-label="同步進度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+        <div class="sync-progress-head"><span>同步進度</span><strong id="sync-progress-value">0%</strong></div>
+        <div class="sync-progress-track" aria-hidden="true"><span id="sync-progress-bar"></span></div>
+        <span class="sync-progress-detail" id="sync-progress-detail">正在準備同步…</span>
+      </div>
+    </div>
+  </div>
   <div class="app" id="app" hidden>
     <header class="topbar">
       <p class="eyebrow">T-SCHOOL 行程同步</p>
@@ -294,6 +346,7 @@
           <button type="button" id="run-sync">立即同步</button>
           <button type="button" id="repair-sync">強制修復</button>
         </div>
+        <p class="sync-estimate">第一次同步會分批在背景完成；行程很多時可能需 10–20 分鐘，可安全關閉側欄。後續只處理異動，通常較快。</p>
       </section>
 
       <section class="section" id="pending-section" hidden>
@@ -317,17 +370,19 @@
 
       <section class="section">
         <div class="section-head"><h2>專用日曆</h2><span>不允許主要日曆</span></div>
-        <div class="calendar-row">
+        <div class="calendar-picker">
           <label class="field"><span>同步目標</span><select id="calendar"></select></label>
-          <button type="button" class="icon-button" id="create-calendar" aria-label="建立專用日曆" title="建立專用日曆">＋</button>
+          <div class="calendar-create" id="calendar-create">
+            <label class="field"><span>新日曆名稱</span><input type="text" id="calendar-name" maxlength="100" autocomplete="off"></label>
+            <button type="button" class="small-button" id="create-calendar">建立日曆</button>
+          </div>
         </div>
-        <p class="hint">若尚未選擇，首次同步會自動建立「T-SCHOOL 課表」</p>
+        <p class="hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆。</p>
       </section>
 
       <section class="section">
         <div class="section-head"><h2>同步與通知</h2><span>時間可能前後約 15 分鐘</span></div>
         <label class="field"><span>通知 Email</span><input type="email" id="email" autocomplete="email"></label>
-        <div class="field"><span>每日同步時段</span><div class="hours" id="hours"></div></div>
         <label class="field"><span>每日成功摘要</span><select id="notify-hour"></select></label>
         <label class="field"><span>異動通知格式</span><select id="notification-preset"><option value="compact">簡潔</option><option value="standard">標準</option><option value="detailed">詳細</option><option value="custom">進階自訂</option></select></label>
         <span class="format-preview" id="notification-preview" aria-live="polite"></span>
@@ -360,14 +415,66 @@
       var selectedCourses = new Set();
       var excludedActivities = new Set();
       var busy = false;
+      var syncProgressTimer = null;
+      var activeSyncJobId = '';
 
       function byId(id) { return document.getElementById(id); }
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
       function normalize(value) { return String(value || '').replace(/\s+/g, '').toLowerCase(); }
-      function setBusy(value, label) { busy = value; byId('loading').hidden = !value; byId('loading-label').textContent = label || '處理中…'; Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) { button.disabled = value; }); }
+      function defaultCalendarName(gradeName) { return (gradeName || '高一') + '行程｜T-SCHOOL Schedule Sync'; }
+      function setBusy(value, label, showProgress) {
+        busy = value;
+        byId('loading').hidden = !value;
+        byId('loading-label').textContent = label || '處理中…';
+        byId('loader-track').hidden = Boolean(showProgress);
+        byId('sync-progress').hidden = !showProgress;
+        Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) { button.disabled = value; });
+      }
       function showToast(message) { var toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(function () { toast.classList.remove('show'); }, 2600); }
       function server(method, value) { return new Promise(function (resolve, reject) { var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (error) { reject(new Error(error && error.message ? error.message : String(error))); }); runner[method](value); }); }
       function getCheckedGrade() { var input = document.querySelector('input[name="grade"]:checked'); return input ? input.value : '高一'; }
+      function renderSyncProgress(progress) {
+        var value = Math.max(0, Math.min(100, Number(progress && progress.percent) || 0));
+        byId('sync-progress').setAttribute('aria-valuenow', String(value));
+        byId('sync-progress-value').textContent = value + '%';
+        byId('sync-progress-bar').style.width = value + '%';
+        byId('sync-progress-detail').textContent = progress && progress.message ? progress.message : '正在同步…';
+      }
+      function stopSyncProgressPolling() {
+        if (syncProgressTimer) clearTimeout(syncProgressTimer);
+        syncProgressTimer = null;
+      }
+      function pollSyncProgress() {
+        stopSyncProgressPolling();
+        server('getSyncProgressForUi', activeSyncJobId || null).then(function (progress) {
+          renderSyncProgress(progress);
+          if (!busy || !progress) return;
+          var terminal = progress.state === 'complete' || progress.state === 'error';
+          if (progress.jobId && !terminal) activeSyncJobId = progress.jobId;
+          if (terminal && (!activeSyncJobId || progress.jobId !== activeSyncJobId)) {
+            syncProgressTimer = setTimeout(pollSyncProgress, 2500);
+            return;
+          }
+          if (terminal) {
+            activeSyncJobId = '';
+            server('getSettingsUiData', null).then(render).catch(function () {});
+            showToast(progress.state === 'complete' ? '同步完成' : progress.message);
+            setBusy(false);
+            return;
+          }
+          var waiting = progress.state === 'queued' || progress.state === 'retry_pending';
+          syncProgressTimer = setTimeout(pollSyncProgress, waiting ? 8000 : 2500);
+        }).catch(function () {
+          if (busy) syncProgressTimer = setTimeout(pollSyncProgress, 8000);
+        });
+      }
+      function startSyncProgress(label) {
+        activeSyncJobId = '';
+        renderSyncProgress({ percent: 1, message: label || '正在準備同步…' });
+        setBusy(true, '正在同步行程；第一批保存後即可關閉側欄', true);
+        stopSyncProgressPolling();
+        syncProgressTimer = setTimeout(pollSyncProgress, 1000);
+      }
 
       function updateFormatPreviews() {
         var notificationExamples = {
@@ -405,8 +512,8 @@
         byId('custom-description').value = settings.customDescription || '';
         byId('reminder-mode').value = settings.reminderMode;
         byId('reminder-minutes').value = String(settings.reminderMinutes || 10);
-        renderHours(settings.autoSyncHours, settings.notifySyncHour);
-        renderCalendars(data.calendars, settings.calendarId);
+        renderNotifyHour(settings.notifySyncHour);
+        renderCalendars(data.calendars, settings.calendarId, settings.calendarName);
         renderSource(data.source);
         renderCourses();
         renderPending(settings.pendingTitles || []);
@@ -425,15 +532,23 @@
         byId('source-updated').textContent = source.updateLabel || '';
       }
 
-      function renderHours(selected, notifyHour) {
-        var selectedSet = new Set(selected || []);
-        byId('hours').innerHTML = [5, 12, 18, 22].map(function (hour) { return '<label class="hour"><input type="checkbox" value="' + hour + '" ' + (selectedSet.has(hour) ? 'checked' : '') + '><span>' + String(hour).padStart(2, '0') + ':00</span></label>'; }).join('');
+      function renderNotifyHour(notifyHour) {
         byId('notify-hour').innerHTML = Array.from({ length: 24 }, function (_, hour) { return '<option value="' + hour + '" ' + (hour === notifyHour ? 'selected' : '') + '>' + String(hour).padStart(2, '0') + ':00</option>'; }).join('');
       }
 
-      function renderCalendars(calendars, selectedId) {
-        var items = [{ id: '', name: '自動建立專用日曆' }].concat(calendars || []);
+      function renderCalendars(calendars, selectedId, calendarName) {
+        var items = [{ id: '', name: '建立新的專用日曆' }].concat(calendars || []);
         byId('calendar').innerHTML = items.map(function (item) { return '<option value="' + escapeHtml(item.id) + '" ' + (item.id === selectedId ? 'selected' : '') + '>' + escapeHtml(item.name) + '</option>'; }).join('');
+        var nextName = calendarName || defaultCalendarName(getCheckedGrade());
+        byId('calendar-name').value = nextName;
+        byId('calendar-name').dataset.autoName = String(/^高[一二三]行程｜T-SCHOOL Schedule Sync$/.test(nextName));
+        updateCalendarFields();
+      }
+
+      function updateCalendarFields() {
+        var creating = !byId('calendar').value;
+        byId('calendar-create').hidden = !creating;
+        byId('calendar-name').disabled = !creating;
       }
 
       function renderCourses() {
@@ -470,16 +585,18 @@
       }
 
       function collectSettings() {
-        var hours = Array.prototype.map.call(document.querySelectorAll('#hours input:checked'), function (input) { return Number(input.value); });
         return {
           gradeName: getCheckedGrade(),
           selectedCourses: Array.from(selectedCourses),
           includeActivities: byId('include-activities').checked,
           excludedActivities: Array.from(excludedActivities),
           calendarId: byId('calendar').value,
+          calendarName: byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade()),
           notificationEmail: byId('email').value.trim(),
           autoSyncEnabled: byId('auto-sync').checked,
-          autoSyncHours: hours,
+          autoSyncHours: model && model.settings && model.settings.autoSyncHours
+            ? model.settings.autoSyncHours.slice()
+            : [Number(byId('notify-hour').value)],
           notifySyncHour: Number(byId('notify-hour').value),
           notificationPreset: byId('notification-preset').value,
           customNotification: byId('custom-notification').value,
@@ -492,61 +609,133 @@
 
       async function save(runSync) {
         if (busy) return;
+        var keepPolling = false;
         var settings = collectSettings();
         var oldCalendarId = model && model.settings ? model.settings.calendarId : '';
-        if (oldCalendarId && settings.calendarId && oldCalendarId !== settings.calendarId && !window.confirm('更換專用日曆後，系統會先在新日曆完成重建，再移除舊日曆中的受管理事件。私人事件不會受影響。是否繼續？')) return;
+        if (oldCalendarId && oldCalendarId !== settings.calendarId && !window.confirm('更換專用日曆後，系統會先在新日曆完成重建，再移除舊日曆中的受管理未來事件。過去事件與私人事件不會受影響。是否繼續？')) return;
         setBusy(true, runSync ? '正在計算變更…' : '正在儲存設定…');
         try {
           if (runSync) {
             var preview = await server('previewSettingsImpactFromUi', settings);
             var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
             if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
-            setBusy(true, '正在儲存並同步…');
+            settings.syncApprovalToken = preview.approvalToken || '';
+            startSyncProgress('正在儲存設定並準備同步…');
           }
           var result = await server(runSync ? 'saveSettingsAndSyncFromUi' : 'saveSettingsFromUi', settings);
           render(result.uiData);
           showToast(result.message);
+          if (result.pending) {
+            keepPolling = true;
+            activeSyncJobId = result.jobId || '';
+            byId('loading-label').textContent = '同步已在背景分批執行；現在可以關閉側欄';
+            pollSyncProgress();
+          }
         } catch (error) {
           showToast(error.message);
         } finally {
-          setBusy(false);
+          if (!keepPolling) {
+            stopSyncProgressPolling();
+            setBusy(false);
+          }
         }
       }
 
-      async function runAction(method, label) {
+      async function runAction(method, label, trackProgress) {
         if (busy) return;
-        setBusy(true, label);
+        var keepPolling = false;
+        if (trackProgress) startSyncProgress(label);
+        else setBusy(true, label);
         try {
           var result = await server(method, null);
           render(result.uiData);
           showToast(result.message);
+          if (result.pending) {
+            keepPolling = true;
+            activeSyncJobId = result.jobId || '';
+            byId('loading-label').textContent = '同步已在背景分批執行；現在可以關閉側欄';
+            pollSyncProgress();
+          }
         } catch (error) {
           showToast(error.message);
         } finally {
-          setBusy(false);
+          if (!keepPolling) {
+            stopSyncProgressPolling();
+            setBusy(false);
+          }
         }
       }
 
       document.addEventListener('change', function (event) {
         if (event.target.matches('#course-list input[data-kind="course"]')) { event.target.checked ? selectedCourses.add(event.target.value) : selectedCourses.delete(event.target.value); renderCourses(); }
-        if (event.target.matches('#course-list input[data-kind="activity"]')) { event.target.checked ? excludedActivities.delete(event.target.value) : excludedActivities.add(event.target.value); renderCourses(); }
+        if (event.target.matches('#course-list input[data-kind="activity"]')) {
+          event.target.checked ? excludedActivities.delete(event.target.value) : excludedActivities.add(event.target.value);
+          var activities = model && model.source && model.source.catalog ? model.source.catalog.activities || [] : [];
+          if (activities.length && activities.every(function (item) { return excludedActivities.has(item.title); })) byId('include-activities').checked = false;
+          renderCourses();
+        }
         if (event.target.id === 'include-activities') renderCourses();
-        if (event.target.name === 'grade') { setBusy(true, '正在讀取年級課表…'); server('getSourceCatalogForUi', event.target.value).then(function (data) { model.source = data; selectedCourses = new Set(); excludedActivities = new Set(); renderSource(data); renderCourses(); }).catch(function (error) { showToast(error.message); }).finally(function () { setBusy(false); }); }
+        if (event.target.id === 'calendar') updateCalendarFields();
+        if (event.target.name === 'grade') {
+          if (byId('calendar-name').dataset.autoName === 'true') byId('calendar-name').value = defaultCalendarName(event.target.value);
+          setBusy(true, '正在讀取年級課表…');
+          server('getSourceCatalogForUi', event.target.value).then(function (data) {
+            model.source = data;
+            selectedCourses = new Set();
+            excludedActivities = new Set();
+            renderSource(data);
+            renderCourses();
+          }).catch(function (error) {
+            showToast(error.message);
+          }).finally(function () {
+            setBusy(false);
+          });
+        }
         if (event.target.id === 'notification-preset' || event.target.id === 'description-preset' || event.target.id === 'reminder-mode') updateConditionalFields();
       });
       byId('course-search').addEventListener('input', renderCourses);
       byId('custom-notification').addEventListener('input', updateFormatPreviews);
       byId('custom-description').addEventListener('input', updateFormatPreviews);
+      byId('calendar-name').addEventListener('input', function () { byId('calendar-name').dataset.autoName = 'false'; });
       byId('clear-courses').addEventListener('click', function () { selectedCourses.clear(); renderCourses(); });
       byId('save').addEventListener('click', function () { save(false); });
       byId('save-sync').addEventListener('click', function () { save(true); });
-      byId('run-sync').addEventListener('click', function () { runAction('runSyncFromUi', '正在同步行程…'); });
-      byId('repair-sync').addEventListener('click', function () { runAction('forceRepairFromUi', '正在檢查並修復事件…'); });
-      byId('create-calendar').addEventListener('click', async function () { setBusy(true, '正在建立專用日曆…'); try { var result = await server('createDedicatedCalendarForUi', null); renderCalendars(result.calendars, result.calendarId); showToast(result.message); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
+      byId('run-sync').addEventListener('click', function () { runAction('runSyncFromUi', '正在同步行程…', true); });
+      byId('repair-sync').addEventListener('click', function () { runAction('forceRepairFromUi', '正在檢查並修復事件…', true); });
+      byId('create-calendar').addEventListener('click', async function () {
+        var calendarName = byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade());
+        setBusy(true, '正在建立專用日曆…');
+        try {
+          var result = await server('createDedicatedCalendarForUi', { calendarName: calendarName, gradeName: getCheckedGrade() });
+          renderCalendars(result.calendars, result.calendarId, result.calendarName);
+          showToast(result.message);
+        } catch (error) {
+          showToast(error.message);
+        } finally {
+          setBusy(false);
+        }
+      });
       byId('pending-list').addEventListener('click', async function (event) { var title = event.target.dataset.keep || event.target.dataset.remove; if (!title) return; setBusy(true, '正在更新項目…'); try { var method = event.target.dataset.keep ? 'confirmPendingTitleFromUi' : 'rejectPendingTitleFromUi'; var result = await server(method, title); render(result.uiData); showToast(result.message); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
 
       setBusy(true, '正在讀取控制臺…');
-      server('getSettingsUiData', null).then(function (data) { render(data); byId('app').hidden = false; requestAnimationFrame(function () { byId('app').classList.add('is-ready'); }); }).catch(function (error) { showToast(error.message); }).finally(function () { setBusy(false); });
+      server('getSettingsUiData', null).then(function (data) {
+        render(data);
+        byId('app').hidden = false;
+        requestAnimationFrame(function () { byId('app').classList.add('is-ready'); });
+        return server('getSyncProgressForUi', null);
+      }).then(function (progress) {
+        if (progress && ['running', 'queued', 'retry_pending'].indexOf(progress.state) !== -1) {
+          activeSyncJobId = progress.jobId || '';
+          renderSyncProgress(progress);
+          setBusy(true, '背景同步仍在執行；現在可以關閉側欄', true);
+          pollSyncProgress();
+          return;
+        }
+        setBusy(false);
+      }).catch(function (error) {
+        showToast(error.message);
+        setBusy(false);
+      });
     })();
   </script>
 </body>

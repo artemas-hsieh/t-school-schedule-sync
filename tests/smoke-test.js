@@ -13,6 +13,8 @@ require(path.join(root, 'configurator/sidebar-template.js'));
 require(path.join(root, 'configurator/code-template.js'));
 
 const sidebarHtml = global.TSCHOOL_SIDEBAR_HTML;
+const configuratorHtml = fs.readFileSync(path.join(root, 'configurator/index.html'), 'utf8');
+const configuratorAppSource = fs.readFileSync(path.join(root, 'configurator/app.js'), 'utf8');
 const sidebarIds = Array.from(sidebarHtml.matchAll(/\sid="([^"]+)"/g), match => match[1]);
 
 assert.equal(new Set(sidebarIds).size, sidebarIds.length, 'Google Sheet 控制臺不應出現重複 id');
@@ -20,8 +22,20 @@ assert.equal(sidebarHtml.includes('--primary-container'), false);
 assert.equal(sidebarHtml.includes('T-SCHOOL · Control'), false);
 assert.equal(sidebarHtml.includes('id="notification-preview"'), true);
 assert.equal(sidebarHtml.includes('id="description-preview"'), true);
+assert.equal(sidebarHtml.includes('id="hours"'), false, '控制臺不應顯示與實際設定不一致的固定同步時段');
+assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
+assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
+assert.equal(sidebarHtml.includes('function pollSyncProgress()'), true);
 assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
+assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), true);
+assert.equal(configuratorHtml.includes('id="high-load-test-banner" role="status" hidden'), true);
+assert.equal(configuratorAppSource.includes('const ENABLE_HIGH_LOAD_TEST_FEATURE = true;'), true);
+assert.equal(
+  configuratorAppSource.includes(".get(HIGH_LOAD_TEST_QUERY_PARAMETER) === '1'"),
+  true,
+  '測試版程式碼必須同時受到專用 URL 參數保護'
+);
 
 const generatedCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-mvp',
@@ -50,6 +64,40 @@ assert.equal(generatedCode.includes('COURSE_DICTIONARY'), false);
 assert.equal(generatedCode.includes('function previewSettingsImpactFromUi('), true);
 assert.equal(generatedCode.includes('function showSettingsSidebar('), true);
 assert.equal(generatedCode.includes('function getNotificationTemplate_('), true);
+assert.equal(generatedCode.includes('function getSyncProgressForUi('), true);
+assert.equal(generatedCode.includes('SYNC_PROGRESS_STORE'), true);
+assert.equal(generatedCode.includes('COURSE_OUTLINE_SOURCE_SETS_BY_GRADE'), true);
+assert.equal(generatedCode.includes('function refreshCourseOutlinesDaily('), true);
+assert.equal(generatedCode.includes('function retryCourseOutlineRefresh('), true);
+assert.equal(generatedCode.includes('function watchCourseOutlineRefresh('), true);
+assert.equal(generatedCode.includes('function updateCalendarDescriptionOnly_('), true);
+assert.equal(generatedCode.includes('const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;'), true);
+assert.equal(
+  generatedCode.includes('.nearMinute(0)'),
+  false,
+  '每日觸發器不應固定擠在整點附近'
+);
+assert.equal(generatedCode.includes("ui.createMenu('高負載測試')"), true);
+assert.equal(generatedCode.includes('function setupHighLoadTestEnvironment('), false);
+
+const highLoadGeneratedCode = global.buildAppsScriptCode({
+  appVersion: '2.0.0-mvp',
+  sourceApiUrl: scheduleData.API_URL,
+  gradeName: '高二',
+  notificationEmail: 'test@example.com',
+  autoSyncHours: [6],
+  notifySyncHour: 6,
+  includeActivities: true,
+  selectedCourses: ['國語文'],
+  highLoadTestingEnabled: true
+});
+assert.doesNotThrow(() => new Function(highLoadGeneratedCode));
+assert.equal(highLoadGeneratedCode.includes('const HIGH_LOAD_TESTING_ENABLED = true;'), true);
+assert.equal(highLoadGeneratedCode.includes('function setupHighLoadTestEnvironment('), true);
+assert.equal(highLoadGeneratedCode.includes('function runHighLoadReadOnlyTest('), true);
+assert.equal(highLoadGeneratedCode.includes('function runHighLoadCourseOutlineReadTest('), true);
+assert.equal(highLoadGeneratedCode.includes('function runHighLoadCalendarTest422('), true);
+assert.equal(highLoadGeneratedCode.includes('function cleanupHighLoadTestEnvironment('), true);
 
 const formatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Taipei',
@@ -89,6 +137,1128 @@ const context = vm.createContext({
 });
 
 vm.runInContext(generatedCode, context);
+
+function recordGeneratedMenus(generatedAppsScriptCode) {
+  const menuNames = [];
+  function createMenu(name) {
+    menuNames.push(name);
+    const menu = {
+      addItem() {
+        return menu;
+      },
+      addSeparator() {
+        return menu;
+      },
+      addSubMenu() {
+        return menu;
+      },
+      addToUi() {
+        return menu;
+      }
+    };
+    return menu;
+  }
+  const menuContext = vm.createContext({
+    console,
+    Intl,
+    SpreadsheetApp: {
+      getUi() {
+        return { createMenu };
+      }
+    }
+  });
+  vm.runInContext(generatedAppsScriptCode, menuContext);
+  menuContext.onOpen();
+  return menuNames;
+}
+
+assert.deepEqual(
+  recordGeneratedMenus(generatedCode),
+  ['行程同步'],
+  '一般 Code.gs 不應建立高負載測試選單'
+);
+assert.deepEqual(
+  recordGeneratedMenus(highLoadGeneratedCode),
+  ['行程同步', '高負載測試'],
+  '測試版 Code.gs 應在既有行程同步選單加入高負載測試子選單'
+);
+
+const outlineWindowEvents = [
+  { dateKey: '2026-02-22' },
+  { dateKey: '2026-02-23' },
+  { dateKey: '2026-03-25' },
+  { dateKey: '2026-03-26' }
+];
+assert.deepEqual(
+  Array.from(
+    context.filterCourseOutlineLookaheadEvents_(
+      outlineWindowEvents,
+      new Date('2026-02-23T06:00:00+08:00'),
+      30
+    ),
+    event => event.dateKey
+  ),
+  ['2026-02-23', '2026-03-25'],
+  '課綱視窗應包含今天至第 30 天，排除過去與更遠課程'
+);
+
+if (fs.existsSync('/tmp/tschool-requirements-grade2.json')) {
+  const highLoadContext = vm.createContext({
+    console,
+    Intl,
+    Utilities: {
+      formatDate(dateValue, timezone, pattern) {
+        assert.equal(timezone, 'Asia/Taipei');
+        return formatDate(dateValue, pattern);
+      }
+    }
+  });
+  vm.runInContext(highLoadGeneratedCode, highLoadContext);
+  const highLoadPayload = JSON.parse(
+    fs.readFileSync('/tmp/tschool-requirements-grade2.json', 'utf8')
+  );
+  const highLoadSource = highLoadContext.parseSchedulePayload_(
+    highLoadPayload,
+    '高二',
+    new Date('2026-02-23T06:00:00+08:00')
+  );
+  const highLoadReport = highLoadContext.buildHighLoadReadOnlyReport_(
+    highLoadSource,
+    0
+  );
+  assert.equal(
+    highLoadReport.ok,
+    true,
+    `高二固定資料應符合高負載基準：${JSON.stringify(highLoadReport)}`
+  );
+  assert.equal(highLoadReport.actual.totalFuture, 422);
+  assert.equal(highLoadReport.actual.outlineWindow, 79);
+  assert.equal(highLoadReport.actual.outlineCourseNames, 20);
+
+  const highLoadDesired = highLoadContext.getHighLoadTestDesiredEvents_(highLoadSource);
+  const estimatedHighLoadState = {};
+  highLoadDesired.forEach((event, index) => {
+    const key = highLoadContext.makeOccurrenceKey_(event);
+    estimatedHighLoadState[key] = `test-event-${index}`;
+  });
+  const serializedHighLoadSource = JSON.stringify({
+    catalog: highLoadSource.catalog,
+    events: highLoadSource.events.map(highLoadContext.serializeHighLoadTestEvent_)
+  });
+  const estimatedStoredCharacters =
+    serializedHighLoadSource.length + JSON.stringify(estimatedHighLoadState).length;
+  assert.equal(
+    estimatedStoredCharacters < 300000,
+    true,
+    `高負載來源與 422 筆狀態不應逼近 Script Properties 總量上限：` +
+      `${estimatedStoredCharacters}（來源 ${serializedHighLoadSource.length}、狀態 ` +
+      `${JSON.stringify(estimatedHighLoadState).length}）`
+  );
+}
+
+const noActivityCode = global.buildAppsScriptCode({
+  appVersion: '2.0.0-mvp',
+  sourceApiUrl: scheduleData.API_URL,
+  gradeName: '高二',
+  notificationEmail: 'test@example.com',
+  autoSyncHours: [6],
+  notifySyncHour: 6,
+  includeActivities: false,
+  excludedActivities: [],
+  selectedCourses: ['公民'],
+  initialKnownTitles: ['公民', '高二全校活動']
+});
+const noActivityContext = vm.createContext({ console, Intl });
+vm.runInContext(noActivityCode, noActivityContext);
+const noActivitySettings = vm.runInContext('DEFAULT_SETTINGS', noActivityContext);
+assert.equal(
+  noActivitySettings.calendarName,
+  '高二行程｜T-SCHOOL Schedule Sync',
+  '新程式碼應使用隨年級變動的專用日曆名稱'
+);
+assert.equal(
+  noActivityContext.shouldIncludeEvent_({ type: 'activity', originalTitle: '高二全校活動' }, noActivitySettings),
+  false,
+  '取消所有活動後不應同步已知活動'
+);
+assert.equal(
+  noActivityContext.shouldIncludeEvent_({ type: 'activity', originalTitle: '新發現活動' }, noActivitySettings),
+  false,
+  '取消所有活動後不應自動同步新活動'
+);
+noActivitySettings.pendingTitles = ['新發現活動'];
+assert.equal(
+  noActivityContext.shouldIncludeEvent_({ type: 'activity', originalTitle: '新發現活動' }, noActivitySettings),
+  false,
+  '取消所有活動後，待確認清單也不得繞過活動總開關'
+);
+
+assert.equal(context.getConfiguredCourseOutlineSourceSets_('高一').length, 0);
+assert.equal(context.getConfiguredCourseOutlineSourceSets_('高三').length, 0);
+assert.equal(context.getConfiguredCourseOutlineSourceSets_('高二').length, 1);
+assert.equal(context.getConfiguredCourseOutlineSourceSets_('高二')[0].key, '114-2-high2');
+assert.equal(context.getConfiguredCourseOutlineSourceSets_('高二')[0].spreadsheetIds.length, 4);
+assert.equal(
+  context.getRelevantCourseOutlineSourceSets_('高二', [{
+    type: 'course',
+    isAllDay: false,
+    dateKey: '2026-07-27'
+  }]).length,
+  1,
+  '114-2 高二日期應啟用目前四份課綱'
+);
+assert.equal(
+  context.getRelevantCourseOutlineSourceSets_('高二', [{
+    type: 'course',
+    isAllDay: false,
+    dateKey: '2026-09-01'
+  }]).length,
+  0,
+  '超出 114-2 適用日期後不得繼續讀取舊課綱'
+);
+
+const outlineValues = [
+  ['114-2 測試課綱'],
+  ['課程說明'],
+  ['節次', '課程內容', '日期', '非同步', '實體', '線上', '單元主題', '實體課程教室'],
+  ['56', '混合式內容', '7/27', '2', '2', '0', '混合式主題', '協作坊'],
+  ['4', '純非同步內容', '7/29', '2', '0', '0', '純非同步主題', '線上'],
+  ['3-4', '', '2026/7/31', '0', '2', '0', '跨節主題', '基地']
+];
+const outlineDesiredEvents = [
+  { originalTitle: '測試課程', dateKey: '2026-07-27', periodStart: 5, periodEnd: 6 },
+  { originalTitle: '測試課程', dateKey: '2026-07-29', periodStart: 4, periodEnd: 4 },
+  { originalTitle: '測試課程', dateKey: '2026-07-31', periodStart: 3, periodEnd: 4 }
+];
+const parsedOutline = context.parseCourseOutlineSheetValues_(
+  outlineValues,
+  '測試課程',
+  outlineDesiredEvents,
+  { sourceSetKey: '114-2-high2', spreadsheetId: 'sheet-id', spreadsheetName: '課綱' }
+);
+assert.equal(parsedOutline.headerRow, 3);
+assert.equal(parsedOutline.records.length, 2, '混合式列應保留，純非同步列應排除');
+assert.equal(parsedOutline.records[0].dateKey, '2026-07-27');
+assert.equal(parsedOutline.records[0].periodStart, 5);
+assert.equal(parsedOutline.records[0].periodEnd, 6);
+assert.equal(parsedOutline.records[1].topic, '跨節主題');
+assert.throws(
+  () => context.parseCourseOutlineSheetValues_(
+    [['日期', '節次', '課程內容'], ['7/27', '1', '內容']],
+    '缺欄位課程',
+    [],
+    { sourceSetKey: 'test', spreadsheetId: 'test', spreadsheetName: 'test' }
+  ),
+  /找不到必要欄位/
+);
+
+const outlineSettings = {
+  descriptionPreset: 'standard',
+  customDescription: '',
+  reminderMode: 'none',
+  reminderMinutes: 10
+};
+const outlineBaseItem = {
+  originalTitle: '測試課程',
+  type: 'course',
+  isAllDay: false,
+  dateKey: '2026-07-27',
+  weekday: '一',
+  weekNum: 2,
+  periodStart: 5,
+  periodEnd: 6,
+  startTime: '13:10',
+  endTime: '15:00',
+  start: new Date('2026-07-27T13:10:00+08:00'),
+  end: new Date('2026-07-27T15:00:00+08:00'),
+  location: '吉林基地',
+  sourceUpdatedLabel: '0724'
+};
+const oldOutlineItem = Object.assign({}, outlineBaseItem, {
+  courseOutline: { classroom: '協作坊', topic: '舊主題', content: '舊內容' },
+  outlineHash: 'old-hash'
+});
+const newOutlineItem = Object.assign({}, outlineBaseItem, {
+  courseOutline: { classroom: '協作坊', topic: '新主題', content: '新內容' },
+  outlineHash: 'new-hash'
+});
+const outlineStateKey = context.makeOccurrenceKey_(outlineBaseItem);
+assert.equal(context.makeOccurrenceKey_(oldOutlineItem), context.makeOccurrenceKey_(newOutlineItem));
+assert.equal(context.normalizeTitle_(' 國 語 文　'), '國語文');
+assert.equal(context.normalizeTitle_('數學Ａ'), context.normalizeTitle_('數學A'));
+assert.equal(
+  context.makeBaseEventSignature_(oldOutlineItem, outlineSettings),
+  context.makeBaseEventSignature_(newOutlineItem, outlineSettings)
+);
+assert.notEqual(
+  context.makeEventSignature_(oldOutlineItem, outlineSettings),
+  context.makeEventSignature_(newOutlineItem, outlineSettings)
+);
+assert.match(
+  context.buildManagedDescription_(newOutlineItem, outlineStateKey, outlineSettings),
+  /課綱\n實體課程教室：協作坊\n單元主題：新主題\n課程內容：新內容/
+);
+const legacyOutlineState = {
+  originalTitle: oldOutlineItem.originalTitle,
+  type: oldOutlineItem.type,
+  isAllDay: oldOutlineItem.isAllDay,
+  dateKey: oldOutlineItem.dateKey,
+  periodStart: oldOutlineItem.periodStart,
+  periodEnd: oldOutlineItem.periodEnd,
+  start: oldOutlineItem.start.toISOString(),
+  end: oldOutlineItem.end.toISOString(),
+  location: oldOutlineItem.location,
+  syncSignature: context.makeBaseEventSignaturePayload_(oldOutlineItem, outlineSettings) +
+    '|outline:' + oldOutlineItem.outlineHash,
+  baseSyncSignature: context.makeBaseEventSignaturePayload_(oldOutlineItem, outlineSettings),
+  outlineHash: oldOutlineItem.outlineHash
+};
+assert.equal(
+  context.storedEventSignatureMatches_(legacyOutlineState, oldOutlineItem, outlineSettings),
+  true,
+  '舊版長簽章應可無寫入升級，避免部署後誤判全數事件變更'
+);
+const spacingVariant = Object.assign({}, outlineBaseItem, { originalTitle: ' 測試 課程　' });
+assert.equal(
+  context.dedupeAndValidateDesiredEvents_([outlineBaseItem, spacingVariant]).length,
+  1,
+  '只差空格的相同事件應合併而不是重複建立'
+);
+assert.throws(
+  () => context.dedupeAndValidateDesiredEvents_([
+    outlineBaseItem,
+    Object.assign({}, spacingVariant, { end: new Date('2026-07-27T16:00:00+08:00') })
+  ]),
+  /相同事件/,
+  '相同身分鍵卻有衝突內容時應停止而非靜默合併'
+);
+
+let descriptionOnlyUpdates = 0;
+const calendarForOutlineUpdate = {
+  getEventById() {
+    return {
+      getId() {
+        return 'event-id';
+      },
+      getDescription() {
+        return context.buildManagedDescription_(oldOutlineItem, outlineStateKey, outlineSettings);
+      },
+      setDescription() {
+        descriptionOnlyUpdates += 1;
+      }
+    };
+  }
+};
+const outlineOnlyResult = context.applySyncPlan_(
+  calendarForOutlineUpdate,
+  {},
+  {
+    oldPast: {},
+    exact: [{
+      oldItem: {
+        stateKey: outlineStateKey,
+        calendarEventId: 'event-id',
+        syncSignature: context.makeEventSignature_(oldOutlineItem, outlineSettings),
+        baseSyncSignature: context.makeBaseEventSignature_(oldOutlineItem, outlineSettings),
+        outlineHash: oldOutlineItem.outlineHash
+      },
+      newItem: newOutlineItem,
+      newKey: outlineStateKey
+    }],
+    moved: [],
+    additions: [],
+    deletions: []
+  },
+  outlineSettings,
+  { forceCalendarCheck: false, trackProgress: false }
+);
+assert.equal(descriptionOnlyUpdates, 1);
+assert.equal(outlineOnlyResult.updated, 0);
+assert.equal(outlineOnlyResult.outlineUpdated, 1);
+assert.equal(outlineOnlyResult.changes.length, 0, '純課綱更新不應列入課表異動通知');
+
+const scriptPropertiesData = {};
+const scriptProperties = {
+  getProperty(key) {
+    return Object.prototype.hasOwnProperty.call(scriptPropertiesData, key)
+      ? scriptPropertiesData[key]
+      : null;
+  },
+  setProperty(key, value) {
+    scriptPropertiesData[key] = String(value);
+  },
+  setProperties(values) {
+    Object.entries(values).forEach(([key, value]) => {
+      scriptPropertiesData[key] = String(value);
+    });
+  },
+  deleteProperty(key) {
+    delete scriptPropertiesData[key];
+  },
+  getKeys() {
+    return Object.keys(scriptPropertiesData);
+  },
+  getProperties() {
+    return Object.assign({}, scriptPropertiesData);
+  }
+};
+let triggerCounter = 0;
+let projectTriggers = [];
+let sentOutlineFailureEmails = 0;
+context.PropertiesService = {
+  getScriptProperties() {
+    return scriptProperties;
+  }
+};
+const utf8ChunkPayload = { text: '課綱😀'.repeat(4000) };
+context.writeChunkedJson_('UTF8_CHUNK_TEST', utf8ChunkPayload);
+const utf8ChunkCount = Number(scriptPropertiesData.UTF8_CHUNK_TEST_COUNT);
+assert.equal(utf8ChunkCount > 1, true, '中文字資料應依 UTF-8 位元組安全分塊');
+for (let index = 0; index < utf8ChunkCount; index += 1) {
+  assert.equal(
+    Buffer.byteLength(scriptPropertiesData[`UTF8_CHUNK_TEST_${index}`], 'utf8') <= 7500,
+    true,
+    '單一 Script Property 不得超過安全位元組上限'
+  );
+}
+assert.deepEqual(
+  JSON.parse(JSON.stringify(context.readChunkedJson_('UTF8_CHUNK_TEST', null))),
+  utf8ChunkPayload,
+  'UTF-8 分塊重新組合後內容必須完全相同'
+);
+context.clearChunkedStore_('UTF8_CHUNK_TEST');
+context.LockService = {
+  getScriptLock() {
+    return {
+      tryLock() {
+        return true;
+      },
+      releaseLock() {}
+    };
+  }
+};
+context.ScriptApp = {
+  getProjectTriggers() {
+    return projectTriggers.slice();
+  },
+  deleteTrigger(trigger) {
+    projectTriggers = projectTriggers.filter(item => item !== trigger);
+  },
+  newTrigger(handler) {
+    const builder = {
+      timeBased() {
+        return builder;
+      },
+      atHour() {
+        return builder;
+      },
+      nearMinute() {
+        return builder;
+      },
+      everyDays() {
+        return builder;
+      },
+      inTimezone() {
+        return builder;
+      },
+      after() {
+        return builder;
+      },
+      create() {
+        const id = `trigger-${++triggerCounter}`;
+        const trigger = {
+          getUniqueId() {
+            return id;
+          },
+          getHandlerFunction() {
+            return handler;
+          }
+        };
+        projectTriggers.push(trigger);
+        return trigger;
+      }
+    };
+    return builder;
+  }
+};
+context.MailApp = {
+  sendEmail() {
+    sentOutlineFailureEmails += 1;
+  }
+};
+context.Session = {
+  getActiveUser() {
+    return { getEmail: () => 'test@example.com' };
+  },
+  getEffectiveUser() {
+    return { getEmail: () => 'test@example.com' };
+  }
+};
+context.Logger = { log() {} };
+
+function createMockCalendar() {
+  let eventCounter = 0;
+  const events = new Map();
+
+  function makeEvent(title, start, end, options, allDay) {
+    const id = `mock-event-${++eventCounter}`;
+    const event = {
+      id,
+      title,
+      start: new Date(start),
+      end: new Date(end),
+      location: options && options.location || '',
+      description: options && options.description || '',
+      allDay: Boolean(allDay),
+      deleted: false,
+      getId() { return id; },
+      getTitle() { return this.title; },
+      setTitle(value) { this.title = value; },
+      getStartTime() { return new Date(this.start); },
+      getEndTime() { return new Date(this.end); },
+      setTime(nextStart, nextEnd) {
+        this.start = new Date(nextStart);
+        this.end = new Date(nextEnd);
+      },
+      isAllDayEvent() { return this.allDay; },
+      getAllDayStartDate() { return new Date(this.start); },
+      setAllDayDate(value) {
+        this.start = new Date(value);
+        this.end = new Date(this.start.getTime() + 24 * 60 * 60 * 1000);
+      },
+      getLocation() { return this.location; },
+      setLocation(value) { this.location = value; },
+      getDescription() { return this.description; },
+      setDescription(value) { this.description = value; },
+      removeAllReminders() {},
+      addPopupReminder() {},
+      addEmailReminder() {},
+      deleteEvent() { this.deleted = true; }
+    };
+    events.set(id, event);
+    return event;
+  }
+
+  return {
+    createEvent(title, start, end, options) {
+      return makeEvent(title, start, end, options, false);
+    },
+    createAllDayEvent(title, start, options) {
+      return makeEvent(
+        title,
+        start,
+        new Date(new Date(start).getTime() + 24 * 60 * 60 * 1000),
+        options,
+        true
+      );
+    },
+    getEventById(id) {
+      const event = events.get(id);
+      return event && !event.deleted ? event : null;
+    },
+    getEvents(start, end) {
+      const startMs = new Date(start).getTime();
+      const endMs = new Date(end).getTime();
+      return Array.from(events.values()).filter(event =>
+        !event.deleted &&
+        event.start.getTime() < endMs &&
+        event.end.getTime() > startMs
+      );
+    },
+    activeEvents() {
+      return Array.from(events.values()).filter(event => !event.deleted);
+    }
+  };
+}
+
+function makeBatchFixtureEvent(index) {
+  const start = new Date('2026-08-01T08:10:00+08:00');
+  start.setDate(start.getDate() + index);
+  const end = new Date(start.getTime() + 50 * 60 * 1000);
+  return {
+    originalTitle: `分批測試課程 ${index + 1}`,
+    type: 'course',
+    isAllDay: false,
+    dateKey: formatDate(start, 'yyyy-MM-dd'),
+    weekday: '一',
+    weekNum: Math.floor(index / 7) + 1,
+    periodStart: 1,
+    periodEnd: 1,
+    startTime: '08:10',
+    endTime: '09:00',
+    start,
+    end,
+    location: '測試教室',
+    sourceUpdatedLabel: '0725'
+  };
+}
+
+function makeSyncJobForTest(desiredCount, forceCalendarCheck) {
+  return {
+    schemaVersion: 1,
+    jobId: `batch-job-${desiredCount}-${forceCalendarCheck ? 'force' : 'normal'}`,
+    status: 'running',
+    phase: 'calendar',
+    reason: forceCalendarCheck ? 'repair' : 'setup',
+    firstSetup: !forceCalendarCheck,
+    forceCalendarCheck: Boolean(forceCalendarCheck),
+    notifyOnSuccess: false,
+    input: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    retryCount: 0,
+    desiredCount,
+    initialOperationCount: desiredCount,
+    processedOperations: 0,
+    created: 0,
+    updated: 0,
+    outlineUpdated: 0,
+    deleted: 0,
+    migrationDeleted: 0,
+    forceProcessedKeys: {},
+    inFlight: [],
+    changes: [],
+    omittedChangeCount: 0,
+    migrationFromId: '',
+    migrationEntries: [],
+    migrationCursor: 0
+  };
+}
+
+const batchSettings = {
+  descriptionPreset: 'standard',
+  customDescription: '',
+  reminderMode: 'none',
+  reminderMinutes: 10
+};
+const batchDesired = Array.from({ length: 422 }, (_, index) => makeBatchFixtureEvent(index));
+const batchCalendar = createMockCalendar();
+let batchState = {};
+let batchJob = makeSyncJobForTest(batchDesired.length, false);
+let batchCount = 0;
+let batchPending = true;
+while (batchPending) {
+  const batchResult = context.runSyncJobBatch_(
+    batchJob,
+    batchCalendar,
+    batchState,
+    batchDesired,
+    batchSettings,
+    '2026-08-01'
+  );
+  batchState = batchResult.state;
+  batchJob = context.applySyncBatchResultToJob_(batchJob, batchResult);
+  batchPending = batchResult.pending;
+  batchCount += 1;
+  assert.equal(batchCount <= 12, true, '422 筆正常同步不應出現無限續跑');
+}
+assert.equal(batchCount, 11, '422 筆應以每批最多 40 筆完成');
+assert.equal(batchJob.created, 422);
+assert.equal(Object.keys(batchState).length, 422);
+assert.equal(batchCalendar.activeEvents().length, 422);
+assert.equal(
+  Object.values(batchState).every(item => item.signatureVersion === 2),
+  true,
+  '新狀態應只保存短雜湊簽章版本'
+);
+
+const noChangeJob = makeSyncJobForTest(batchDesired.length, false);
+const noChangeResult = context.runSyncJobBatch_(
+  noChangeJob,
+  batchCalendar,
+  batchState,
+  batchDesired,
+  batchSettings,
+  '2026-08-01'
+);
+assert.equal(noChangeResult.pending, false);
+assert.equal(noChangeResult.completedOperations, 0);
+assert.equal(batchCalendar.activeEvents().length, 422);
+
+let forceJob = makeSyncJobForTest(batchDesired.length, true);
+let forceState = batchState;
+let forceBatchCount = 0;
+let forcePending = true;
+while (forcePending) {
+  const forceResult = context.runSyncJobBatch_(
+    forceJob,
+    batchCalendar,
+    forceState,
+    batchDesired,
+    batchSettings,
+    '2026-08-01'
+  );
+  forceState = forceResult.state;
+  forceJob = context.applySyncBatchResultToJob_(forceJob, forceResult);
+  forcePending = forceResult.pending;
+  forceBatchCount += 1;
+  assert.equal(forceBatchCount <= 12, true, '強制修復不得重複處理同一批而無限續跑');
+}
+assert.equal(forceBatchCount, 11);
+assert.equal(forceJob.updated, 422);
+assert.equal(Object.keys(forceJob.forceProcessedKeys).length, 422);
+assert.equal(batchCalendar.activeEvents().length, 422);
+
+const recoveryCalendar = createMockCalendar();
+const recoveryItem = makeBatchFixtureEvent(0);
+const recoveryKey = context.makeOccurrenceKey_(recoveryItem);
+const recoveredExistingEvent = context.createCalendarEvent_(
+  recoveryCalendar,
+  recoveryItem,
+  recoveryKey,
+  batchSettings
+);
+let recoveredReminderRepairs = 0;
+recoveredExistingEvent.removeAllReminders = () => { recoveredReminderRepairs += 1; };
+const recoveryJob = makeSyncJobForTest(1, false);
+recoveryJob.inFlight = [{
+  type: 'create',
+  newKey: recoveryKey,
+  newItem: JSON.parse(JSON.stringify(recoveryItem)),
+  signature: context.makeEventSignature_(recoveryItem, batchSettings)
+}];
+const recoveryResult = context.runSyncJobBatch_(
+  recoveryJob,
+  recoveryCalendar,
+  {},
+  [recoveryItem],
+  batchSettings,
+  '2026-08-01'
+);
+assert.equal(recoveryResult.pending, false);
+assert.equal(recoveryCalendar.activeEvents().length, 1, 'Calendar 已寫入但狀態未存時不得重複建立');
+assert.equal(Object.keys(recoveryResult.state).length, 1);
+assert.equal(
+  recoveredReminderRepairs,
+  1,
+  '接回已建立事件時仍須重新套用提醒，修復建立後中斷的情況'
+);
+
+const movedRecoveryCalendar = createMockCalendar();
+const movedOldItem = makeBatchFixtureEvent(0);
+const movedOldKey = context.makeOccurrenceKey_(movedOldItem);
+const movedExisting = context.createCalendarEvent_(
+  movedRecoveryCalendar,
+  movedOldItem,
+  movedOldKey,
+  batchSettings
+);
+const movedNewItem = Object.assign({}, movedOldItem, {
+  dateKey: '2026-08-03',
+  start: new Date('2026-08-03T08:10:00+08:00'),
+  end: new Date('2026-08-03T09:00:00+08:00')
+});
+const movedNewKey = context.makeOccurrenceKey_(movedNewItem);
+context.updateCalendarEvent_(
+  movedRecoveryCalendar,
+  movedExisting.getId(),
+  movedNewItem,
+  movedNewKey,
+  batchSettings,
+  movedOldKey
+);
+assert.doesNotThrow(
+  () => context.updateCalendarEvent_(
+    movedRecoveryCalendar,
+    movedExisting.getId(),
+    movedNewItem,
+    movedNewKey,
+    batchSettings,
+    movedOldKey
+  ),
+  '移動事件已改成新 marker、但尚未 checkpoint 時仍應能安全續跑'
+);
+assert.equal(movedRecoveryCalendar.activeEvents().length, 1);
+
+const duplicateCalendar = createMockCalendar();
+context.createCalendarEvent_(duplicateCalendar, recoveryItem, recoveryKey, batchSettings);
+context.createCalendarEvent_(duplicateCalendar, recoveryItem, recoveryKey, batchSettings);
+assert.throws(
+  () => context.createCalendarEventIdempotent_(
+    duplicateCalendar,
+    recoveryItem,
+    recoveryKey,
+    batchSettings
+  ),
+  /多筆相同同步識別碼/,
+  '發現兩筆相同管理識別碼時不得建立第三筆'
+);
+
+const unmanagedCalendar = createMockCalendar();
+const unmanagedEvent = unmanagedCalendar.createEvent(
+  recoveryItem.originalTitle,
+  recoveryItem.start,
+  recoveryItem.end,
+  { description: '使用者自己的事件' }
+);
+assert.throws(
+  () => context.updateCalendarEvent_(
+    unmanagedCalendar,
+    unmanagedEvent.getId(),
+    recoveryItem,
+    recoveryKey,
+    batchSettings,
+    recoveryKey
+  ),
+  /管理標記/,
+  '既有事件失去管理標記後不得被更新'
+);
+
+const migrationSanitized = context.sanitizeSettingsInput_(
+  {
+    gradeName: '高二',
+    selectedCourses: ['測試課程'],
+    includeActivities: true,
+    excludedActivities: [],
+    calendarId: '',
+    calendarName: '新專用日曆',
+    notificationEmail: '',
+    autoSyncEnabled: true,
+    autoSyncHours: [5],
+    notifySyncHour: 5,
+    notificationPreset: 'standard',
+    customNotification: '',
+    descriptionPreset: 'standard',
+    customDescription: '',
+    reminderMode: 'none',
+    reminderMinutes: 10
+  },
+  {
+    schemaVersion: 3,
+    gradeName: '高二',
+    setupComplete: true,
+    selectedCourses: ['測試課程'],
+    excludedActivities: [],
+    knownTitles: ['測試課程'],
+    pendingTitles: [],
+    excludedTitles: [],
+    calendarId: 'old-calendar-id',
+    calendarName: '舊專用日曆',
+    calendarMigrationFromId: '',
+    notificationEmail: '',
+    autoSyncHours: [5],
+    notifySyncHour: 5,
+    notificationPreset: 'standard',
+    customNotification: '',
+    descriptionPreset: 'standard',
+    customDescription: '',
+    reminderMode: 'none',
+    reminderMinutes: 10,
+    termKey: '二年級|2026-02-23',
+    pendingTermKey: ''
+  },
+  {
+    termKey: '二年級|2026-02-23',
+    fingerprint: 'source',
+    catalog: {
+      all: [{ title: '測試課程', type: 'course' }],
+      activities: []
+    }
+  }
+);
+assert.equal(
+  migrationSanitized.calendarMigrationFromId,
+  'old-calendar-id',
+  '選擇建立新日曆時仍須保存舊日曆 ID 供分批搬移'
+);
+assert.throws(
+  () => context.sanitizeSettingsInput_(
+    Object.assign({}, migrationSanitized, { calendarId: 'third-calendar-id' }),
+    Object.assign({}, migrationSanitized, {
+      calendarId: 'second-calendar-id',
+      calendarMigrationFromId: 'old-calendar-id'
+    }),
+    {
+      termKey: '二年級|2026-02-23',
+      fingerprint: 'source',
+      catalog: {
+        all: [{ title: '測試課程', type: 'course' }],
+        activities: []
+      }
+    }
+  ),
+  /搬移尚未清理完成/,
+  '前一次 Calendar 搬移完成前不得再次更換目標'
+);
+const deletionSafetyPlan = {
+  oldFutureCount: 10,
+  deletions: Array.from({ length: 5 }, (_, index) => ({
+    stateKey: `delete-${index}`
+  }))
+};
+assert.throws(
+  () => context.assertSafeDeletionPlan_(deletionSafetyPlan, {}, 'repair', false),
+  /移除過多事件/,
+  '強制修復不得繞過大量刪除保護'
+);
+assert.throws(
+  () => context.assertSafeDeletionPlan_(deletionSafetyPlan, {}, 'settings', false),
+  /移除過多事件/,
+  '沒有有效預覽 token 的設定變更不得大量刪除'
+);
+assert.doesNotThrow(
+  () => context.assertSafeDeletionPlan_(deletionSafetyPlan, {}, 'settings', true),
+  '有效預覽 token 才能套用使用者剛確認的大量設定變更'
+);
+const finalizerRetryJob = makeSyncJobForTest(0, false);
+finalizerRetryJob.retryCount = 1;
+context.applySyncBatchResultToJob_(finalizerRetryJob, {
+  stats: { created: 0, updated: 0, outlineUpdated: 0, deleted: 0, migrationDeleted: 0 },
+  completedOperations: 0,
+  changes: []
+});
+assert.equal(
+  finalizerRetryJob.retryCount,
+  1,
+  '零操作的 finalizer 重試不得清除連續失敗次數'
+);
+
+const emailsBeforeWatchdog = sentOutlineFailureEmails;
+const timedOutJob = makeSyncJobForTest(1, false);
+timedOutJob.status = 'running';
+timedOutJob.runStartedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+timedOutJob.retryCount = 0;
+context.saveSyncJob_(timedOutJob);
+const firstWatchdogResult = context.watchScheduleSync();
+assert.equal(firstWatchdogResult.retrying, true);
+assert.equal(context.loadSyncJob_().status, 'retry_pending');
+assert.equal(sentOutlineFailureEmails, emailsBeforeWatchdog);
+const secondTimedOutJob = context.loadSyncJob_();
+secondTimedOutJob.status = 'running';
+secondTimedOutJob.runStartedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+secondTimedOutJob.retryCount = 1;
+context.saveSyncJob_(secondTimedOutJob);
+const secondWatchdogResult = context.watchScheduleSync();
+assert.equal(secondWatchdogResult.retrying, false);
+assert.equal(context.loadSyncJob_().status, 'failed');
+assert.equal(
+  sentOutlineFailureEmails,
+  emailsBeforeWatchdog + 1,
+  '連續第二次硬逾時應停止並寄信一次'
+);
+context.clearChunkedStore_('TSCHOOL_SYNC_JOB');
+projectTriggers = projectTriggers.filter(trigger =>
+  ['continueScheduleSync', 'watchScheduleSync'].indexOf(trigger.getHandlerFunction()) === -1
+);
+sentOutlineFailureEmails = 0;
+
+function makeOutlineSheet(name, values) {
+  return {
+    getName() {
+      return name;
+    },
+    getLastRow() {
+      return values.length;
+    },
+    getLastColumn() {
+      return Math.max(...values.map(row => row.length));
+    },
+    getRange() {
+      return {
+        getDisplayValues() {
+          return values;
+        }
+      };
+    }
+  };
+}
+
+const configuredHigh2OutlineSet = context.getConfiguredCourseOutlineSourceSets_('高二')[0];
+let outlineWorkbookSheets = {
+  [configuredHigh2OutlineSet.spreadsheetIds[0]]: [makeOutlineSheet('測試課程', outlineValues)],
+  [configuredHigh2OutlineSet.spreadsheetIds[1]]: [makeOutlineSheet('另一課程', outlineValues)],
+  [configuredHigh2OutlineSet.spreadsheetIds[2]]: [],
+  [configuredHigh2OutlineSet.spreadsheetIds[3]]: []
+};
+const openedOutlineWorkbookIds = [];
+context.SpreadsheetApp = {
+  openById(id) {
+    openedOutlineWorkbookIds.push(id);
+    return {
+      getName() {
+        return `課綱-${id.slice(0, 4)}`;
+      },
+      getSheets() {
+        return outlineWorkbookSheets[id] || [];
+      }
+    };
+  }
+};
+const collectedOutlineSnapshot = context.collectCourseOutlineSnapshot_(
+  { gradeName: '高二' },
+  { termKey: '二年級|2026-02-23' },
+  [Object.assign({}, outlineBaseItem)],
+  [configuredHigh2OutlineSet]
+);
+assert.equal(openedOutlineWorkbookIds.length, 4, '相關高二來源組應批次檢查四份課綱');
+assert.equal(collectedOutlineSnapshot.diagnostics.matchedRecordCount, 1);
+assert.deepEqual(
+  Array.from(collectedOutlineSnapshot.diagnostics.missingSheetNames),
+  [],
+  '一字不差命中分頁時不應列為缺少課綱'
+);
+outlineWorkbookSheets = {
+  [configuredHigh2OutlineSet.spreadsheetIds[0]]: [
+    makeOutlineSheet('測試課程 ', outlineValues)
+  ],
+  [configuredHigh2OutlineSet.spreadsheetIds[1]]: [],
+  [configuredHigh2OutlineSet.spreadsheetIds[2]]: [],
+  [configuredHigh2OutlineSet.spreadsheetIds[3]]: []
+};
+const nearMatchSnapshot = context.collectCourseOutlineSnapshot_(
+  { gradeName: '高二' },
+  { termKey: '二年級|2026-02-23' },
+  [
+    Object.assign({}, outlineBaseItem),
+    Object.assign({}, outlineBaseItem, {
+      originalTitle: '週五跨校選修',
+      dateKey: '2026-07-28',
+      start: new Date('2026-07-28T13:10:00+08:00'),
+      end: new Date('2026-07-28T15:00:00+08:00')
+    })
+  ],
+  [configuredHigh2OutlineSet]
+);
+assert.deepEqual(Array.from(nearMatchSnapshot.diagnostics.missingSheetNames), ['測試課程']);
+assert.deepEqual(
+  Array.from(nearMatchSnapshot.diagnostics.ignoredCrossSchoolSheetNames),
+  ['週五跨校選修'],
+  '跨校課程不應列入課綱缺頁錯誤'
+);
+assert.equal(nearMatchSnapshot.diagnostics.nearMatchSheetNames.length, 1);
+assert.equal(
+  nearMatchSnapshot.diagnostics.nearMatchSheetNames[0].candidates[0],
+  '測試課程 ',
+  '只差空格的課綱分頁只能提示，不得自動配對'
+);
+outlineWorkbookSheets = Object.assign({}, outlineWorkbookSheets, {
+  [configuredHigh2OutlineSet.spreadsheetIds[0]]: [makeOutlineSheet('測試課程', outlineValues)],
+  [configuredHigh2OutlineSet.spreadsheetIds[1]]: [makeOutlineSheet('測試課程', outlineValues)]
+});
+assert.throws(
+  () => context.collectCourseOutlineSnapshot_(
+    { gradeName: '高二' },
+    { termKey: '二年級|2026-02-23' },
+    [Object.assign({}, outlineBaseItem)],
+    [configuredHigh2OutlineSet]
+  ),
+  /課綱資料重複/,
+  '同一分頁、日期與節次在兩個來源同時命中時不得任選'
+);
+
+const high2OutlineSets = context.getRelevantCourseOutlineSourceSets_('高二', [{
+  type: 'course',
+  isAllDay: false,
+  dateKey: '2026-07-27'
+}]);
+const snapshotLookupKey = context.makeCourseOutlineOccurrenceKey_('測試課程', '2026-07-27', 5, 6);
+const publishedSnapshot = context.publishCourseOutlineSnapshot_({
+  schemaVersion: 1,
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  sourceSetKeys: ['114-2-high2'],
+  sourceSetsFingerprint: context.makeCourseOutlineSourceSetsFingerprint_(high2OutlineSets),
+  contextFingerprint: 'test-context',
+  refreshedAt: new Date().toISOString(),
+  refreshedAtLabel: '2026/07/24 20:00',
+  lookup: {
+    [snapshotLookupKey]: {
+      classroom: '協作坊',
+      topic: '快照主題',
+      content: '快照內容',
+      hash: 'snapshot-hash'
+    }
+  },
+  diagnostics: { matchedRecordCount: 1 }
+});
+assert.notEqual(publishedSnapshot.version, '');
+const enrichedFromSnapshot = context.enrichEventsWithCourseOutlines_(
+  [outlineBaseItem],
+  { gradeName: '高二' },
+  { termKey: '二年級|2026-02-23' }
+);
+assert.equal(enrichedFromSnapshot[0].courseOutline.topic, '快照主題');
+assert.equal(enrichedFromSnapshot[0].outlineHash, 'snapshot-hash');
+assert.equal(
+  context.enrichEventsWithCourseOutlines_(
+    [outlineBaseItem],
+    { gradeName: '高一' },
+    { termKey: '一年級|2026-02-23' }
+  )[0].outlineHash,
+  undefined,
+  '其他年級不得套用高二課綱快照'
+);
+
+context.refreshAutoSyncTriggers_({
+  gradeName: '高一',
+  autoSyncEnabled: true,
+  autoSyncHours: [5],
+  notifySyncHour: 5
+});
+assert.equal(
+  projectTriggers.some(trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily'),
+  false,
+  '高一不得建立目前四份高二課綱的讀取觸發器'
+);
+context.refreshAutoSyncTriggers_({
+  gradeName: '高二',
+  autoSyncEnabled: true,
+  autoSyncHours: [5],
+  notifySyncHour: 5
+});
+assert.equal(
+  projectTriggers.filter(trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily').length,
+  1,
+  '高二應建立一個獨立的每日課綱更新觸發器'
+);
+
+const firstFailureRun = {
+  status: 'running',
+  attempt: 1,
+  incidentId: 'outline-incident',
+  runId: 'outline-run-1',
+  startedAt: new Date().toISOString(),
+  watchdogTriggerId: '',
+  retryTriggerId: '',
+  failureNotifiedAt: '',
+  notificationPending: false,
+  lastError: '',
+  lastSuccessAt: ''
+};
+context.saveCourseOutlineState_(firstFailureRun);
+context.handleCourseOutlineRefreshFailure_(firstFailureRun, new Error('第一次失敗'));
+let outlineFailureState = context.loadCourseOutlineState_();
+assert.equal(outlineFailureState.status, 'retry_pending');
+assert.equal(sentOutlineFailureEmails, 0, '第一次課綱失敗不得寄信');
+assert.equal(
+  projectTriggers.filter(trigger => trigger.getHandlerFunction() === 'retryCourseOutlineRefresh').length,
+  1,
+  '第一次失敗應只建立一次重試'
+);
+
+const secondFailureRun = Object.assign({}, outlineFailureState, {
+  status: 'running',
+  attempt: 2,
+  runId: 'outline-run-2',
+  startedAt: new Date().toISOString(),
+  retryTriggerId: ''
+});
+context.saveCourseOutlineState_(secondFailureRun);
+context.handleCourseOutlineRefreshFailure_(secondFailureRun, new Error('第二次失敗'));
+outlineFailureState = context.loadCourseOutlineState_();
+assert.equal(outlineFailureState.status, 'failed');
+assert.equal(sentOutlineFailureEmails, 1, '第二次課綱失敗應寄信一次');
+assert.notEqual(outlineFailureState.failureNotifiedAt, '');
+
+const repeatedFailureRun = Object.assign({}, outlineFailureState, {
+  status: 'running',
+  attempt: 2,
+  runId: 'outline-run-3',
+  startedAt: new Date().toISOString()
+});
+context.saveCourseOutlineState_(repeatedFailureRun);
+context.handleCourseOutlineRefreshFailure_(repeatedFailureRun, new Error('相同事故再次失敗'));
+assert.equal(sentOutlineFailureEmails, 1, '相同課綱事故不得重複寄信');
 
 const fixtures = [
   { grade: '高一', file: '/tmp/tschool-requirements-grade1.json' },

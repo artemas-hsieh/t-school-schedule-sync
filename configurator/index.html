@@ -17,6 +17,9 @@
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div class="high-load-test-banner" id="high-load-test-banner" role="status" hidden>
+    測試版：Code.gs 會包含「行程同步 → 高負載測試」。
+  </div>
 
   <div class="kinetic-cursor" id="kinetic-cursor" aria-hidden="true">
     <span class="cursor-lens"></span>
@@ -51,7 +54,10 @@
           <h1 id="page-title"><span>T-SCHOOL</span><span>Schedule Sync</span></h1>
           <p class="intro">省下常常找課表、看課網消耗的時間與精力！</p>
           <ul class="hero-benefits" aria-label="行程同步功能">
-            <li>把你的課程與活動定時同步到行事曆上</li>
+            <li>
+              <span class="benefit-desktop">把你的課程與活動定時同步到行事曆上</span>
+              <span class="benefit-mobile">定時同步課程和活動</span>
+            </li>
             <li>告訴你每堂課要幹嘛</li>
             <li>即時通知你新調課</li>
           </ul>
@@ -170,7 +176,7 @@
             <header class="step-heading step-heading-component">
               <div>
                 <h2 id="step-3-title">設定通知偏好</h2>
-                <p id="notification-selection-count">已選 0 門課 ・ 0 項活動</p>
+                <p id="notification-selection-count">用來收調課、同步狀態通知</p>
               </div>
               <span class="step-position" aria-label="步驟 3，共 5 步">步驟 3/5</span>
             </header>
@@ -182,14 +188,14 @@
                   <input id="notification-email" name="notificationEmail" type="email" placeholder="用來收調課、同步狀態通知" aria-describedby="notification-email-hint">
                   <span class="field-icon" aria-hidden="true"></span>
                 </div>
-                <span class="field-hint" id="notification-email-hint" aria-live="polite">通知的原理：透過程式自動「用自己的信箱寄信給自己」</span>
+                <span class="field-hint" id="notification-email-hint" aria-live="polite">請填寫校內信箱（通知原理是透過程式自動「用自己的信箱寄信給自己）</span>
               </label>
 
-              <label class="field" data-cursor-label="選擇時段">
-                <span>通知時間</span>
-                <select id="notify-hour" name="notifyHour"></select>
+              <div class="field notification-time-field">
+                <span id="notification-time-label">通知時間</span>
+                <div class="notification-time-list" id="notify-hours-list"></div>
                 <span class="field-hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動</span>
-              </label>
+              </div>
             </div>
 
           </div>
@@ -203,7 +209,7 @@
             <header class="step-heading step-heading-component">
               <div>
                 <h2 id="step-4-title">檢查設定</h2>
-                <p>想更改可以點「↗」按鈕前往設定卡片</p>
+                <p>想修改可以點「↗」按鈕前往設定卡片</p>
               </div>
               <span class="step-position" aria-label="步驟 4，共 5 步">步驟 4/5</span>
             </header>
@@ -217,37 +223,36 @@
         </section>
 
         <section class="journey-step output-step" id="step-5" data-step="5" aria-labelledby="output-title">
-          <div class="step-card output-card">
-            <header class="step-heading output-heading">
+          <div class="step-card output-card control-panel-card">
+            <header class="step-heading output-heading step-heading-component">
               <div>
-                <h2 id="output-title">複製控制臺程式碼</h2>
-                <p>不需閱讀或修改程式碼，複製後依下方步驟安裝即可</p>
+                <h2 id="output-title">變出控制臺</h2>
+                <p>放心你不用看懂程式，只要跟著指引操作即可！（如果擔心有資安疑慮，可以將程式碼貼給 AI 檢查）</p>
               </div>
-              <button type="button" class="copy-button" id="copy-code" data-cursor-label="複製程式碼">複製程式碼</button>
+              <span class="step-position" aria-label="步驟 5，共 5 步">步驟 5/5</span>
             </header>
 
             <div class="code-window" id="code-window">
-              <div class="code-window-bar">
-                <span>Code.gs</span>
-                <button type="button" id="full-code-toggle" aria-expanded="false" aria-controls="generated-code" data-cursor-label="查看完整程式碼">查看完整程式碼</button>
-              </div>
               <textarea id="generated-code" spellcheck="false" readonly aria-label="產生的 Code.gs" data-cursor-mode="text" data-lenis-prevent></textarea>
+              <button type="button" class="copy-button" id="copy-code" data-cursor-label="複製程式碼" aria-live="polite">複製程式碼 ↵</button>
             </div>
 
             <section class="install-steps" aria-labelledby="steps-title">
-              <h3 id="steps-title">安裝步驟</h3>
-              <p class="steps-intro">先建立自己的控制臺，再安裝程式；不需要在試算表儲存格中輸入設定</p>
+              <h3 class="visually-hidden" id="steps-title">安裝步驟</h3>
               <ol class="steps-list">
-                <li><span class="step-num">1</span><span><strong>建立控制臺試算表</strong><small id="sheet-template-note">下載後上傳至 Google Drive；設定都在安裝完成後的側欄進行，不需要編輯儲存格。</small><a class="sheet-template-link" id="sheet-template-link" href="assets/t-school-control-panel-template.xlsx" download="t-school-control-panel-template.xlsx" data-cursor-label="下載控制臺範本">下載控制臺範本</a></span></li>
-                <li><span class="step-num">2</span><span><strong>安裝程式</strong><small>刪除範例內容，貼上已複製的 <button type="button" class="inline-code-button" id="copy-code-inline" data-cursor-label="複製程式碼"><code>Code.gs</code></button>，儲存後重新整理試算表</small></span></li>
-                <li><span class="step-num">3</span><span><strong>完成第一次同步</strong><small>點選「行程同步 → 開啟設定」，檢查選課後按「儲存並首次同步」</small></span></li>
-                <li><span class="step-num">4</span><span><strong>檢查專用日曆</strong><small>確認課程、時間與地點正確；後續設定都從同一個試算表選單調整</small></span></li>
+                <li>
+                  <div class="install-step-heading"><strong>建立控制臺試算表</strong><span>操作 1</span></div>
+                  <small>登入 <span id="output-email">！您未填寫收通知的 Email！</span> → 點擊<a class="sheet-template-link" id="sheet-template-link" href="https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy" target="_blank" rel="noopener" data-cursor-label="開啟模板連結">模板連結</a>並建立副本</small>
+                </li>
+                <li>
+                  <div class="install-step-heading"><strong>新增擴充功能</strong><span>操作 2</span></div>
+                  <small><button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製程式碼">複製程式碼</button> → 回試算表，點選「擴充功能 → Apps Script」→ <button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製並貼上程式碼">貼上程式碼</button></small>
+                </li>
+                <li>
+                  <div class="install-step-heading"><strong>根據試算表說明完成後續操作</strong><span>操作 3</span></div>
+                </li>
               </ol>
             </section>
-
-            <div class="output-actions">
-              <a class="calendar-link" href="https://calendar.google.com/" target="_blank" rel="noopener" data-cursor-label="開啟日曆">開啟 Google Calendar ↗</a>
-            </div>
           </div>
         </section>
       </form>
