@@ -1,6 +1,6 @@
 const DEFAULTS = {
   gradeName: '',
-  notificationEmail: '',
+  notificationEmail: '@tschool.tp.edu.tw',
   syncHours: [6],
   notifyHour: 6,
   notificationPreset: 'standard',
@@ -36,6 +36,10 @@ const LOCAL_SHEETS_TEMPLATE_URL = 'assets/t-school-control-panel-template.xlsx';
 const COURSE_SEARCH_ICON_URL = 'assets/icon-search.svg';
 const COURSE_SEARCH_CANCEL_ICON_URL = 'assets/icon-x.svg';
 const MAX_NOTIFY_HOURS = 4;
+const SCHOOL_EMAIL_DOMAIN = '@tschool.tp.edu.tw';
+const SCHOOL_EMAIL_PATTERN =
+  /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@tschool\.tp\.edu\.tw$/;
+const SCHOOL_EMAIL_HINT = '請輸入有效的校內 Email，格式比如「學號/教師名/職位/組織名@tschool.tp.edu.tw」';
 const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
   try {
     return new Intl.Collator('zh-Hant-u-co-stroke', {
@@ -66,8 +70,9 @@ const MOTION_CONFIG = Object.freeze({
   boundarySlowdownExponent: 1.8,
   boundaryMinimumFactor: 0.01,
   boundarySnapDistance: 1.5,
-  activationLineRatio: 0.34,
-  activationLineMax: 240,
+  focusLineRatio: 0.5,
+  focusSwitchHysteresisForward: 48,
+  focusSwitchHysteresisBackward: 96,
   homeEntryScrollDuration: 0.9,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
@@ -355,8 +360,8 @@ function renderSourceStatus() {
   if (state.sourceLoading) {
     elements.sourceStatus.dataset.state = 'loading';
     elements.sourceStatusTitle.textContent = '正在讀取課表';
-    elements.sourceStatusDetail.textContent = '確認目前年級與課程資料';
-    elements.sourceRefresh.disabled = true;
+    elements.sourceStatusDetail.textContent = '若等待過久，可重新讀取';
+    elements.sourceRefresh.disabled = !getCurrentGrade();
     return;
   }
 
@@ -409,27 +414,50 @@ function bindMobileOutputToggle() {
 function setupValidation() {
   elements.notificationEmail.addEventListener('input', validateNotificationEmail);
   elements.notificationEmail.addEventListener('blur', validateNotificationEmail);
+  elements.notificationEmail.addEventListener('click', positionEmailCaretBeforeDomain);
 }
 
 function validateNotificationEmail() {
   const value = elements.notificationEmail.value.trim();
   const field = document.getElementById('field-notification-email');
 
-  if (!value) {
+  if (isValidNotificationEmail(value)) {
     elements.notificationEmail.setCustomValidity('');
-    setFieldState(field, null, '通知的原理：透過程式自動「用自己的信箱寄信給自己」');
+    setFieldState(field, 'valid', '為了讓程式能存取課綱，請輸入校內 Email');
     return true;
   }
 
-  if (/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(value)) {
-    elements.notificationEmail.setCustomValidity('');
-    setFieldState(field, 'valid', '通知的原理：透過程式自動「用自己的信箱寄信給自己」');
-    return true;
-  }
-
-  elements.notificationEmail.setCustomValidity('請填入單一通知 Email');
-  setFieldState(field, 'invalid', '請填入單一 Email，不要使用逗號、分號或顯示名稱');
+  elements.notificationEmail.setCustomValidity(
+    '請輸入有效的校內 Email'
+  );
+  setFieldState(field, 'invalid', SCHOOL_EMAIL_HINT);
   return false;
+}
+
+function isValidNotificationEmail(value) {
+  return SCHOOL_EMAIL_PATTERN.test(String(value || '').trim());
+}
+
+function positionEmailCaretBeforeDomain() {
+  if (elements.notificationEmail.value !== SCHOOL_EMAIL_DOMAIN) {
+    return;
+  }
+
+  elements.notificationEmail.setSelectionRange(0, 0);
+}
+
+function focusEmailBeforeDomain() {
+  const value = elements.notificationEmail.value;
+  const domainStart = value.toLowerCase().lastIndexOf(SCHOOL_EMAIL_DOMAIN);
+  const atSign = value.indexOf('@');
+  const caretPosition = domainStart >= 0
+    ? domainStart
+    : atSign >= 0
+      ? atSign
+      : value.length;
+
+  elements.notificationEmail.focus({ preventScroll: true });
+  elements.notificationEmail.setSelectionRange(caretPosition, caretPosition);
 }
 
 function setFieldState(field, stateValue, hint) {
@@ -446,7 +474,11 @@ function setFieldState(field, stateValue, hint) {
   }
 
   if (input) {
-    input.toggleAttribute('aria-invalid', stateValue === 'invalid');
+    if (stateValue === 'invalid') {
+      input.setAttribute('aria-invalid', 'true');
+    } else {
+      input.removeAttribute('aria-invalid');
+    }
   }
 
   const hintElement = field.querySelector('.field-hint');
@@ -468,9 +500,9 @@ function renderNotifyHours(hours) {
 }
 
 function updateNotifyHourState() {
-  const hasEmail = Boolean(elements.notificationEmail.value.trim());
+  const hasValidEmail = isValidNotificationEmail(elements.notificationEmail.value);
   getNotifyHourSelects().forEach(select => {
-    select.title = hasEmail ? '' : '未填寫時會使用目前 Google 帳號的 Email';
+    select.title = hasValidEmail ? '' : '請先填寫有效的校內 Email';
   });
 }
 
@@ -733,7 +765,9 @@ function renderSelectionCounts() {
   const selectedActivities = activities.filter(item => isActivitySelected(item.title));
   const label = `已選 ${selected.length} 門課 ・ ${selectedActivities.length} 項活動`;
   elements.courseCount.textContent = label;
-  if (elements.notificationSelectionCount) elements.notificationSelectionCount.textContent = label;
+  if (elements.notificationSelectionCount) {
+    elements.notificationSelectionCount.textContent = '包含調課、同步狀態通知';
+  }
 }
 
 function getCurrentGrade() {
@@ -897,14 +931,14 @@ function initProgressiveBlurLayers() {
   const steps = Array.from(document.querySelectorAll('.journey-step'));
 
   steps.forEach(step => {
-    const createFog = (className, layerClassName) => {
+    const createFog = (className, layerClassName, layerCount = 5) => {
       if (step.querySelector(`:scope > .${className}`)) return;
 
       const fog = document.createElement('span');
       fog.className = className;
       fog.setAttribute('aria-hidden', 'true');
 
-      for (let index = 0; index < 5; index += 1) {
+      for (let index = 0; index < layerCount; index += 1) {
         const layer = document.createElement('span');
         layer.className = `${layerClassName} ${layerClassName}-${index + 1}`;
         fog.append(layer);
@@ -914,7 +948,7 @@ function initProgressiveBlurLayers() {
     };
 
     createFog('progressive-blur', 'progressive-blur-layer');
-    createFog('past-progressive-blur', 'past-progressive-blur-layer');
+    createFog('past-progressive-blur', 'past-progressive-blur-layer', 1);
   });
 
   if ('IntersectionObserver' in window) {
@@ -926,8 +960,8 @@ function initProgressiveBlurLayers() {
         entry.target.classList.toggle('is-blur-rendering-active', entry.isIntersecting);
       });
     }, {
-      // Keep the effect ready before it can enter the visible viewport.
-      rootMargin: '100% 0px'
+      // Prepare the effect half a viewport early without painting distant fog.
+      rootMargin: '50% 0px'
     });
 
     steps.forEach(step => observer.observe(step));
@@ -1228,6 +1262,7 @@ function initStepJourney() {
   let journeyGeometryDirty = true;
   let journeyGeometry = null;
   let activeSectionTransition = null;
+  let preserveActiveStepAfterLayout = false;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -1241,6 +1276,7 @@ function initStepJourney() {
     },
     3: {
       initial: 'Email 和通知時間都沒錯 ↵',
+      correction: '修正 Email ↵',
       confirmed: 'Email 和通知時間都沒錯 ↵'
     },
     4: {
@@ -1287,15 +1323,18 @@ function initStepJourney() {
     completionStates.set(stepNumber, nextState);
     button.textContent = labels[nextState];
     button.classList.toggle('is-review', nextState === 'review');
+    button.classList.toggle('is-correction', nextState === 'correction');
     button.classList.toggle('is-confirmed', nextState === 'confirmed');
     button.setAttribute('aria-pressed', String(nextState === 'confirmed'));
     button.dataset.cursorLabel = nextState === 'review'
       ? '再次確認選課'
-      : stepNumber === 2
-        ? '確認選課'
-        : stepNumber === 3
-          ? '確認通知設定'
-          : '產生安裝程式碼';
+      : nextState === 'correction'
+        ? '修正 Email'
+        : stepNumber === 2
+          ? '確認選課'
+          : stepNumber === 3
+            ? '確認通知設定'
+            : '產生安裝程式碼';
   }
 
   function activateCompletionButton(button) {
@@ -1312,8 +1351,9 @@ function initStepJourney() {
     }
 
     if (completedStep === 3 && !validateNotificationEmail()) {
+      setCompletionState(3, 'correction');
+      focusEmailBeforeDomain();
       elements.notificationEmail.reportValidity();
-      elements.notificationEmail.focus();
       return;
     }
 
@@ -1331,7 +1371,9 @@ function initStepJourney() {
       setCompletionState(2, 'initial');
       setCompletionState(4, 'initial');
     } else if (changedStep === 3) {
-      setCompletionState(3, 'initial');
+      if (completionStates.get(3) !== 'correction') {
+        setCompletionState(3, 'initial');
+      }
       setCompletionState(4, 'initial');
     } else {
       return;
@@ -1548,6 +1590,11 @@ function initStepJourney() {
       return;
     }
 
+    if (preserveActiveStepAfterLayout) {
+      setActiveStep(Math.min(activeStep, maxUnlockedStep));
+      return;
+    }
+
     if (Number.isFinite(maximumScrollY) && window.scrollY >= maximumScrollY - 1) {
       setActiveStep(maxUnlockedStep);
       return;
@@ -1561,25 +1608,41 @@ function initStepJourney() {
       return;
     }
 
-    const targetY = Math.min(
-      MOTION_CONFIG.activationLineMax,
-      window.innerHeight * MOTION_CONFIG.activationLineRatio
-    );
-    let closestStep = 1;
+    const focusLineY = window.scrollY + window.innerHeight * MOTION_CONFIG.focusLineRatio;
+    let closestStep = activeStep;
+    let closestDistance = Number.POSITIVE_INFINITY;
 
-    steps.forEach((step, index) => {
-      const number = Number(step.dataset.step);
+    geometry.stepFocusRanges.forEach((range, index) => {
+      const number = index + 1;
 
       if (number > maxUnlockedStep) {
         return;
       }
 
-      if (geometry.stepTops[index] - window.scrollY <= targetY) {
-        closestStep = Math.max(closestStep, number);
+      const distance = getDistanceToVerticalRange(focusLineY, range);
+      if (distance < closestDistance) {
+        closestStep = number;
+        closestDistance = distance;
       }
     });
 
-    setActiveStep(closestStep);
+    if (closestStep === activeStep) {
+      setActiveStep(activeStep);
+      return;
+    }
+
+    const activeRange = geometry.stepFocusRanges[activeStep - 1];
+    const activeDistance = getDistanceToVerticalRange(focusLineY, activeRange);
+    const maximumHysteresis = closestStep < activeStep
+      ? MOTION_CONFIG.focusSwitchHysteresisBackward
+      : MOTION_CONFIG.focusSwitchHysteresisForward;
+    const hysteresis = Math.min(maximumHysteresis, window.innerHeight * 0.09);
+
+    setActiveStep(
+      closestDistance + hysteresis < activeDistance
+        ? closestStep
+        : activeStep
+    );
   }
 
   function getJourneyGeometry() {
@@ -1589,6 +1652,14 @@ function initStepJourney() {
 
     const documentMaximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     const stepTops = steps.map(getDocumentLayoutTop);
+    const stepFocusRanges = steps.map(step => {
+      const card = step.querySelector(':scope > .step-card') || step;
+      const top = getDocumentLayoutTop(card);
+      return {
+        top,
+        bottom: top + card.offsetHeight
+      };
+    });
     const wizardTop = wizard ? getDocumentLayoutTop(wizard) : Number.POSITIVE_INFINITY;
     let maximumScrollY = documentMaximum;
 
@@ -1622,6 +1693,7 @@ function initStepJourney() {
 
     journeyGeometry = {
       maximumScrollY,
+      stepFocusRanges,
       stepTops,
       wizardTop
     };
@@ -1647,6 +1719,22 @@ function initStepJourney() {
     }
 
     return top;
+  }
+
+  function getDistanceToVerticalRange(position, range) {
+    if (!range) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    if (position < range.top) {
+      return range.top - position;
+    }
+
+    if (position > range.bottom) {
+      return position - range.bottom;
+    }
+
+    return 0;
   }
 
   function getBoundarySlowdownDistance() {
@@ -1692,6 +1780,10 @@ function initStepJourney() {
   function handleBoundaryVirtualScroll(payload) {
     const event = payload?.event;
     const deltaY = Number(payload?.deltaY) || 0;
+
+    if (deltaY !== 0) {
+      preserveActiveStepAfterLayout = false;
+    }
 
     if (automatedTargetStep) {
       if (event?.cancelable) event.preventDefault();
@@ -1746,7 +1838,11 @@ function initStepJourney() {
     return true;
   }
 
-  function requestUpdate() {
+  function requestUpdate(options = {}) {
+    if (options.preserveActiveStep === true) {
+      preserveActiveStepAfterLayout = true;
+    }
+
     if (!frameRequested) {
       frameRequested = true;
       requestAnimationFrame(updateFromScroll);
@@ -1875,18 +1971,30 @@ function initStepJourney() {
 
   window.tschoolBoundaryVirtualScroll = handleBoundaryVirtualScroll;
 
+  const releaseLayoutFocusOnScrollInput = () => {
+    preserveActiveStepAfterLayout = false;
+  };
+  const releaseLayoutFocusOnScrollKey = event => {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+      preserveActiveStepAfterLayout = false;
+    }
+  };
+
+  window.addEventListener('wheel', releaseLayoutFocusOnScrollInput, { passive: true });
+  window.addEventListener('touchmove', releaseLayoutFocusOnScrollInput, { passive: true });
+  window.addEventListener('keydown', releaseLayoutFocusOnScrollKey, { passive: true });
   window.addEventListener('scroll', requestUpdate, { passive: true });
   window.addEventListener('resize', () => {
     window.tschoolLenis?.resize?.();
     invalidateJourneyGeometry();
     clampToCurrentBoundary({ immediate: true });
-    requestUpdate();
+    requestUpdate({ preserveActiveStep: true });
   });
 
   if ('ResizeObserver' in window) {
     const resizeObserver = new ResizeObserver(() => {
       invalidateJourneyGeometry();
-      requestUpdate();
+      requestUpdate({ preserveActiveStep: true });
     });
     resizeObserver.observe(document.body);
   }
@@ -1935,6 +2043,7 @@ function renderSettingsSummary() {
   const selectedItems = selected.concat(selectedActivities).sort(compareByTraditionalStroke);
   const unselectedItems = unselectedCourses.concat(unselectedActivities).sort(compareByTraditionalStroke);
   const email = elements.notificationEmail.value.trim();
+  const hasValidEmail = isValidNotificationEmail(email);
   const notificationTimes = getSelectedNotifyHours()
     .map(hour => `${pad2(hour)}:00`);
   const grade = getCurrentGrade();
@@ -1948,7 +2057,7 @@ function renderSettingsSummary() {
       ['你「沒」選的課程與活動有：', unselectedItems.length ? unselectedItems : '沒有']
     ], 2, '修改課程與活動'),
     renderSummaryRow([
-      ['你想用來收通知的 Email 是：', [email || '未填寫'], email ? '' : 'is-error'],
+      ['你想用來收通知的 Email 是：', [email || '未填寫'], hasValidEmail ? '' : 'is-error'],
       ['你想收到通知的時間是：', notificationTimes]
     ], 3, '修改通知偏好')
   ].join('');

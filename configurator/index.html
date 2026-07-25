@@ -176,7 +176,7 @@
             <header class="step-heading step-heading-component">
               <div>
                 <h2 id="step-3-title">設定通知偏好</h2>
-                <p id="notification-selection-count">用來收調課、同步狀態通知</p>
+                <p id="notification-selection-count">包含調課、同步狀態通知</p>
               </div>
               <span class="step-position" aria-label="步驟 3，共 5 步">步驟 3/5</span>
             </header>
@@ -185,10 +185,10 @@
               <label class="field validated-field" id="field-notification-email" data-cursor-mode="text">
                 <span>收通知的 Email</span>
                 <div class="input-wrap">
-                  <input id="notification-email" name="notificationEmail" type="email" placeholder="用來收調課、同步狀態通知" aria-describedby="notification-email-hint">
+                  <input id="notification-email" name="notificationEmail" type="text" inputmode="email" autocomplete="email" required pattern="[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@tschool\.tp\.edu\.tw" maxlength="254" aria-describedby="notification-email-hint">
                   <span class="field-icon" aria-hidden="true"></span>
                 </div>
-                <span class="field-hint" id="notification-email-hint" aria-live="polite">請填寫校內信箱（通知原理是透過程式自動「用自己的信箱寄信給自己）</span>
+                <span class="field-hint" id="notification-email-hint" aria-live="polite">為了讓程式能存取課綱，請輸入校內 Email</span>
               </label>
 
               <div class="field notification-time-field">
@@ -242,14 +242,16 @@
               <ol class="steps-list">
                 <li>
                   <div class="install-step-heading"><strong>建立控制臺試算表</strong><span>操作 1</span></div>
-                  <small>登入 <span id="output-email">！您未填寫收通知的 Email！</span> → 點擊<a class="sheet-template-link" id="sheet-template-link" href="https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy" target="_blank" rel="noopener" data-cursor-label="開啟模板連結">模板連結</a>並建立副本</small>
+                  <small>登入 <span id="output-email">！您未填寫收通知的 Email！</span> → 點擊 <a class="sheet-template-link" id="sheet-template-link" href="https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy" target="_blank" rel="noopener" data-cursor-label="開啟模板連結">模板連結</a> 並建立副本</small>
                 </li>
                 <li>
                   <div class="install-step-heading"><strong>新增擴充功能</strong><span>操作 2</span></div>
-                  <small><button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製程式碼">複製程式碼</button> → 回試算表，點選「擴充功能 → Apps Script」→ <button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製並貼上程式碼">貼上程式碼</button></small>
+                  <small>複製<button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製程式碼" aria-label="複製程式碼">程式碼</button> → 回試算表，點選「擴充功能 → Apps Script」→ 貼上<button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製並貼上程式碼" aria-label="複製程式碼以便貼上">程式碼</button> → 按下 Ctrl/Cmd + S 儲存程式</small>
+                  <img class="apps-script-guide-image" src="assets/google-sheets-apps-script-menu.png" alt="在 Google 試算表的「擴充功能」選單中選擇「Apps Script」">
                 </li>
                 <li>
-                  <div class="install-step-heading"><strong>根據試算表說明完成後續操作</strong><span>操作 3</span></div>
+                  <div class="install-step-heading"><strong>完成第一次同步設定</strong><span>操作 3</span></div>
+                  <small>回試算表 → 跟著試算表指引完成後續操作</small>
                 </li>
               </ol>
             </section>
