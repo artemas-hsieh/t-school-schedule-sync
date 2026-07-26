@@ -3,18 +3,15 @@ const DEFAULTS = {
   notificationEmail: '@tschool.tp.edu.tw',
   syncHours: [6],
   notifyHour: 6,
-  notificationPreset: 'standard',
-  customNotification: [
-    '{type}｜{course}',
-    '原：{oldDate} {oldPeriod} {oldTime} {oldLocation}',
-    '新：{newDate} {newPeriod} {newTime} {newLocation}'
-  ].join('\n'),
   descriptionPreset: 'standard',
   customDescription: [
-    '第 {week} 週｜星期{weekday}｜第 {period} 節',
-    '時間：{startTime}–{endTime}',
-    '地點：{location}',
-    '課表更新：{sourceUpdatedAt}'
+    '第 {week} 週 / 週{weekday} / 第 {period} 節',
+    '',
+    '**# 單元主題**',
+    '{topic}',
+    '',
+    '**# 課程內容**',
+    '{content}'
   ].join('\n'),
   reminderMode: 'none',
   reminderMinutes: 10,
@@ -55,25 +52,23 @@ const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
 })();
 
 // Journey tuning: each completed section reveals the next one in the vertical narrative.
-// Scroll feel: raise lerp/multipliers for a faster response; lower them for a softer glide.
-// Boundary feel: distance starts the slowdown, exponent shapes its curve, and
-// minimumFactor keeps the last part moving before it settles exactly on the limit.
+// Scroll feel: duration controls how long each full wheel delta takes to settle;
+// multipliers retain the input distance while adjusting its overall scale.
+// Locked-step boundaries cap the final target without damping repeated input.
 const MOTION_CONFIG = Object.freeze({
   sectionTransitionDuration: 1,
-  scrollLerpDesktop: 0.2,
+  scrollDuration: 1,
   scrollLerpTouch: 0.2,
   scrollWheelMultiplier: 1,
   scrollTouchMultiplier: 0.9,
   scrollTouchInertiaExponent: 1.35,
-  boundarySlowdownDistanceDesktop: 200,
-  boundarySlowdownDistanceMobile: 96,
-  boundarySlowdownExponent: 1.8,
-  boundaryMinimumFactor: 0.01,
+  boundarySettleDuration: 1,
   boundarySnapDistance: 1.5,
   focusLineRatio: 0.5,
   focusSwitchHysteresisForward: 48,
   focusSwitchHysteresisBackward: 96,
   homeEntryScrollDuration: 0.9,
+  footerReturnScrollDuration: 1.8,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
   heroDesktopPaperTravelRatio: 0.06,
@@ -766,7 +761,7 @@ function renderSelectionCounts() {
   const label = `已選 ${selected.length} 門課 ・ ${selectedActivities.length} 項活動`;
   elements.courseCount.textContent = label;
   if (elements.notificationSelectionCount) {
-    elements.notificationSelectionCount.textContent = '包含調課、同步狀態通知';
+    elements.notificationSelectionCount.textContent = '包含行程調整、同步狀態通知';
   }
 }
 
@@ -792,7 +787,9 @@ function isHighLoadTestGenerationEnabled() {
 
 function getSettings() {
   const autoSyncHours = getSelectedNotifyHours();
-  const notifyHour = autoSyncHours[0] ?? DEFAULTS.notifyHour;
+  const notifyHour = autoSyncHours.length
+    ? autoSyncHours[autoSyncHours.length - 1]
+    : DEFAULTS.notifyHour;
 
   const summary = state.sourceSummary;
   const activityTitles = summary ? summary.catalog.activities.map(item => item.title) : [];
@@ -814,8 +811,6 @@ function getSettings() {
     selectedCourses: Array.from(getSelectedCourses()).sort((a, b) =>
       a.localeCompare(b, 'zh-Hant')
     ),
-    notificationPreset: DEFAULTS.notificationPreset,
-    customNotification: DEFAULTS.customNotification,
     descriptionPreset: DEFAULTS.descriptionPreset,
     customDescription: DEFAULTS.customDescription,
     reminderMode: DEFAULTS.reminderMode,
@@ -883,6 +878,21 @@ function updateCopyCursorSuccess(trigger) {
   }));
 }
 
+function playCopyKeyboardPressFeedback() {
+  const button = elements.copyCode;
+
+  if (!button) return;
+
+  button.classList.remove('is-keyboard-pressing');
+  void button.offsetWidth;
+  button.classList.add('is-keyboard-pressing');
+  button.addEventListener('animationend', event => {
+    if (event.animationName === 'copy-button-keyboard-press') {
+      button.classList.remove('is-keyboard-pressing');
+    }
+  }, { once: true });
+}
+
 async function copyGeneratedCode(event) {
   if (!state.sourceSummary || !validateNotificationEmail()) {
     elements.notificationEmail.reportValidity();
@@ -900,8 +910,8 @@ async function copyGeneratedCode(event) {
   }
 
   elements.copyCode.classList.add('is-copied');
-  elements.copyCode.textContent = '複製完成！';
-  elements.copyCode.setAttribute('aria-label', '程式碼已複製，再次按下可重新複製');
+  elements.copyCode.textContent = '再次複製 ↵';
+  elements.copyCode.setAttribute('aria-label', '程式碼已複製，再次複製');
   updateCopyCursorSuccess(trigger);
 }
 
@@ -920,11 +930,36 @@ function showToast(message) {
 
 function initVisualExperience() {
   initSmoothScroll();
+  initFooterReturn();
   initHeroScroll();
   initProgressiveBlurLayers();
   initStepJourney();
   initCodeDisclosure();
   initKineticCursor();
+}
+
+function initFooterReturn() {
+  const returnButton = document.querySelector('.site-footer-top');
+
+  if (!returnButton) {
+    return;
+  }
+
+  returnButton.addEventListener('click', event => {
+    event.preventDefault();
+
+    if (window.tschoolLenis && smoothScrollEnabled()) {
+      window.tschoolLenis.scrollTo(0, {
+        duration: MOTION_CONFIG.footerReturnScrollDuration
+      });
+      return;
+    }
+
+    window.scrollTo({
+      top: 0,
+      behavior: smoothScrollEnabled() ? 'smooth' : 'auto'
+    });
+  });
 }
 
 function initProgressiveBlurLayers() {
@@ -978,7 +1013,7 @@ function initSmoothScroll() {
   const touchInput = window.matchMedia('(pointer: coarse)').matches;
 
   const lenis = new window.Lenis({
-    lerp: touchInput ? MOTION_CONFIG.scrollLerpTouch : MOTION_CONFIG.scrollLerpDesktop,
+    duration: MOTION_CONFIG.scrollDuration,
     smoothWheel: true,
     wheelMultiplier: MOTION_CONFIG.scrollWheelMultiplier,
     touchMultiplier: MOTION_CONFIG.scrollTouchMultiplier,
@@ -1258,6 +1293,11 @@ function initStepJourney() {
   let renderedUnlockedStep = 0;
   let frameRequested = false;
   let automatedTargetStep = 0;
+  let navigationTargetStep = 0;
+  let navigationFocusReleaseTimer = 0;
+  // Lenis can briefly rebound while settling. Keep focus moving with the
+  // user's latest scroll intent so adjacent steps do not trade focus.
+  let focusInputDirection = 0;
   let compositionActive = false;
   let journeyGeometryDirty = true;
   let journeyGeometry = null;
@@ -1433,6 +1473,22 @@ function initStepJourney() {
     window.setTimeout(() => heading.focus({ preventScroll: true }), duration);
   }
 
+  function clearNavigationFocusLock(options = {}) {
+    const targetStep = navigationTargetStep;
+
+    if (navigationFocusReleaseTimer) {
+      clearTimeout(navigationFocusReleaseTimer);
+      navigationFocusReleaseTimer = 0;
+    }
+
+    navigationTargetStep = 0;
+
+    if (options.preserveTarget === true && targetStep) {
+      setActiveStep(Math.min(targetStep, maxUnlockedStep));
+      requestUpdate({ preserveActiveStep: true });
+    }
+  }
+
   function scrollToStep(stepNumber, options) {
     if (stepNumber < 1 || stepNumber > maxUnlockedStep) {
       return;
@@ -1451,9 +1507,21 @@ function initStepJourney() {
       clearActiveSectionTransition({ requestUpdate: false });
     }
 
+    clearNavigationFocusLock();
+    const shouldLockFocus = options?.lockFocusDuringScroll === true;
+
+    if (shouldLockFocus) {
+      navigationTargetStep = stepNumber;
+    }
+
+    if (options?.preserveTransition !== true) {
+      focusInputDirection = 0;
+    }
     resetScrollMomentum();
     setActiveStep(stepNumber);
+    invalidateJourneyGeometry();
     const scrollTarget = getStepScrollTarget(target, stepNumber);
+    const focusDelay = smoothScrollEnabled() ? duration * 1000 : 0;
 
     if (window.tschoolLenis && smoothScrollEnabled()) {
       window.tschoolLenis.scrollTo(scrollTarget, { duration });
@@ -1464,7 +1532,15 @@ function initStepJourney() {
       });
     }
 
-    focusStepHeading(target, smoothScrollEnabled() ? duration * 1000 : 0);
+    focusStepHeading(target, focusDelay);
+
+    if (shouldLockFocus) {
+      navigationFocusReleaseTimer = window.setTimeout(() => {
+        if (navigationTargetStep === stepNumber) {
+          clearNavigationFocusLock({ preserveTarget: true });
+        }
+      }, focusDelay + 80);
+    }
   }
 
   function enterFirstStepWithPageScroll() {
@@ -1538,6 +1614,7 @@ function initStepJourney() {
     const target = steps[stepNumber - 1];
     const previous = steps[activeStep - 1];
     const shouldAnimatePastFog = Boolean(previous) && !prefersReducedMotion();
+    focusInputDirection = Math.sign(stepNumber - activeStep);
     automatedTargetStep = stepNumber;
 
     if (shouldAnimatePastFog) {
@@ -1590,12 +1667,21 @@ function initStepJourney() {
       return;
     }
 
+    if (navigationTargetStep) {
+      setActiveStep(navigationTargetStep);
+      return;
+    }
+
     if (preserveActiveStepAfterLayout) {
       setActiveStep(Math.min(activeStep, maxUnlockedStep));
       return;
     }
 
-    if (Number.isFinite(maximumScrollY) && window.scrollY >= maximumScrollY - 1) {
+    if (
+      focusInputDirection >= 0 &&
+      Number.isFinite(maximumScrollY) &&
+      window.scrollY >= maximumScrollY - 1
+    ) {
       setActiveStep(maxUnlockedStep);
       return;
     }
@@ -1637,6 +1723,14 @@ function initStepJourney() {
       ? MOTION_CONFIG.focusSwitchHysteresisBackward
       : MOTION_CONFIG.focusSwitchHysteresisForward;
     const hysteresis = Math.min(maximumHysteresis, window.innerHeight * 0.09);
+    const conflictsWithInputDirection =
+      (focusInputDirection > 0 && closestStep < activeStep) ||
+      (focusInputDirection < 0 && closestStep > activeStep);
+
+    if (conflictsWithInputDirection) {
+      setActiveStep(activeStep);
+      return;
+    }
 
     setActiveStep(
       closestDistance + hysteresis < activeDistance
@@ -1737,22 +1831,32 @@ function initStepJourney() {
     return 0;
   }
 
-  function getBoundarySlowdownDistance() {
-    return window.matchMedia('(max-width: 600px)').matches
-      ? MOTION_CONFIG.boundarySlowdownDistanceMobile
-      : MOTION_CONFIG.boundarySlowdownDistanceDesktop;
-  }
-
   function resetScrollMomentum() {
     const lenis = window.tschoolLenis;
     if (!lenis || !Number.isFinite(lenis.animatedScroll)) return;
     lenis.scrollTo(lenis.animatedScroll, { immediate: true, force: true });
   }
 
-  function getConfiguredScrollLerp() {
-    return window.matchMedia('(pointer: coarse)').matches
-      ? MOTION_CONFIG.scrollLerpTouch
-      : MOTION_CONFIG.scrollLerpDesktop;
+  function resetOpposingScrollMomentum(lenis, deltaY) {
+    if (
+      !lenis ||
+      !Number.isFinite(lenis.targetScroll) ||
+      !Number.isFinite(lenis.animatedScroll)
+    ) {
+      return;
+    }
+
+    const pendingDistance = lenis.targetScroll - lenis.animatedScroll;
+    const hasOpposingMomentum =
+      Math.abs(pendingDistance) > MOTION_CONFIG.boundarySnapDistance &&
+      Math.sign(pendingDistance) !== Math.sign(deltaY);
+
+    if (hasOpposingMomentum) {
+      lenis.scrollTo(lenis.animatedScroll, {
+        immediate: true,
+        force: true
+      });
+    }
   }
 
   function clampToCurrentBoundary(options = {}, maximumScrollY = getMaximumScrollY()) {
@@ -1766,7 +1870,8 @@ function initStepJourney() {
 
       lenis.scrollTo(maximumScrollY, {
         immediate: options.immediate === true,
-        lerp: getConfiguredScrollLerp(),
+        duration: MOTION_CONFIG.boundarySettleDuration,
+        programmatic: false,
         force: true
       });
       return true;
@@ -1782,6 +1887,7 @@ function initStepJourney() {
     const deltaY = Number(payload?.deltaY) || 0;
 
     if (deltaY !== 0) {
+      focusInputDirection = Math.sign(deltaY);
       preserveActiveStepAfterLayout = false;
     }
 
@@ -1795,20 +1901,29 @@ function initStepJourney() {
     }
 
     const maximumScrollY = getMaximumScrollY();
-    if (!Number.isFinite(maximumScrollY)) {
+    const lenis = window.tschoolLenis;
+
+    if (!lenis || !Number.isFinite(maximumScrollY)) {
       return true;
     }
 
-    const lenis = window.tschoolLenis;
+    resetOpposingScrollMomentum(lenis, deltaY);
+
+    // Once every step is unlocked there is no card-specific boundary. Lenis'
+    // native document limit is the only bottom boundary and already prevents
+    // overscroll without introducing a second settling animation.
+    if (deltaY < 0 || maxUnlockedStep >= steps.length) {
+      return true;
+    }
+
     const currentTarget = Number.isFinite(lenis?.targetScroll) ? lenis.targetScroll : window.scrollY;
-    const boundary = deltaY > 0 ? maximumScrollY : 0;
-    const remaining = deltaY > 0 ? boundary - currentTarget : currentTarget - boundary;
-    const slowdownDistance = getBoundarySlowdownDistance();
+    const remaining = maximumScrollY - currentTarget;
 
     function settleAtBoundary() {
       if (event?.cancelable) event.preventDefault();
-      lenis?.scrollTo(boundary, {
-        lerp: getConfiguredScrollLerp(),
+      lenis.scrollTo(maximumScrollY, {
+        duration: MOTION_CONFIG.boundarySettleDuration,
+        programmatic: false,
         force: true
       });
       return false;
@@ -1818,23 +1933,12 @@ function initStepJourney() {
       return settleAtBoundary();
     }
 
-    let dampingFactor = 1;
-
-    if (remaining < slowdownDistance) {
-      const normalizedDistance = clamp(remaining / slowdownDistance, 0, 1);
-      const shapedDistance = Math.pow(normalizedDistance, MOTION_CONFIG.boundarySlowdownExponent);
-      const smoothDistance = shapedDistance * shapedDistance * (3 - 2 * shapedDistance);
-      dampingFactor = MOTION_CONFIG.boundaryMinimumFactor +
-        (1 - MOTION_CONFIG.boundaryMinimumFactor) * smoothDistance;
-    }
-
-    const dampedDelta = Math.abs(deltaY) * dampingFactor;
-
-    if (dampedDelta >= remaining - MOTION_CONFIG.boundarySnapDistance) {
+    if (deltaY >= remaining - MOTION_CONFIG.boundarySnapDistance) {
       return settleAtBoundary();
     }
 
-    payload.deltaY = Math.sign(deltaY) * dampedDelta;
+    // Leave payload.deltaY untouched: Lenis retains the full final distance and
+    // its duration/easing only stretches the time needed to reach that target.
     return true;
   }
 
@@ -1855,11 +1959,15 @@ function initStepJourney() {
     const completionButton = event.target.closest('[data-complete-step]');
 
     if (navigationButton && !navigationButton.disabled) {
-      scrollToStep(Number(navigationButton.dataset.stepTarget));
+      scrollToStep(Number(navigationButton.dataset.stepTarget), {
+        lockFocusDuringScroll: true
+      });
       if (elements.stageMenu?.contains(navigationButton)) setStageMenuOpen(false, false);
     }
     if (editButton) {
-      scrollToStep(Number(editButton.dataset.editStep));
+      scrollToStep(Number(editButton.dataset.editStep), {
+        lockFocusDuringScroll: true
+      });
     }
 
     if (completionButton) {
@@ -1928,6 +2036,13 @@ function initStepJourney() {
 
     if (interactiveTarget) return;
 
+    if (activeStep === 5 && elements.copyCode && !elements.copyCode.disabled) {
+      event.preventDefault();
+      playCopyKeyboardPressFeedback();
+      elements.copyCode.click();
+      return;
+    }
+
     const completionButton = steps[activeStep - 1]?.querySelector('[data-complete-step]');
     if (!completionButton || completionButton.disabled) {
       return;
@@ -1943,6 +2058,8 @@ function initStepJourney() {
 
   document.addEventListener('tschool:grade-selection-start', () => {
     clearActiveSectionTransition({ requestUpdate: false });
+    clearNavigationFocusLock();
+    focusInputDirection = 0;
     resetScrollMomentum();
     automatedTargetStep = 0;
     maxUnlockedStep = 1;
@@ -1971,11 +2088,22 @@ function initStepJourney() {
 
   window.tschoolBoundaryVirtualScroll = handleBoundaryVirtualScroll;
 
-  const releaseLayoutFocusOnScrollInput = () => {
+  const releaseLayoutFocusOnScrollInput = event => {
+    clearNavigationFocusLock();
+    const deltaY = Number(event.deltaY);
+    if (Number.isFinite(deltaY) && deltaY !== 0) {
+      focusInputDirection = Math.sign(deltaY);
+    }
     preserveActiveStepAfterLayout = false;
   };
   const releaseLayoutFocusOnScrollKey = event => {
     if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+      clearNavigationFocusLock();
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
+        focusInputDirection = -1;
+      } else {
+        focusInputDirection = 1;
+      }
       preserveActiveStepAfterLayout = false;
     }
   };
@@ -2054,7 +2182,7 @@ function renderSettingsSummary() {
     ], 1, '修改年級'),
     renderSummaryRow([
       ['你選的課程與活動有：', selectedItems.length ? selectedItems : '尚未選擇'],
-      ['你「沒」選的課程與活動有：', unselectedItems.length ? unselectedItems : '沒有']
+      ['你「沒」選的課程與活動有：', unselectedItems]
     ], 2, '修改課程與活動'),
     renderSummaryRow([
       ['你想用來收通知的 Email 是：', [email || '未填寫'], hasValidEmail ? '' : 'is-error'],

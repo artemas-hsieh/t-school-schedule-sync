@@ -4,8 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f4f7f2">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
   <title>T-SCHOOL Schedule Sync</title>
+  <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
+  <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
   <link id="app-stylesheet" rel="stylesheet">
   <script>
     (function () {
@@ -33,7 +35,10 @@
     </a>
     <div class="stage-menu" id="stage-menu">
       <button type="button" class="stage-menu-trigger" id="stage-menu-trigger" aria-label="設定階段" aria-expanded="false" aria-controls="stage-menu-panel" data-cursor-label="開啟階段選單">
-        <span class="stage-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="stage-menu-icon" aria-hidden="true">
+          <span class="material-symbols-outlined stage-menu-icon-menu">menu</span>
+          <span class="material-symbols-outlined stage-menu-icon-close">close</span>
+        </span>
       </button>
       <nav class="stage-menu-panel" id="stage-menu-panel" aria-label="設定階段" hidden>
         <ol>
@@ -59,7 +64,7 @@
               <span class="benefit-mobile">定時同步課程和活動</span>
             </li>
             <li>告訴你每堂課要幹嘛</li>
-            <li>即時通知你新調課</li>
+            <li>即時通知行程調整</li>
           </ul>
           <button type="button" class="start-button" id="start-config" data-cursor-label="開始設定">
             <span>開始設定 ↓</span>
@@ -94,9 +99,9 @@
               <span class="sync-complete">同步完成</span>
             </section>
 
-            <span class="transfer-tile tile-one" data-tile-index="0">實體課 [吉林基地]</span>
+            <span class="transfer-tile tile-one" data-tile-index="0">實體課 [吉林基地-協作坊]</span>
             <span class="transfer-tile tile-two" data-tile-index="1">線上課 [線上教室]</span>
-            <span class="transfer-tile tile-three" data-tile-index="2">活動 [吉林基地]</span>
+            <span class="transfer-tile tile-three" data-tile-index="2">活動 [弘道基地-未來教室]</span>
 
             <span class="hero-progressive-fog" aria-hidden="true">
               <i class="hero-fog-layer hero-fog-layer-1"></i>
@@ -176,7 +181,7 @@
             <header class="step-heading step-heading-component">
               <div>
                 <h2 id="step-3-title">設定通知偏好</h2>
-                <p id="notification-selection-count">包含調課、同步狀態通知</p>
+                <p id="notification-selection-count">包含行程調整、同步狀態通知</p>
               </div>
               <span class="step-position" aria-label="步驟 3，共 5 步">步驟 3/5</span>
             </header>
@@ -260,6 +265,22 @@
       </form>
     </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-content">
+      <div class="site-footer-copy">
+        <strong>T-SCHOOL Schedule Sync</strong>
+        <nav class="site-footer-links" aria-label="專案與聯絡資訊">
+          <a href="https://github.com/artemas-hsieh/t-school-schedule-sync" target="_blank" rel="noopener" data-cursor-label="開啟 GitHub repository">GitHub repository</a>
+          <a href="mailto:artemas.hsieh5473@gmail.com" data-cursor-label="撰寫 Email">Email</a>
+          <a href="https://www.instagram.com/artemas.hsieh/" target="_blank" rel="noopener" data-cursor-label="開啟 Instagram">Instagram</a>
+        </nav>
+      </div>
+      <a class="site-footer-top" href="#top" aria-label="回到頁首" data-cursor-label="回到頁首">
+        <span class="material-symbols-outlined" aria-hidden="true">arrow_upward</span>
+      </a>
+    </div>
+  </footer>
 
   <script>
     (function () {

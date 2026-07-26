@@ -15,22 +15,63 @@ require(path.join(root, 'configurator/code-template.js'));
 const sidebarHtml = global.TSCHOOL_SIDEBAR_HTML;
 const configuratorHtml = fs.readFileSync(path.join(root, 'configurator/index.html'), 'utf8');
 const configuratorAppSource = fs.readFileSync(path.join(root, 'configurator/app.js'), 'utf8');
+const emailTemplateManifestText = fs.readFileSync(
+  path.join(root, 'configurator/notification-email-templates.json'),
+  'utf8'
+);
+const emailTemplateManifest = JSON.parse(emailTemplateManifestText);
 const sidebarIds = Array.from(sidebarHtml.matchAll(/\sid="([^"]+)"/g), match => match[1]);
 
 assert.equal(new Set(sidebarIds).size, sidebarIds.length, 'Google Sheet 控制臺不應出現重複 id');
 assert.equal(sidebarHtml.includes('--primary-container'), false);
 assert.equal(sidebarHtml.includes('T-SCHOOL · Control'), false);
-assert.equal(sidebarHtml.includes('id="notification-preview"'), true);
+assert.equal(sidebarHtml.includes('id="notification-preview"'), false);
+assert.equal(sidebarHtml.includes('id="notification-preset"'), false);
+assert.equal(sidebarHtml.includes('id="custom-notification"'), false);
 assert.equal(sidebarHtml.includes('id="description-preview"'), true);
+const descriptionPresetMarkup = sidebarHtml.match(/<select id="description-preset">[\s\S]*?<\/select>/);
+assert.equal(Boolean(descriptionPresetMarkup), true);
+assert.equal(
+  descriptionPresetMarkup[0],
+  '<select id="description-preset"><option value="standard">標準</option><option value="custom">進階自訂</option></select>'
+);
+assert.equal(sidebarHtml.includes('**# 單元主題**'), true);
 assert.equal(sidebarHtml.includes('id="hours"'), false, '控制臺不應顯示與實際設定不一致的固定同步時段');
 assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
 assert.equal(sidebarHtml.includes('function pollSyncProgress()'), true);
+assert.equal(sidebarHtml.includes('id="term-transition" role="alert"'), true);
+assert.equal(sidebarHtml.includes('id="term-transition-action"'), true);
+assert.equal(sidebarHtml.includes('function updateActionAvailability()'), true);
 assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), true);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner" role="status" hidden'), true);
 assert.equal(configuratorAppSource.includes('const ENABLE_HIGH_LOAD_TEST_FEATURE = true;'), true);
+assert.equal(emailTemplateManifest.schemaVersion, 1);
+assert.deepEqual(
+  Object.keys(emailTemplateManifest.notifications).sort(),
+  [
+    'action_required',
+    'course_outline_failure',
+    'new_schedule_items',
+    'schedule_changes',
+    'setup_complete',
+    'sync_failure',
+    'sync_stopped',
+    'sync_success',
+    'term_transition'
+  ],
+  '所有通知都應只有一套標準 HTML 版型'
+);
+assert.equal(/<(script|iframe)\b/i.test(emailTemplateManifestText), false);
+assert.equal(emailTemplateManifestText.includes('。'), false);
+assert.equal(/border-left\s*:/i.test(emailTemplateManifestText), false);
+assert.equal(
+  emailTemplateManifestText.includes('這封信由你的行程同步控制臺自動寄出'),
+  true
+);
+assert.equal(emailTemplateManifestText.includes('課表異動'), false);
 assert.equal(
   configuratorAppSource.includes(".get(HIGH_LOAD_TEST_QUERY_PARAMETER) === '1'"),
   true,
@@ -48,8 +89,6 @@ const generatedCode = global.buildAppsScriptCode({
   includeActivities: true,
   excludedActivities: ['高一全校活動'],
   selectedCourses: ['公民'],
-  notificationPreset: 'standard',
-  customNotification: '{type}｜{course}',
   descriptionPreset: 'standard',
   customDescription: '{course}',
   reminderMode: 'none',
@@ -64,14 +103,30 @@ assert.equal(generatedCode.includes('COURSE_DICTIONARY'), false);
 assert.equal(generatedCode.includes('function previewSettingsImpactFromUi('), true);
 assert.equal(generatedCode.includes('function showSettingsSidebar('), true);
 assert.equal(generatedCode.includes('function getNotificationTemplate_('), true);
+assert.equal(generatedCode.includes('function buildEmailHtmlSafe_('), true);
+assert.equal(generatedCode.includes('NOTIFICATION_QUEUE_STORE'), true);
+assert.equal(generatedCode.includes('notification-email-templates.json'), true);
+assert.equal(
+  generatedCode.includes('這封信由你的 T-SCHOOL 行程同步控制臺自動寄出'),
+  false,
+  'Code.gs 不應內嵌信件 HTML'
+);
 assert.equal(generatedCode.includes('function getSyncProgressForUi('), true);
 assert.equal(generatedCode.includes('SYNC_PROGRESS_STORE'), true);
 assert.equal(generatedCode.includes('COURSE_OUTLINE_SOURCE_SETS_BY_GRADE'), true);
+assert.equal(
+  generatedCode.includes(
+    "const COURSE_OUTLINE_INDEX_SPREADSHEET_ID = '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY';"
+  ),
+  true
+);
+assert.equal(generatedCode.includes('function parseCourseOutlineSourceIndexValues_('), true);
 assert.equal(generatedCode.includes('function refreshCourseOutlinesDaily('), true);
 assert.equal(generatedCode.includes('function retryCourseOutlineRefresh('), true);
 assert.equal(generatedCode.includes('function watchCourseOutlineRefresh('), true);
-assert.equal(generatedCode.includes('function updateCalendarDescriptionOnly_('), true);
+assert.equal(generatedCode.includes('function updateCalendarOutlineFields_('), true);
 assert.equal(generatedCode.includes('const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;'), true);
+assert.equal(generatedCode.includes("const TERM_TRANSITION_NOTICE_HANDLER = 'retryTermTransitionNotice';"), true);
 assert.equal(
   generatedCode.includes('.nearMinute(0)'),
   false,
@@ -122,6 +177,10 @@ function formatDate(dateValue, pattern) {
     return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
   }
 
+  if (pattern === 'H') {
+    return String(Number(parts.hour));
+  }
+
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
@@ -137,6 +196,74 @@ const context = vm.createContext({
 });
 
 vm.runInContext(generatedCode, context);
+
+const parsedOutlineIndex = context.parseCourseOutlineSourceIndexValues_([
+  ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '備註', '課綱試算表連結'],
+  [
+    'TRUE',
+    '114-2-high2',
+    '114-2 高二—必修',
+    '高二',
+    '2026-01-01',
+    '2026-08-31',
+    '現行來源',
+    'https://docs.google.com/spreadsheets/d/index-required-sheet/edit?usp=sharing'
+  ],
+  [
+    true,
+    '114-2-high2',
+    '114-2 高二—學科選修',
+    '高二',
+    '2026-01-01',
+    '2026-08-31',
+    '',
+    'https://docs.google.com/spreadsheets/d/index-elective-sheet/edit'
+  ],
+  [
+    'FALSE',
+    '115-1-high2',
+    '停用來源',
+    '高二',
+    '2026-09-01',
+    '2027-01-31',
+    '',
+    'https://docs.google.com/spreadsheets/d/index-disabled-sheet/edit'
+  ]
+]);
+assert.equal(parsedOutlineIndex.setsByGrade['高二'].length, 1);
+assert.deepEqual(
+  Array.from(parsedOutlineIndex.setsByGrade['高二'][0].outlineNames),
+  ['114-2 高二—必修', '114-2 高二—學科選修']
+);
+assert.deepEqual(
+  Array.from(parsedOutlineIndex.setsByGrade['高二'][0].spreadsheetIds),
+  ['index-required-sheet', 'index-elective-sheet']
+);
+assert.equal(parsedOutlineIndex.setsByGrade['高一'].length, 0);
+assert.throws(
+  () => context.parseCourseOutlineSourceIndexValues_([
+    ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '課綱試算表連結'],
+    [
+      'TRUE',
+      '114-2-high2',
+      '必修',
+      '高二',
+      '2026-01-01',
+      '2026-08-31',
+      'https://docs.google.com/spreadsheets/d/duplicate-sheet/edit'
+    ],
+    [
+      'TRUE',
+      '114-2-high2',
+      '選修',
+      '高二',
+      '2026-02-01',
+      '2026-08-31',
+      'https://docs.google.com/spreadsheets/d/second-sheet/edit'
+    ]
+  ]),
+  /相同年級與適用日期/
+);
 
 function recordGeneratedMenus(generatedAppsScriptCode) {
   const menuNames = [];
@@ -394,9 +521,54 @@ assert.notEqual(
   context.makeEventSignature_(oldOutlineItem, outlineSettings),
   context.makeEventSignature_(newOutlineItem, outlineSettings)
 );
-assert.match(
+assert.equal(
+  context.buildEventTitle_(newOutlineItem),
+  '測試課程 [吉林基地-協作坊]'
+);
+assert.equal(
+  context.buildEventLocation_(newOutlineItem),
+  '吉林基地-協作坊'
+);
+assert.equal(
+  context.buildEventLocation_(
+    Object.assign({}, newOutlineItem, {
+      courseOutline: Object.assign({}, newOutlineItem.courseOutline, { classroom: '吉林基地' })
+    })
+  ),
+  '吉林基地',
+  '課表地點與實體課程教室相同時不得重複'
+);
+assert.equal(
   context.buildManagedDescription_(newOutlineItem, outlineStateKey, outlineSettings),
-  /課綱\n實體課程教室：協作坊\n單元主題：新主題\n課程內容：新內容/
+  '第 2 週 / 週一 / 第 5–6 節<br><br><b># 單元主題</b><br>新主題<br><br><b># 課程內容</b><br>新內容<br><br><br>[T-SCHOOL Schedule Sync]<br>＊部分資訊來自課綱，請以教師最新說明為主'
+);
+assert.equal(
+  context.buildManagedDescription_(
+    Object.assign({}, outlineBaseItem, {
+      courseOutline: { classroom: '協作坊', topic: '<第一冊>', content: '內容 & 補充' }
+    }),
+    outlineStateKey,
+    outlineSettings
+  ).includes('&lt;第一冊&gt;<br><br><b># 課程內容</b><br>內容 &amp; 補充'),
+  true,
+  '課綱文字必須先 HTML escape'
+);
+assert.doesNotMatch(
+  context.buildManagedDescription_(newOutlineItem, outlineStateKey, outlineSettings),
+  /T-SCHOOL-SCHEDULE-SYNC|同步識別碼/,
+  '使用者可見說明不得包含技術管理標記或識別碼'
+);
+assert.equal(
+  context.buildManagedDescription_(
+    newOutlineItem,
+    outlineStateKey,
+    Object.assign({}, outlineSettings, {
+      descriptionPreset: 'custom',
+      customDescription: '**{course}**\n{displayLocation}\n{topic}'
+    })
+  ),
+  '<b>測試課程</b><br>吉林基地-協作坊<br>新主題<br><br><br>[T-SCHOOL Schedule Sync]<br>＊部分資訊來自課綱，請以教師最新說明為主',
+  '進階自訂應沿用標準格式的粗體與段落內換行規則'
 );
 const legacyOutlineState = {
   originalTitle: oldOutlineItem.originalTitle,
@@ -415,9 +587,34 @@ const legacyOutlineState = {
 };
 assert.equal(
   context.storedEventSignatureMatches_(legacyOutlineState, oldOutlineItem, outlineSettings),
-  true,
-  '舊版長簽章應可無寫入升級，避免部署後誤判全數事件變更'
+  false,
+  '舊版事件必須執行一次中繼資料遷移，將可見識別碼改為隱藏標籤'
 );
+assert.equal(
+  context.storedEventContentSignatureMatches_(legacyOutlineState, oldOutlineItem, outlineSettings),
+  true,
+  '中繼資料遷移不得把內容未變的舊事件誤判為一般更新'
+);
+const legacyMetadataPlan = context.prepareSyncOperations_(
+  {
+    exact: [{
+      oldItem: Object.assign({}, legacyOutlineState, {
+        stateKey: outlineStateKey,
+        calendarEventId: 'legacy-event-id'
+      }),
+      newItem: oldOutlineItem,
+      newKey: outlineStateKey
+    }],
+    moved: [],
+    additions: [],
+    deletions: []
+  },
+  {},
+  outlineSettings,
+  { forceCalendarCheck: false, forceProcessedKeys: {} }
+);
+assert.equal(legacyMetadataPlan.operations.length, 1);
+assert.equal(legacyMetadataPlan.operations[0].type, 'metadata');
 const spacingVariant = Object.assign({}, outlineBaseItem, { originalTitle: ' 測試 課程　' });
 assert.equal(
   context.dedupeAndValidateDesiredEvents_([outlineBaseItem, spacingVariant]).length,
@@ -433,18 +630,44 @@ assert.throws(
   '相同身分鍵卻有衝突內容時應停止而非靜默合併'
 );
 
-let descriptionOnlyUpdates = 0;
+let outlineFieldUpdates = 0;
 const calendarForOutlineUpdate = {
   getEventById() {
+    const tags = {
+      tschool_managed: '1',
+      tschool_sync_id: context.hashText_(outlineStateKey)
+    };
+    let title = context.buildEventTitle_(oldOutlineItem);
+    let location = context.buildEventLocation_(oldOutlineItem);
     return {
       getId() {
         return 'event-id';
+      },
+      getTitle() {
+        return title;
+      },
+      setTitle(value) {
+        title = value;
+        outlineFieldUpdates += 1;
+      },
+      getLocation() {
+        return location;
+      },
+      setLocation(value) {
+        location = value;
+        outlineFieldUpdates += 1;
+      },
+      getTag(key) {
+        return tags[key] || '';
+      },
+      setTag(key, value) {
+        tags[key] = String(value);
       },
       getDescription() {
         return context.buildManagedDescription_(oldOutlineItem, outlineStateKey, outlineSettings);
       },
       setDescription() {
-        descriptionOnlyUpdates += 1;
+        outlineFieldUpdates += 1;
       }
     };
   }
@@ -458,6 +681,7 @@ const outlineOnlyResult = context.applySyncPlan_(
       oldItem: {
         stateKey: outlineStateKey,
         calendarEventId: 'event-id',
+        metadataVersion: 2,
         syncSignature: context.makeEventSignature_(oldOutlineItem, outlineSettings),
         baseSyncSignature: context.makeBaseEventSignature_(oldOutlineItem, outlineSettings),
         outlineHash: oldOutlineItem.outlineHash
@@ -472,10 +696,10 @@ const outlineOnlyResult = context.applySyncPlan_(
   outlineSettings,
   { forceCalendarCheck: false, trackProgress: false }
 );
-assert.equal(descriptionOnlyUpdates, 1);
+assert.equal(outlineFieldUpdates, 1);
 assert.equal(outlineOnlyResult.updated, 0);
 assert.equal(outlineOnlyResult.outlineUpdated, 1);
-assert.equal(outlineOnlyResult.changes.length, 0, '純課綱更新不應列入課表異動通知');
+assert.equal(outlineOnlyResult.changes.length, 0, '純課綱更新不應列入行程調整通知');
 
 const scriptPropertiesData = {};
 const scriptProperties = {
@@ -505,11 +729,25 @@ const scriptProperties = {
 let triggerCounter = 0;
 let projectTriggers = [];
 let sentOutlineFailureEmails = 0;
+let mailFailuresRemaining = 0;
+const sentEmailSubjects = [];
+const sentEmailMessages = [];
+let cachedEmailTemplateManifest = '';
+let emailTemplateFetchShouldFail = false;
 context.PropertiesService = {
   getScriptProperties() {
     return scriptProperties;
   }
 };
+const initialGeneratedSettings = context.loadSettings_();
+assert.deepEqual(Array.from(initialGeneratedSettings.autoSyncHours), [5, 12, 18, 22]);
+assert.equal(
+  initialGeneratedSettings.notifySyncHour,
+  22,
+  '每日成功摘要應安排在最後一個通知時間，才能讓當日行程調整優先'
+);
+assert.equal(initialGeneratedSettings.notificationPreset, 'standard');
+assert.equal(initialGeneratedSettings.customNotification, '');
 const utf8ChunkPayload = { text: '課綱😀'.repeat(4000) };
 context.writeChunkedJson_('UTF8_CHUNK_TEST', utf8ChunkPayload);
 const utf8ChunkCount = Number(scriptPropertiesData.UTF8_CHUNK_TEST_COUNT);
@@ -581,9 +819,56 @@ context.ScriptApp = {
     return builder;
   }
 };
+context.CacheService = {
+  getScriptCache() {
+    return {
+      get(key) {
+        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_V1');
+        return cachedEmailTemplateManifest;
+      },
+      put(key, value, seconds) {
+        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_V1');
+        assert.equal(seconds, 60 * 60);
+        cachedEmailTemplateManifest = value;
+      }
+    };
+  }
+};
+context.UrlFetchApp = {
+  fetch(url, options) {
+    assert.equal(
+      url,
+      'https://artemas-hsieh.github.io/t-school-schedule-sync/configurator/notification-email-templates.json'
+    );
+    assert.equal(options.followRedirects, true);
+    assert.equal(options.muteHttpExceptions, true);
+    return {
+      getResponseCode() {
+        return emailTemplateFetchShouldFail ? 503 : 200;
+      },
+      getContentText(encoding) {
+        assert.equal(encoding, 'UTF-8');
+        return emailTemplateManifestText;
+      }
+    };
+  }
+};
 context.MailApp = {
-  sendEmail() {
+  sendEmail(messageOrRecipient, legacySubject, legacyBody, legacyOptions) {
+    if (mailFailuresRemaining > 0) {
+      mailFailuresRemaining -= 1;
+      throw new Error('模擬寄信失敗');
+    }
+    const message = typeof messageOrRecipient === 'object'
+      ? messageOrRecipient
+      : Object.assign({
+        to: messageOrRecipient,
+        subject: legacySubject,
+        body: legacyBody
+      }, legacyOptions || {});
     sentOutlineFailureEmails += 1;
+    sentEmailSubjects.push(message.subject);
+    sentEmailMessages.push(message);
   }
 };
 context.Session = {
@@ -596,12 +881,221 @@ context.Session = {
 };
 context.Logger = { log() {} };
 
+assert.doesNotThrow(() =>
+  context.assertEmailTemplateManifest_(JSON.parse(emailTemplateManifestText))
+);
+const renderedFailureEmail = context.buildEmailHtmlSafe_(
+  'sync_failure',
+  '[T-SCHOOL] 行程同步失敗',
+  {
+    sentAt: '2026/07/26 12:00',
+    controlUrl: 'https://docs.google.com/spreadsheets/d/test/edit',
+    calendarUrl: 'https://calendar.google.com/calendar/u/0/r',
+    message: '<script>alert("x")</script> 權限不足'
+  }
+);
+assert.match(renderedFailureEmail, /<!doctype html>/);
+assert.match(renderedFailureEmail, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; 權限不足/);
+assert.equal(renderedFailureEmail.includes('<script>alert("x")</script>'), false);
+assert.match(renderedFailureEmail, /這次同步沒有完成/);
+
+const sampleEmailData = {
+  sentAt: '2026/07/26 12:00',
+  controlUrl: 'https://docs.google.com/spreadsheets/d/test/edit',
+  calendarUrl: 'https://calendar.google.com/calendar/u/0/r',
+  summary: '新增 1、更新 2、移除 0、未變更 8',
+  message: '測試訊息',
+  created: 1,
+  updated: 2,
+  outlineUpdated: 3,
+  deleted: 0,
+  unchanged: 8,
+  changeCount: 1,
+  omittedNote: '',
+  dateRange: '2026-09-01–2027-01-31',
+  itemCount: 1,
+  items: [{ label: '測試活動' }],
+  changes: [{
+    type: '時間變更',
+    course: '測試課程',
+    oldStandard: '2026/07/27 第 5 節 舊教室',
+    newStandard: '2026/07/28 第 6 節 新教室',
+    displayText: '時間變更｜測試課程'
+  }]
+};
+Object.keys(emailTemplateManifest.notifications).forEach(templateKind => {
+  const html = context.buildEmailHtmlSafe_(
+    templateKind,
+    '[T-SCHOOL] 測試通知',
+    sampleEmailData
+  );
+  assert.match(html, /<!doctype html>/, `${templateKind} 應可渲染完整 HTML`);
+  assert.equal(
+    /\{\{\{?[A-Za-z]/.test(html),
+    false,
+    `${templateKind} 不應留下未解析變數`
+  );
+});
+
+cachedEmailTemplateManifest = '';
+emailTemplateFetchShouldFail = true;
+assert.equal(
+  context.buildEmailHtmlSafe_(
+    'sync_failure',
+    '[T-SCHOOL] 行程同步失敗',
+    { message: '暫時無法下載版型' }
+  ),
+  '',
+  '遠端版型失效時應退回純文字寄送'
+);
+emailTemplateFetchShouldFail = false;
+
+context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
+const notificationTimingSettings = {
+  notificationEmail: 'test@example.com',
+  autoSyncHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
+  notifySyncHour: (Number(formatDate(new Date(), 'H')) + 1) % 24
+};
+const scheduledChangeResult = {
+  created: 0,
+  updated: 1,
+  outlineUpdated: 0,
+  deleted: 0,
+  unchanged: 8,
+  omittedChangeCount: 0,
+  changes: [{
+    type: '時間變更',
+    oldItem: {
+      originalTitle: '測試課程',
+      dateKey: '2026-07-27',
+      periodStart: 5,
+      periodEnd: 6,
+      startTime: '13:10',
+      endTime: '15:00',
+      location: '舊教室',
+      isAllDay: false
+    },
+    newItem: {
+      originalTitle: '測試課程',
+      dateKey: '2026-07-28',
+      periodStart: 3,
+      periodEnd: 4,
+      startTime: '10:10',
+      endTime: '12:00',
+      location: '新教室',
+      isAllDay: false
+    }
+  }]
+};
+const emailsBeforeQueuedChange = sentEmailMessages.length;
+context.sendSyncNotificationsSafe_(
+  notificationTimingSettings,
+  scheduledChangeResult,
+  { reason: 'source', notifyOnSuccess: false, notificationWindow: false }
+);
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeQueuedChange,
+  '通知時間外偵測到的行程調整不得立即寄信'
+);
+assert.equal(
+  context.loadNotificationQueueState_().pendingChangeData.changeCount,
+  1
+);
+context.sendSyncNotificationsSafe_(
+  notificationTimingSettings,
+  {
+    created: 0,
+    updated: 0,
+    outlineUpdated: 0,
+    deleted: 0,
+    unchanged: 9,
+    omittedChangeCount: 0,
+    changes: []
+  },
+  { reason: 'source', notifyOnSuccess: true, notificationWindow: true }
+);
+assert.equal(sentEmailMessages.length, emailsBeforeQueuedChange + 1);
+assert.match(sentEmailMessages.at(-1).subject, /行程調整 1 項/);
+assert.doesNotMatch(sentEmailMessages.at(-1).subject, /同步成功/);
+assert.equal(
+  context.loadNotificationQueueState_().pendingChangeData,
+  null,
+  '通知時間應寄出並清除已排程的行程調整'
+);
+
+const emailsBeforeImmediateError = sentEmailMessages.length;
+context.notifySyncFailureSafe_(new Error('第一句。第二句。'));
+assert.equal(sentEmailMessages.length, emailsBeforeImmediateError + 1);
+assert.equal(sentEmailMessages.at(-1).body.includes('。'), false);
+assert.match(sentEmailMessages.at(-1).subject, /同步失敗/);
+context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
+
+const liveOutlineIndexValues = [
+  ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '課綱試算表連結'],
+  [
+    'TRUE',
+    '115-1-high1',
+    '115-1 高一—必修',
+    '高一',
+    '2026-09-01',
+    '2027-01-31',
+    'https://docs.google.com/spreadsheets/d/live-index-required-sheet/edit'
+  ]
+];
+context.SpreadsheetApp = {
+  openById(id) {
+    assert.equal(id, '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY');
+    return {
+      getSheetByName(name) {
+        assert.equal(name, '課綱來源');
+        return {
+          getLastRow() {
+            return liveOutlineIndexValues.length;
+          },
+          getLastColumn() {
+            return liveOutlineIndexValues[0].length;
+          },
+          getRange() {
+            return {
+              getDisplayValues() {
+                return liveOutlineIndexValues;
+              }
+            };
+          }
+        };
+      }
+    };
+  }
+};
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+const liveOutlineIndex = context.loadCourseOutlineSourceIndex_();
+assert.equal(liveOutlineIndex.source, 'live');
+assert.equal(liveOutlineIndex.setsByGrade['高一'][0].key, '115-1-high1');
+context.SpreadsheetApp = {
+  openById() {
+    throw new Error('模擬中央索引暫時無法讀取');
+  }
+};
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+const cachedOutlineIndex = context.loadCourseOutlineSourceIndex_();
+assert.equal(cachedOutlineIndex.source, 'last_success');
+assert.equal(cachedOutlineIndex.setsByGrade['高一'][0].key, '115-1-high1');
+assert.match(cachedOutlineIndex.warning, /沿用最後成功版本/);
+context.clearChunkedStore_('TSCHOOL_COURSE_OUTLINE_INDEX_CACHE');
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+const embeddedOutlineIndex = context.loadCourseOutlineSourceIndex_();
+assert.equal(embeddedOutlineIndex.source, 'embedded_fallback');
+assert.equal(embeddedOutlineIndex.setsByGrade['高二'][0].key, '114-2-high2');
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+
 function createMockCalendar() {
   let eventCounter = 0;
   const events = new Map();
 
   function makeEvent(title, start, end, options, allDay) {
     const id = `mock-event-${++eventCounter}`;
+    const tags = {};
     const event = {
       id,
       title,
@@ -630,6 +1124,15 @@ function createMockCalendar() {
       setLocation(value) { this.location = value; },
       getDescription() { return this.description; },
       setDescription(value) { this.description = value; },
+      getTag(key) { return tags[key] || ''; },
+      setTag(key, value) {
+        tags[key] = String(value);
+        return this;
+      },
+      deleteTag(key) {
+        delete tags[key];
+        return this;
+      },
       removeAllReminders() {},
       addPopupReminder() {},
       addEmailReminder() {},
@@ -761,6 +1264,22 @@ assert.equal(
   true,
   '新狀態應只保存短雜湊簽章版本'
 );
+assert.equal(
+  Object.values(batchState).every(item => item.metadataVersion === 2),
+  true,
+  '新狀態應標記為新版隱藏事件標籤與顯示格式'
+);
+assert.equal(
+  batchCalendar.activeEvents().every(event =>
+    event.getTag('tschool_managed') === '1' &&
+    event.getTag('tschool_meta_version') === '2' &&
+    event.getDescription().indexOf('同步識別碼：') === -1 &&
+    event.getDescription().indexOf('[T-SCHOOL-SCHEDULE-SYNC]') === -1 &&
+    event.getDescription().indexOf('[T-SCHOOL Schedule Sync]') !== -1
+  ),
+  true,
+  '新建立事件應以隱藏標籤管理，說明欄只顯示可讀頁尾'
+);
 
 const noChangeJob = makeSyncJobForTest(batchDesired.length, false);
 const noChangeResult = context.runSyncJobBatch_(
@@ -802,11 +1321,14 @@ assert.equal(batchCalendar.activeEvents().length, 422);
 const recoveryCalendar = createMockCalendar();
 const recoveryItem = makeBatchFixtureEvent(0);
 const recoveryKey = context.makeOccurrenceKey_(recoveryItem);
-const recoveredExistingEvent = context.createCalendarEvent_(
-  recoveryCalendar,
-  recoveryItem,
-  recoveryKey,
-  batchSettings
+const recoveredExistingEvent = recoveryCalendar.createEvent(
+  context.buildEventTitle_(recoveryItem),
+  recoveryItem.start,
+  recoveryItem.end,
+  {
+    location: context.buildEventLocation_(recoveryItem),
+    description: context.buildManagedDescription_(recoveryItem, recoveryKey, batchSettings)
+  }
 );
 let recoveredReminderRepairs = 0;
 recoveredExistingEvent.removeAllReminders = () => { recoveredReminderRepairs += 1; };
@@ -833,6 +1355,40 @@ assert.equal(
   1,
   '接回已建立事件時仍須重新套用提醒，修復建立後中斷的情況'
 );
+
+const legacyMarkerCalendar = createMockCalendar();
+const legacyMarkerDescription = [
+  '[T-SCHOOL-SCHEDULE-SYNC]',
+  '舊版學生可見內容',
+  '',
+  '同步識別碼：' + context.hashText_(recoveryKey)
+].join('\n');
+const legacyMarkerEvent = legacyMarkerCalendar.createEvent(
+  '舊版標題',
+  recoveryItem.start,
+  recoveryItem.end,
+  {
+    location: '舊版地點',
+    description: legacyMarkerDescription
+  }
+);
+context.migrateCalendarEventMetadata_(
+  legacyMarkerCalendar,
+  legacyMarkerEvent.getId(),
+  recoveryItem,
+  recoveryKey,
+  batchSettings,
+  recoveryKey
+);
+assert.equal(legacyMarkerEvent.getTitle(), '分批測試課程 1 [測試教室]');
+assert.equal(legacyMarkerEvent.getLocation(), '測試教室');
+assert.equal(
+  legacyMarkerEvent.getDescription(),
+  '第 1 週 / 週一 / 第 1 節<br><br><br>[T-SCHOOL Schedule Sync]'
+);
+assert.equal(legacyMarkerEvent.getTag('tschool_managed'), '1');
+assert.equal(legacyMarkerEvent.getTag('tschool_sync_id'), context.hashText_(recoveryKey));
+assert.equal(legacyMarkerEvent.getTag('tschool_meta_version'), '2');
 
 const movedRecoveryCalendar = createMockCalendar();
 const movedOldItem = makeBatchFixtureEvent(0);
@@ -866,7 +1422,7 @@ assert.doesNotThrow(
     batchSettings,
     movedOldKey
   ),
-  '移動事件已改成新 marker、但尚未 checkpoint 時仍應能安全續跑'
+  '移動事件已改成新隱藏標籤、但尚未 checkpoint 時仍應能安全續跑'
 );
 assert.equal(movedRecoveryCalendar.activeEvents().length, 1);
 
@@ -961,6 +1517,156 @@ assert.equal(
   'old-calendar-id',
   '選擇建立新日曆時仍須保存舊日曆 ID 供分批搬移'
 );
+assert.equal(migrationSanitized.descriptionPreset, 'standard');
+assert.equal(migrationSanitized.notificationPreset, 'standard');
+assert.equal(migrationSanitized.customNotification, '');
+assert.match(
+  migrationSanitized.customDescription,
+  /第 \{week\} 週 \/ 週\{weekday\} \/ 第 \{period\} 節/
+);
+const legacyDescriptionPresetSanitized = context.sanitizeSettingsInput_(
+  Object.assign({}, migrationSanitized, {
+    calendarId: '',
+    descriptionPreset: 'detailed',
+    customDescription: ''
+  }),
+  Object.assign({}, migrationSanitized, {
+    calendarId: '',
+    calendarMigrationFromId: ''
+  }),
+  {
+    termKey: '二年級|2026-02-23',
+    fingerprint: 'source',
+    catalog: {
+      all: [{ title: '測試課程', type: 'course' }],
+      activities: []
+    }
+  }
+);
+assert.equal(
+  legacyDescriptionPresetSanitized.descriptionPreset,
+  'standard',
+  '舊的簡潔或詳細說明格式必須遷移為標準'
+);
+
+const newTermSource = {
+  termKey: '二年級|2026-09-01',
+  firstDateKey: '2026-09-01',
+  lastDateKey: '2027-01-31',
+  fingerprint: 'new-term-source',
+  events: [],
+  catalog: {
+    all: [{ title: '新學期課程', type: 'course' }],
+    activities: []
+  }
+};
+const settingsBeforeTermTransition = Object.assign({}, migrationSanitized, {
+  setupComplete: true,
+  termKey: '二年級|2026-02-23',
+  pendingTermKey: '',
+  selectedCourses: ['測試課程'],
+  excludedActivities: ['測試活動'],
+  pendingTitles: ['待確認課程'],
+  autoSyncHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
+  notifySyncHour: (Number(formatDate(new Date(), 'H')) + 1) % 24,
+  autoSyncEnabled: true,
+  autoSyncEnabledBeforeTermTransition: null,
+  termTransitionNoticeAttempts: 0,
+  termTransitionNoticeSentAt: '',
+  termTransitionNoticeLastError: ''
+});
+const emailsBeforeTermTransition = sentOutlineFailureEmails;
+const transitionedSettings = context.applyTermTransitionIfNeeded_(
+  settingsBeforeTermTransition,
+  newTermSource,
+  true
+);
+assert.equal(transitionedSettings.pendingTermKey, newTermSource.termKey);
+assert.deepEqual(Array.from(transitionedSettings.selectedCourses), []);
+assert.equal(transitionedSettings.autoSyncEnabled, false);
+assert.equal(transitionedSettings.autoSyncEnabledBeforeTermTransition, true);
+assert.equal(transitionedSettings.termTransitionNoticeAttempts, 1);
+assert.notEqual(transitionedSettings.termTransitionNoticeSentAt, '');
+assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition);
+assert.equal(context.loadNotificationQueueState_().pending.length, 1);
+context.flushQueuedNotificationsSafe_(transitionedSettings);
+assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition + 1);
+assert.match(sentEmailSubjects.at(-1), /新學期行程已更新/);
+assert.match(sentEmailMessages.at(-1).body, /自動同步已暫停/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /需要重新選課/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /2026-09-01–2027-01-31/);
+context.deliverTermTransitionNotice_(transitionedSettings, newTermSource);
+assert.equal(
+  sentOutlineFailureEmails,
+  emailsBeforeTermTransition + 1,
+  '同一學期已成功寄送的提醒不得重複寄出'
+);
+
+const laterTermSource = Object.assign({}, newTermSource, {
+  termKey: '二年級|2027-02-22',
+  firstDateKey: '2027-02-22',
+  lastDateKey: '2027-06-30'
+});
+const failedNoticeSettings = Object.assign({}, settingsBeforeTermTransition, {
+  termKey: newTermSource.termKey,
+  pendingTermKey: '',
+  selectedCourses: ['新學期課程'],
+  autoSyncEnabled: true,
+  autoSyncHours: [Number(formatDate(new Date(), 'H'))],
+  notifySyncHour: Number(formatDate(new Date(), 'H'))
+});
+mailFailuresRemaining = 1;
+const failedTransition = context.applyTermTransitionIfNeeded_(
+  failedNoticeSettings,
+  laterTermSource,
+  true
+);
+assert.equal(failedTransition.termTransitionNoticeAttempts, 1);
+assert.equal(failedTransition.termTransitionNoticeSentAt, '');
+assert.match(failedTransition.termTransitionNoticeLastError, /模擬寄信失敗/);
+assert.equal(
+  projectTriggers.filter(trigger =>
+    trigger.getHandlerFunction() === 'retryTermTransitionNotice'
+  ).length,
+  1,
+  '第一次寄信失敗應建立一次重試'
+);
+assert.equal(context.deliverTermTransitionNotice_(failedTransition, laterTermSource), true);
+assert.equal(failedTransition.termTransitionNoticeAttempts, 2);
+assert.notEqual(failedTransition.termTransitionNoticeSentAt, '');
+assert.equal(
+  projectTriggers.some(trigger =>
+    trigger.getHandlerFunction() === 'retryTermTransitionNotice'
+  ),
+  false,
+  '重試成功後應移除未執行的提醒觸發器'
+);
+
+const restoredAfterSelection = context.sanitizeSettingsInput_(
+  Object.assign({}, migrationSanitized, {
+    gradeName: '高二',
+    selectedCourses: ['新學期課程'],
+    calendarId: '',
+    calendarName: '新專用日曆',
+    calendarMigrationFromId: '',
+    autoSyncEnabled: true
+  }),
+  Object.assign({}, failedTransition, {
+    calendarId: '',
+    calendarMigrationFromId: ''
+  }),
+  newTermSource
+);
+assert.equal(restoredAfterSelection.pendingTermKey, '');
+assert.equal(restoredAfterSelection.autoSyncEnabled, true);
+assert.equal(restoredAfterSelection.autoSyncEnabledBeforeTermTransition, null);
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
+context.clearChunkedStore_('TSCHOOL_NOTICE_STATE');
+projectTriggers = projectTriggers.filter(trigger =>
+  trigger.getHandlerFunction() !== 'retryTermTransitionNotice'
+);
+mailFailuresRemaining = 0;
+
 assert.throws(
   () => context.sanitizeSettingsInput_(
     Object.assign({}, migrationSanitized, { calendarId: 'third-calendar-id' }),
@@ -1248,6 +1954,8 @@ context.handleCourseOutlineRefreshFailure_(secondFailureRun, new Error('第二�
 outlineFailureState = context.loadCourseOutlineState_();
 assert.equal(outlineFailureState.status, 'failed');
 assert.equal(sentOutlineFailureEmails, 1, '第二次課綱失敗應寄信一次');
+assert.match(sentEmailMessages.at(-1).body, /課綱已嘗試兩次仍無法更新/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /課綱資料暫時無法更新/);
 assert.notEqual(outlineFailureState.failureNotifiedAt, '');
 
 const repeatedFailureRun = Object.assign({}, outlineFailureState, {

@@ -10,15 +10,15 @@ T-SCHOOL 行程同步是一個純靜態設定器，會依使用者的年級、�
 
 - 直接從課表 API 載入一、二、三年級資料，動態產生去重後的課程選單。
 - 同步選定課程、年級活動與全校活動到專用 Google Calendar；活動預設全選，也可逐項排除。
-- 支援的年級與學期可從校內課綱 Google Sheets 補入實體課程教室、單元主題與課程內容；目前先支援 114-2 高二。
+- 支援的年級與學期可從校內課綱 Google Sheets 補入實體課程教室、單元主題與課程內容；來源清單由中央索引更新，目前先支援 114-2 高二。
 - 課綱只讀取未來 30 天內的相關課程，整學期基本行程仍照常同步。
-- 比對新增、取消、改名、日期、節次、時間與地點變更，視設定寄送 Email 摘要。
-- 支援每日自動同步、每日狀態摘要、事件提醒、說明格式與進階自訂變數。
+- 比對新增、取消、改名、日期、節次、時間與地點變更，於設定時間寄送標準「行程調整」HTML Email 與手機純文字摘要。
+- 支援每日自動同步、每日狀態摘要、事件提醒，以及以標準格式為基礎的進階自訂說明。
 - 安裝後可從 Google Sheet 的「行程同步」選單與側邊欄調整設定，不需再回 Apps Script 編輯器。
 - 一般同步保留使用者對日曆事件的手動編輯；必要時可使用「強制修復」重新套用來源資料。
 - 大量首次同步會自動拆成每批最多 40 次 Calendar 操作；每批都有安全存檔點，關閉側欄後仍可背景續跑。
-- 以同步識別碼防止「Calendar 已建立、狀態尚未保存」造成重複事件；暫時失敗會重試一次，下一次仍失敗才寄信。
-- 偵測新學期後會暫停寫入、保留已有事件，並要求使用者重新選課。
+- 事件標題與地點會合併課表地點及課綱中的實體課程教室；隱藏同步標籤可防止「Calendar 已建立、狀態尚未保存」造成重複事件。暫時失敗會重試一次，下一次仍失敗才寄信。
+- 偵測新學期後會暫停寫入、保留已有事件，以 Email 與側欄警示要求使用者重新選課；儲存後可恢復原本的自動同步偏好。
 
 ## 安裝
 
@@ -74,10 +74,24 @@ Google Sheet 的「行程同步」選單提供：
 
 產生程式仍保留 `syncMyScheduleToCalendar()`、`forceFullSyncMyScheduleToCalendar()`、`setupAutoSyncTriggers()` 與 `deleteAutoSyncTriggers()` 等公開函式，供進階操作或除錯使用。
 
+## 修改 HTML Email 版型
+
+所有信件外框、文案、inline style 與通知種類設定集中在
+[`configurator/notification-email-templates.json`](configurator/notification-email-templates.json)：
+
+- `shell` 是所有通知共用的信件外框。
+- `notifications` 內含一套標準行程調整格式，以及設定完成、每日成功摘要、同步失敗、課綱失敗、新學期、新項目與同步停止等版型。
+- 一般 `{{value}}` 會先做 HTML 跳脫；`{{{content}}}`、`{{{changesHtml}}}` 與 `{{{itemsHtml}}}` 只用於插入由 manifest 本身產生的 HTML 區塊。
+- 修改後需把檔案發布到目前的 GitHub Pages 網址。既有 `Code.gs` 不必重貼，最長約一小時後會自動取得新版；遠端檔案無法讀取時仍會寄純文字。
+
+調整時應保留 `schemaVersion: 1`、既有通知 key 與所使用的變數名稱，並執行 `node tests/smoke-test.js`。
+
 ## 資料來源與限制
 
 - 課表執行階段使用固定的 Google Apps Script API 部署網址；不使用已停止更新的舊課表 Google Sheet。
-- 課綱是獨立的補充來源。只有年級與日期符合已設定來源組時，使用者自己的 Apps Script 才會讀取受校內帳號保護的課綱 Sheets；目前高一與高三不會觸發課綱讀取。
+- HTML Email 版型由公開的 `configurator/notification-email-templates.json` 提供，產生的 `Code.gs` 不內嵌 HTML。版型更新後，已安裝程式會在快取到期（最長約一小時）後自動套用；下載失敗時改寄純文字。
+- 課綱是獨立的補充來源。產生的 Apps Script 會讀取中央「課綱來源」索引，所以日後只要在索引新增或啟用新學期來源，不必重新產生既有 `Code.gs`。索引暫時失敗時沿用最後成功版本。
+- 只有年級與日期符合已啟用來源組時，使用者自己的 Apps Script 才會讀取受校內帳號保護的課綱 Sheets；目前高一與高三不會觸發課綱讀取。
 - 課綱依工作表分頁名稱、日期與節次精確配對。純非同步課程、過去課程與沒有課表事件的未開課課程不會加入行事曆說明。
 - 課綱由獨立觸發器更新成最後成功快照，因此 Sheets 暫時失敗時仍可完成基本課表同步；第一次失敗會自動重試，重試仍失敗才寄信。
 - 課程選單由 API 即時解析、清理與去重，不依賴大型課程別名字典。
@@ -108,6 +122,7 @@ Google Sheet 的「行程同步」選單提供：
 │   ├── schedule-data.js
 │   ├── sidebar-template.js
 │   ├── code-template.js
+│   ├── notification-email-templates.json
 │   ├── app.js
 │   ├── assets/
 │   │   └── t-school-control-panel-template.xlsx

@@ -78,6 +78,40 @@
       font-size: 11px;
       line-height: 16px;
     }
+    .top-status[data-state="warning"] { color: var(--warning); font-weight: 850; }
+
+    .term-transition {
+      display: grid;
+      grid-template-columns: var(--space-1) minmax(0, 1fr);
+      gap: var(--space-3);
+      padding: var(--space-4);
+      border-bottom: 1px solid var(--warning);
+      background: var(--warning-surface);
+    }
+    .term-transition::before { content: ""; background: var(--warning); }
+    .term-transition:focus-visible { outline: 2px solid var(--warning); outline-offset: -4px; }
+    .term-transition-kicker {
+      margin: 0;
+      color: var(--warning);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      font-weight: 850;
+      line-height: 16px;
+    }
+    .term-transition h2 { margin: var(--space-1) 0 0; font-size: 16px; line-height: 22px; }
+    .term-transition p { margin: var(--space-2) 0 0; color: var(--ink-soft); font-size: 11px; line-height: 17px; }
+    .term-transition button {
+      min-height: 40px;
+      margin-top: var(--space-3);
+      padding: 0 var(--space-3);
+      border: 1px solid var(--ink);
+      border-radius: var(--radius-control);
+      background: var(--ink);
+      color: var(--paper-bright);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 850;
+    }
 
     .content { display: grid; padding: 0 var(--space-3) var(--space-6); }
     .section {
@@ -267,6 +301,7 @@
     .save { padding: 0 var(--space-4); background: var(--paper-bright); color: var(--ink); }
     .sync { padding: 0 var(--space-4); background: var(--sync); color: var(--paper-bright); }
     button:disabled { opacity: .48; cursor: wait; }
+    button[data-validation-disabled="true"]:disabled { cursor: not-allowed; }
 
     .loading { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(244, 247, 242, .96); }
     .loader { display: grid; width: min(224px, calc(100vw - 48px)); gap: var(--space-3); justify-items: center; color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-align: center; }
@@ -324,6 +359,16 @@
       <p class="top-status" id="top-status">尚未完成設定</p>
     </header>
 
+    <section class="term-transition" id="term-transition" role="alert" aria-live="assertive" tabindex="-1" hidden>
+      <div>
+        <p class="term-transition-kicker">NEW TERM / 重新確認</p>
+        <h2>新學期需要重新選課</h2>
+        <p id="term-transition-message">舊學期行程已保留。請重新選擇本學期課程，儲存後才會恢復同步。</p>
+        <p id="term-transition-outline-message" hidden></p>
+        <button type="button" id="term-transition-action">前往重新選課</button>
+      </div>
+    </section>
+
     <main class="content">
       <section class="section">
         <div class="section-head"><h2>來源與年級</h2><span id="source-updated"></span></div>
@@ -354,7 +399,7 @@
         <div class="pending" id="pending-list"></div>
       </section>
 
-      <section class="section">
+      <section class="section" id="course-section">
         <div class="section-head"><h2>課程與活動</h2><span id="course-count">0 門課 · 0 項活動</span></div>
         <div class="course-toolbar">
           <input type="search" id="course-search" placeholder="搜尋課程或活動" aria-label="搜尋課程或活動">
@@ -384,9 +429,6 @@
         <div class="section-head"><h2>同步與通知</h2><span>時間可能前後約 15 分鐘</span></div>
         <label class="field"><span>通知 Email</span><input type="email" id="email" autocomplete="email"></label>
         <label class="field"><span>每日成功摘要</span><select id="notify-hour"></select></label>
-        <label class="field"><span>異動通知格式</span><select id="notification-preset"><option value="compact">簡潔</option><option value="standard">標準</option><option value="detailed">詳細</option><option value="custom">進階自訂</option></select></label>
-        <span class="format-preview" id="notification-preview" aria-live="polite"></span>
-        <label class="field" id="custom-notification-wrap" hidden><span>自訂異動模板</span><textarea id="custom-notification"></textarea><p class="hint">可使用 {type}、{course}、{oldDate}、{newDate}、{oldPeriod}、{newPeriod}、{oldTime}、{newTime}、{oldLocation}、{newLocation}</p></label>
         <label class="switch">
           <input type="checkbox" id="auto-sync">
           <span class="switch-track" aria-hidden="true"></span>
@@ -396,9 +438,9 @@
 
       <section class="section">
         <div class="section-head"><h2>事件呈現</h2><span>可隨時調整</span></div>
-        <label class="field"><span>說明格式</span><select id="description-preset"><option value="compact">簡潔</option><option value="standard">標準</option><option value="detailed">詳細</option><option value="custom">進階自訂</option></select></label>
+        <label class="field"><span>說明格式</span><select id="description-preset"><option value="standard">標準</option><option value="custom">進階自訂</option></select></label>
         <span class="format-preview" id="description-preview" aria-live="polite"></span>
-        <label class="field" id="custom-wrap" hidden><span>自訂模板</span><textarea id="custom-description"></textarea><p class="hint">可使用 {course}、{date}、{weekday}、{week}、{period}、{startTime}、{endTime}、{location}、{sourceUpdatedAt}</p></label>
+        <label class="field" id="custom-wrap" hidden><span>自訂模板</span><textarea id="custom-description"></textarea><p class="hint">以標準格式為基礎；可使用 **粗體** 與 {course}、{date}、{weekday}、{week}、{period}、{startTime}、{endTime}、{location}、{classroom}、{displayLocation}、{topic}、{content}、{sourceUpdatedAt}</p></label>
         <label class="field"><span>活動提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
         <label class="field" id="reminder-wrap" hidden><span>提前時間</span><select id="reminder-minutes"><option value="10">10 分鐘</option><option value="30">30 分鐘</option><option value="60">1 小時</option><option value="1440">1 天</option></select></label>
       </section>
@@ -417,6 +459,16 @@
       var busy = false;
       var syncProgressTimer = null;
       var activeSyncJobId = '';
+      var termTransitionAnnounced = false;
+      var standardDescriptionTemplate = [
+        '第 {week} 週 / 週{weekday} / 第 {period} 節',
+        '',
+        '**# 單元主題**',
+        '{topic}',
+        '',
+        '**# 課程內容**',
+        '{content}'
+      ].join('\n');
 
       function byId(id) { return document.getElementById(id); }
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -429,6 +481,7 @@
         byId('loader-track').hidden = Boolean(showProgress);
         byId('sync-progress').hidden = !showProgress;
         Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) { button.disabled = value; });
+        if (!value) updateActionAvailability();
       }
       function showToast(message) { var toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(function () { toast.classList.remove('show'); }, 2600); }
       function server(method, value) { return new Promise(function (resolve, reject) { var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (error) { reject(new Error(error && error.message ? error.message : String(error))); }); runner[method](value); }); }
@@ -477,23 +530,12 @@
       }
 
       function updateFormatPreviews() {
-        var notificationExamples = {
-          compact: '調課｜數學（二）｜3/18 第 3 節 → 3/20 第 2 節',
-          standard: '調課：數學（二）\n原定 3/18 第 3 節，調整為 3/20 第 2 節',
-          detailed: '調課：數學（二）\n日期：3/18 → 3/20\n節次：第 3 節 → 第 2 節\n場地：201 教室 → 305 教室'
-        };
         var descriptionExamples = {
-          compact: '第 8 週｜第 3 節',
-          standard: '課程：數學（二）\n節次：第 3 節\n場地：201 教室',
-          detailed: '課程：數學（二）\n日期：2026/3/18（三）\n週次：第 8 週\n時間：10:10–11:00\n場地：201 教室'
+          standard: '第 23 週 / 週五 / 第 1 節\n\n# 單元主題\n第一冊\n\n# 課程內容\n【核心選文講解】：桃花源記、項脊軒志\n\n\n[T-SCHOOL Schedule Sync]\n＊部分資訊來自課綱，請以教師最新說明為主'
         };
-        var notificationPreset = byId('notification-preset').value;
         var descriptionPreset = byId('description-preset').value;
-        byId('notification-preview').textContent = notificationPreset === 'custom'
-          ? (byId('custom-notification').value.trim() || '輸入自訂異動模板後，這裡會顯示預覽')
-          : notificationExamples[notificationPreset];
         byId('description-preview').textContent = descriptionPreset === 'custom'
-          ? (byId('custom-description').value.trim() || '輸入自訂說明模板後，這裡會顯示預覽')
+          ? (byId('custom-description').value.trim() || standardDescriptionTemplate)
           : descriptionExamples[descriptionPreset];
       }
 
@@ -505,11 +547,14 @@
         document.querySelector('input[name="grade"][value="' + settings.gradeName + '"]').checked = true;
         byId('include-activities').checked = settings.includeActivities;
         byId('email').value = settings.notificationEmail || '';
-        byId('auto-sync').checked = settings.autoSyncEnabled;
-        byId('notification-preset').value = settings.notificationPreset || 'standard';
-        byId('custom-notification').value = settings.customNotification || '';
-        byId('description-preset').value = settings.descriptionPreset;
-        byId('custom-description').value = settings.customDescription || '';
+        byId('auto-sync').checked = data.termTransition && data.termTransition.required
+          ? data.termTransition.resumeAutoSync
+          : settings.autoSyncEnabled;
+        var customDescriptionSelected = settings.descriptionPreset === 'custom';
+        byId('description-preset').value = customDescriptionSelected ? 'custom' : 'standard';
+        byId('custom-description').value = customDescriptionSelected
+          ? (settings.customDescription || standardDescriptionTemplate)
+          : standardDescriptionTemplate;
         byId('reminder-mode').value = settings.reminderMode;
         byId('reminder-minutes').value = String(settings.reminderMinutes || 10);
         renderNotifyHour(settings.notifySyncHour);
@@ -518,10 +563,63 @@
         renderCourses();
         renderPending(settings.pendingTitles || []);
         renderStatus(data.status);
+        renderTermTransition(data.termTransition, data.courseOutlineStatus, data.source);
         updateConditionalFields();
         byId('app-version').textContent = data.appVersion;
-        byId('top-status').textContent = data.status && data.status.ok ? '同步功能正常' : (settings.setupComplete ? '需要檢查同步狀態' : '尚未完成第一次同步');
-        byId('save-sync').textContent = settings.setupComplete ? '儲存並同步' : '儲存並首次同步';
+        var needsTermSelection = Boolean(data.termTransition && data.termTransition.required);
+        byId('top-status').dataset.state = needsTermSelection ? 'warning' : '';
+        byId('top-status').textContent = needsTermSelection
+          ? '新學期需要重新選課'
+          : (data.status && data.status.ok
+            ? '同步功能正常'
+            : (settings.setupComplete ? '需要檢查同步狀態' : '尚未完成第一次同步'));
+        byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
+        byId('save-sync').textContent = needsTermSelection
+          ? '完成選課並同步'
+          : (settings.setupComplete ? '儲存並同步' : '儲存並首次同步');
+        updateActionAvailability();
+      }
+
+      function renderTermTransition(transition, outlineStatus, source) {
+        var panel = byId('term-transition');
+        var required = Boolean(transition && transition.required);
+        panel.hidden = !required;
+        if (!required) {
+          termTransitionAnnounced = false;
+          return;
+        }
+        var dateRange = transition.firstDate
+          ? transition.firstDate + (transition.lastDate ? '–' + transition.lastDate : '')
+          : (source && source.firstDate ? source.firstDate : '新學期');
+        byId('term-transition-message').textContent =
+          '已偵測到 ' + dateRange + ' 的新學期行程。舊學期行程會保留；請重新選擇至少一門課程，儲存後才恢復同步。';
+        var outlineMessage = byId('term-transition-outline-message');
+        var indexWarning = outlineStatus && outlineStatus.indexWarning || '';
+        var missingCurrentOutline = outlineStatus && !outlineStatus.enabled;
+        outlineMessage.hidden = !indexWarning && !missingCurrentOutline && !transition.noticeFailed;
+        outlineMessage.textContent = transition.noticeFailed
+          ? '提醒信暫時無法寄出，但這裡會持續保留重新選課提示。'
+          : (indexWarning
+            ? indexWarning
+            : (missingCurrentOutline
+              ? '這學期的課綱尚未加入中央索引；可先同步基本行程，課綱上架後會再補入。'
+              : ''));
+      }
+
+      function updateActionAvailability() {
+        if (!model || busy) return;
+        var requiresSelection = Boolean(model.termTransition && model.termTransition.required);
+        var missingSelection = requiresSelection && selectedCourses.size === 0;
+        ['save', 'save-sync'].forEach(function (id) {
+          var button = byId(id);
+          button.disabled = missingSelection;
+          button.dataset.validationDisabled = String(missingSelection);
+        });
+        ['run-sync', 'repair-sync'].forEach(function (id) {
+          var button = byId(id);
+          button.disabled = requiresSelection;
+          button.dataset.validationDisabled = String(requiresSelection);
+        });
       }
 
       function renderSource(source) {
@@ -562,6 +660,7 @@
         byId('course-list').innerHTML = courseHtml + activityHtml || '<p class="empty">找不到符合的課程或活動</p>';
         var selectedActivityCount = (model.source.catalog.activities || []).filter(function (item) { return includeActivities && !excludedActivities.has(item.title); }).length;
         byId('course-count').textContent = selectedCourses.size + ' 門課 · ' + selectedActivityCount + ' 項活動';
+        updateActionAvailability();
       }
 
       function renderPending(items) {
@@ -578,7 +677,6 @@
       }
 
       function updateConditionalFields() {
-        byId('custom-notification-wrap').hidden = byId('notification-preset').value !== 'custom';
         byId('custom-wrap').hidden = byId('description-preset').value !== 'custom';
         byId('reminder-wrap').hidden = byId('reminder-mode').value === 'none';
         updateFormatPreviews();
@@ -598,8 +696,6 @@
             ? model.settings.autoSyncHours.slice()
             : [Number(byId('notify-hour').value)],
           notifySyncHour: Number(byId('notify-hour').value),
-          notificationPreset: byId('notification-preset').value,
-          customNotification: byId('custom-notification').value,
           descriptionPreset: byId('description-preset').value,
           customDescription: byId('custom-description').value,
           reminderMode: byId('reminder-mode').value,
@@ -684,6 +780,7 @@
             selectedCourses = new Set();
             excludedActivities = new Set();
             renderSource(data);
+            renderTermTransition(model.termTransition, model.courseOutlineStatus, data);
             renderCourses();
           }).catch(function (error) {
             showToast(error.message);
@@ -691,13 +788,15 @@
             setBusy(false);
           });
         }
-        if (event.target.id === 'notification-preset' || event.target.id === 'description-preset' || event.target.id === 'reminder-mode') updateConditionalFields();
+        if (event.target.id === 'description-preset' || event.target.id === 'reminder-mode') updateConditionalFields();
       });
       byId('course-search').addEventListener('input', renderCourses);
-      byId('custom-notification').addEventListener('input', updateFormatPreviews);
       byId('custom-description').addEventListener('input', updateFormatPreviews);
       byId('calendar-name').addEventListener('input', function () { byId('calendar-name').dataset.autoName = 'false'; });
       byId('clear-courses').addEventListener('click', function () { selectedCourses.clear(); renderCourses(); });
+      byId('term-transition-action').addEventListener('click', function () {
+        byId('course-search').focus();
+      });
       byId('save').addEventListener('click', function () { save(false); });
       byId('save-sync').addEventListener('click', function () { save(true); });
       byId('run-sync').addEventListener('click', function () { runAction('runSyncFromUi', '正在同步行程…', true); });
@@ -721,7 +820,13 @@
       server('getSettingsUiData', null).then(function (data) {
         render(data);
         byId('app').hidden = false;
-        requestAnimationFrame(function () { byId('app').classList.add('is-ready'); });
+        requestAnimationFrame(function () {
+          byId('app').classList.add('is-ready');
+          if (data.termTransition && data.termTransition.required && !termTransitionAnnounced) {
+            termTransitionAnnounced = true;
+            byId('term-transition').focus({ preventScroll: true });
+          }
+        });
         return server('getSyncProgressForUi', null);
       }).then(function (progress) {
         if (progress && ['running', 'queued', 'retry_pending'].indexOf(progress.state) !== -1) {

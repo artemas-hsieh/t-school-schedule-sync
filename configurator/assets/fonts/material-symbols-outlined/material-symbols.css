@@ -1,0 +1,22 @@
+@font-face {
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("material-symbols-outlined.ttf") format("truetype");
+}
+
+.material-symbols-outlined {
+  display: inline-block;
+  font-family: "Material Symbols Outlined";
+  font-size: 24px;
+  font-style: normal;
+  font-weight: 400;
+  font-feature-settings: "liga";
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+}

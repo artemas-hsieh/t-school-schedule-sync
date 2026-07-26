@@ -47,6 +47,16 @@
     return result.sort((a, b) => a - b);
   }
 
+  const STANDARD_CUSTOM_DESCRIPTION_TEMPLATE = [
+    '第 {week} 週 / 週{weekday} / 第 {period} 節',
+    '',
+    '**# 單元主題**',
+    '{topic}',
+    '',
+    '**# 課程內容**',
+    '{content}'
+  ].join('\n');
+
   function buildHighLoadTestAppsScriptCode() {
     return `
 const HIGH_LOAD_TEST_CONFIG_STORE = 'TSCHOOL_HIGH_LOAD_TEST_CONFIG';
@@ -349,8 +359,9 @@ function verifyHighLoadSecondSync() {
       return;
     }
     const description = String(event.getDescription() || '');
-    if (description.indexOf(MANAGED_MARKER) === -1 ||
-        description.indexOf('同步識別碼：' + hashText_(stateKey)) === -1) {
+    if (!isManagedEvent_(event, stateKey) ||
+        description.indexOf(MANAGED_MARKER) !== -1 ||
+        description.indexOf('同步識別碼：') !== -1) {
       invalid += 1;
     }
   });
@@ -360,7 +371,7 @@ function verifyHighLoadSecondSync() {
   rangeStart.setDate(rangeStart.getDate() - 1);
   rangeEnd.setDate(rangeEnd.getDate() + 1);
   const managedCalendarEvents = calendar.getEvents(rangeStart, rangeEnd)
-    .filter(event => String(event.getDescription() || '').indexOf(MANAGED_MARKER) !== -1);
+    .filter(event => isManagedEvent_(event, null));
   const duplicateEvents = Math.max(0, managedCalendarEvents.length - desired.length);
 
   const report = {
@@ -660,11 +671,16 @@ function buildHighLoadTestSettings_(source) {
   }
 
   window.buildAppsScriptCode = function buildAppsScriptCode(settings) {
-    const notifyHour = normalizeHour(settings.notifySyncHour, 5);
+    const requestedNotifyHour = normalizeHour(settings.notifySyncHour, 5);
+    const autoSyncHours = normalizeHourArray(
+      settings.autoSyncHours,
+      requestedNotifyHour
+    );
+    const notifyHour = autoSyncHours[autoSyncHours.length - 1];
     const gradeName = settings.gradeName || '高一';
     const defaultCalendarName = `${gradeName}行程｜T-SCHOOL Schedule Sync`;
     const initialSettings = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       appVersion: settings.appVersion || '2.0.0-mvp',
       setupComplete: false,
       gradeName,
@@ -675,12 +691,12 @@ function buildHighLoadTestSettings_(source) {
       includeActivities: settings.includeActivities !== false,
       excludedActivities: settings.excludedActivities || [],
       autoSyncEnabled: true,
-      autoSyncHours: normalizeHourArray(settings.autoSyncHours, notifyHour),
+      autoSyncHours,
       notifySyncHour: notifyHour,
-      notificationPreset: settings.notificationPreset || 'standard',
-      customNotification: settings.customNotification || '',
-      descriptionPreset: settings.descriptionPreset || 'standard',
-      customDescription: settings.customDescription || '',
+      notificationPreset: 'standard',
+      customNotification: '',
+      descriptionPreset: settings.descriptionPreset === 'custom' ? 'custom' : 'standard',
+      customDescription: settings.customDescription || STANDARD_CUSTOM_DESCRIPTION_TEMPLATE,
       reminderMode: settings.reminderMode || 'none',
       reminderMinutes: Number(settings.reminderMinutes) || 10,
       knownTitles: settings.initialKnownTitles || [],
@@ -690,6 +706,10 @@ function buildHighLoadTestSettings_(source) {
       sourceFingerprint: settings.initialSourceFingerprint || '',
       pendingTermKey: '',
       pausedReason: '',
+      autoSyncEnabledBeforeTermTransition: null,
+      termTransitionNoticeAttempts: 0,
+      termTransitionNoticeSentAt: '',
+      termTransitionNoticeLastError: '',
       calendarMigrationFromId: ''
     };
     const sidebarHtml = window.TSCHOOL_SIDEBAR_HTML || '';
@@ -699,15 +719,21 @@ function buildHighLoadTestSettings_(source) {
       : '';
 
     return `const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-mvp')};
-const SETTINGS_SCHEMA_VERSION = 3;
+const SETTINGS_SCHEMA_VERSION = 4;
 const TIMEZONE = 'Asia/Taipei';
 const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
+const EMAIL_TEMPLATE_MANIFEST_URL = 'https://artemas-hsieh.github.io/t-school-schedule-sync/configurator/notification-email-templates.json';
+const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_V1';
+const EMAIL_TEMPLATE_CACHE_SECONDS = 60 * 60;
+const EMAIL_TEMPLATE_MAX_BYTES = 100 * 1024;
 const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
 const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
 const SYNC_JOB_STORE = 'TSCHOOL_SYNC_JOB';
 const STATUS_STORE = 'TSCHOOL_STATUS';
 const SYNC_PROGRESS_STORE = 'TSCHOOL_SYNC_PROGRESS';
 const NOTICE_STORE = 'TSCHOOL_NOTICE_STATE';
+const NOTIFICATION_QUEUE_STORE = 'TSCHOOL_NOTIFICATION_QUEUE';
+const COURSE_OUTLINE_INDEX_CACHE_STORE = 'TSCHOOL_COURSE_OUTLINE_INDEX_CACHE';
 const SYNC_JOB_SCHEMA_VERSION = 1;
 const SYNC_CONTINUATION_HANDLER = 'continueScheduleSync';
 const SYNC_WATCHDOG_HANDLER = 'watchScheduleSync';
@@ -735,6 +761,21 @@ const COURSE_OUTLINE_ONCE_HANDLER = 'refreshCourseOutlinesOnce';
 const COURSE_OUTLINE_RETRY_HANDLER = 'retryCourseOutlineRefresh';
 const COURSE_OUTLINE_WATCHDOG_HANDLER = 'watchCourseOutlineRefresh';
 const COURSE_OUTLINE_APPLY_HANDLER = 'applyCourseOutlineSnapshotToCalendar';
+const TERM_TRANSITION_NOTICE_HANDLER = 'retryTermTransitionNotice';
+const TERM_TRANSITION_NOTICE_RETRY_DELAY_MS = 30 * 60 * 1000;
+const TERM_TRANSITION_NOTICE_MAX_ATTEMPTS = 2;
+const COURSE_OUTLINE_INDEX_SPREADSHEET_ID = '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY';
+const COURSE_OUTLINE_INDEX_SHEET_NAME = '課綱來源';
+const COURSE_OUTLINE_INDEX_HEADER_SCAN_LIMIT = 20;
+const EVENT_METADATA_VERSION = 2;
+const MANAGED_EVENT_TAG_KEY = 'tschool_managed';
+const SYNC_ID_EVENT_TAG_KEY = 'tschool_sync_id';
+const METADATA_VERSION_EVENT_TAG_KEY = 'tschool_meta_version';
+const MANAGED_EVENT_TAG_VALUE = '1';
+const STANDARD_DESCRIPTION_TEMPLATE = ${formatString(STANDARD_CUSTOM_DESCRIPTION_TEMPLATE)};
+const VISIBLE_DESCRIPTION_FOOTER = '[T-SCHOOL Schedule Sync]';
+const COURSE_OUTLINE_DISCLAIMER = '＊部分資訊來自課綱，請以教師最新說明為主';
+// 只供辨識既有事件；新版不再把技術標記寫入使用者可見的說明欄。
 const MANAGED_MARKER = '[T-SCHOOL-SCHEDULE-SYNC]';
 const DESCRIPTION_MARKER = '[T-SCHOOL 行程同步]';
 const LEGACY_DESCRIPTION_MARKER = '[T-SCHOOL 課表同步]';
@@ -745,7 +786,7 @@ const SETTINGS_SIDEBAR_HTML = ${formatLongString(sidebarHtml)};
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const MANUAL_MERGE_EXCEPTIONS = {};
-// 取得新課綱後，在對應年級陣列追加新的來源組與適用日期；不必修改解析或同步核心。
+// 中央索引暫時不可讀且沒有最後成功快取時使用，避免既有 114-2 課綱立即失效。
 const COURSE_OUTLINE_SOURCE_SETS_BY_GRADE = {
   '高一': [],
   '高二': [
@@ -764,6 +805,7 @@ const COURSE_OUTLINE_SOURCE_SETS_BY_GRADE = {
   ],
   '高三': []
 };
+let courseOutlineSourceIndexRuntimeCache_ = null;
 const ACTIVITY_PATTERNS = [
   /全校(?:性)?活動/,
   /^高[一二三](?:導入期|全校活動)$/,
@@ -1055,6 +1097,9 @@ function saveSettingsCore_(input) {
 
     cancelActiveSyncJob_('設定已更新，將依新設定重新規劃。');
     saveSettings_(next);
+    if (!next.pendingTermKey) {
+      deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+    }
     if (next.setupComplete) refreshAutoSyncTriggers_(next);
     else deleteAutoSyncTriggersUnlocked_();
     return {
@@ -1115,18 +1160,28 @@ function sanitizeSettingsInput_(input, previous, source) {
     assertDedicatedCalendar_(calendarId);
   }
 
-  const notifyHour = normalizeHour_(value.notifySyncHour, 5);
-  const hours = normalizeHourArray_(value.autoSyncHours, notifyHour);
+  const requestedNotifyHour = normalizeHour_(value.notifySyncHour, 5);
+  const hours = normalizeHourArray_(
+    (Array.isArray(value.autoSyncHours) ? value.autoSyncHours : [])
+      .concat([requestedNotifyHour]),
+    requestedNotifyHour
+  );
+  const notifyHour = Math.max.apply(null, hours);
   const reminderMode = ['none', 'popup', 'email'].indexOf(value.reminderMode) !== -1
     ? value.reminderMode
     : 'none';
-  const descriptionPreset = ['compact', 'standard', 'detailed', 'custom'].indexOf(value.descriptionPreset) !== -1
-    ? value.descriptionPreset
-    : 'standard';
-  const notificationPreset = ['compact', 'standard', 'detailed', 'custom'].indexOf(value.notificationPreset) !== -1
-    ? value.notificationPreset
-    : 'standard';
-
+  const descriptionPreset = value.descriptionPreset === 'custom' ? 'custom' : 'standard';
+  const customDescription = descriptionPreset === 'custom'
+    ? String(
+      value.customDescription ||
+      previous.customDescription ||
+      STANDARD_DESCRIPTION_TEMPLATE
+    ).slice(0, 4000)
+    : String(
+      previous.customDescription ||
+      value.customDescription ||
+      STANDARD_DESCRIPTION_TEMPLATE
+    ).slice(0, 4000);
   let calendarMigrationFromId = previous.calendarMigrationFromId || '';
   if (previous.calendarId && previous.calendarId !== calendarId) {
     calendarMigrationFromId = previous.calendarId;
@@ -1145,10 +1200,10 @@ function sanitizeSettingsInput_(input, previous, source) {
     autoSyncEnabled: value.autoSyncEnabled !== false,
     autoSyncHours: hours,
     notifySyncHour: notifyHour,
-    notificationPreset,
-    customNotification: String(value.customNotification || previous.customNotification || '').slice(0, 4000),
+    notificationPreset: 'standard',
+    customNotification: '',
     descriptionPreset,
-    customDescription: String(value.customDescription || previous.customDescription || '').slice(0, 4000),
+    customDescription,
     reminderMode,
     reminderMinutes: sanitizeReminderMinutes_(value.reminderMinutes),
     knownTitles: sourceTitles,
@@ -1158,6 +1213,10 @@ function sanitizeSettingsInput_(input, previous, source) {
     sourceFingerprint: source.fingerprint,
     pendingTermKey: '',
     pausedReason: '',
+    autoSyncEnabledBeforeTermTransition: null,
+    termTransitionNoticeAttempts: 0,
+    termTransitionNoticeSentAt: '',
+    termTransitionNoticeLastError: '',
     calendarMigrationFromId
   });
 }
@@ -1169,7 +1228,28 @@ function buildUiData_(settings, source) {
     source: buildSourceUiModel_(source, settings.gradeName),
     calendars: listOwnedCalendars_(),
     status: loadStatus_(),
-    courseOutlineStatus: buildCourseOutlineUiStatus_(settings)
+    courseOutlineStatus: buildCourseOutlineUiStatus_(settings, source),
+    termTransition: buildTermTransitionUiModel_(settings, source)
+  };
+}
+
+function buildTermTransitionUiModel_(settings, source) {
+  const required = Boolean(settings && settings.pendingTermKey);
+  const resumeAutoSync = required
+    ? (typeof settings.autoSyncEnabledBeforeTermTransition === 'boolean'
+      ? settings.autoSyncEnabledBeforeTermTransition
+      : true)
+    : Boolean(settings && settings.autoSyncEnabled);
+  return {
+    required,
+    pendingTermKey: required ? settings.pendingTermKey : '',
+    firstDate: source && source.firstDateKey || '',
+    lastDate: source && source.lastDateKey || '',
+    resumeAutoSync,
+    noticeFailed: required &&
+      Number(settings.termTransitionNoticeAttempts) >= TERM_TRANSITION_NOTICE_MAX_ATTEMPTS &&
+      !settings.termTransitionNoticeSentAt,
+    noticeLastError: required ? settings.termTransitionNoticeLastError || '' : ''
   };
 }
 
@@ -1583,6 +1663,9 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
     firstSetup: Boolean(options.firstSetup),
     forceCalendarCheck,
     notifyOnSuccess: Boolean(options.notifyOnSuccess),
+    notificationWindow: Boolean(
+      options.notificationWindow || isConfiguredNotificationHour_(settings)
+    ),
     deletionApproved: Boolean(options.deletionApproved),
     input,
     createdAt: now,
@@ -1692,6 +1775,8 @@ function prepareSyncOperations_(plan, state, settings, job) {
     const nextOutlineHash = pair.newItem.outlineHash || '';
     const outlineOnlyChanged = storedBaseSignatureMatches_(pair.oldItem, pair.newItem, settings) &&
       previousOutlineHash !== nextOutlineHash;
+    const metadataOnlyChanged = needsEventMetadataMigration_(pair.oldItem) &&
+      storedEventContentSignatureMatches_(pair.oldItem, pair.newItem, settings);
     const forceToken = pair.newKey;
     const forcePending = job.forceCalendarCheck && !job.forceProcessedKeys[forceToken];
 
@@ -1705,7 +1790,9 @@ function prepareSyncOperations_(plan, state, settings, job) {
       return;
     }
     operations.push({
-      type: !forcePending && outlineOnlyChanged ? 'outline' : 'update',
+      type: !forcePending && metadataOnlyChanged
+        ? 'metadata'
+        : (!forcePending && outlineOnlyChanged ? 'outline' : 'update'),
       oldKey: pair.oldItem.stateKey,
       newKey: pair.newKey,
       oldItem: pair.oldItem,
@@ -1794,7 +1881,8 @@ function applySyncOperation_(operation, state, calendar, settings, recovering, s
     const duplicates = findManagedCalendarEventsByStateKey_(
       calendar,
       operation.newItem,
-      operation.newKey
+      operation.newKey,
+      settings
     );
     if (duplicates.length > 1) {
       throw new Error(
@@ -1805,17 +1893,18 @@ function applySyncOperation_(operation, state, calendar, settings, recovering, s
   }
 
   const updateOptions = { recovering };
-  const calendarEventId = operation.type === 'outline'
-    ? updateCalendarDescriptionOnly_(
+  let calendarEventId;
+  if (operation.type === 'metadata') {
+    calendarEventId = migrateCalendarEventMetadata_(
       calendar,
       operation.oldItem.calendarEventId,
       operation.newItem,
       operation.newKey,
       settings,
-      operation.oldKey,
-      updateOptions
-    )
-    : updateCalendarEvent_(
+      operation.oldKey
+    );
+  } else if (operation.type === 'outline') {
+    calendarEventId = updateCalendarOutlineFields_(
       calendar,
       operation.oldItem.calendarEventId,
       operation.newItem,
@@ -1824,6 +1913,17 @@ function applySyncOperation_(operation, state, calendar, settings, recovering, s
       operation.oldKey,
       updateOptions
     );
+  } else {
+    calendarEventId = updateCalendarEvent_(
+      calendar,
+      operation.oldItem.calendarEventId,
+      operation.newItem,
+      operation.newKey,
+      settings,
+      operation.oldKey,
+      updateOptions
+    );
+  }
   if (operation.oldKey !== operation.newKey) delete state[operation.oldKey];
   state[operation.newKey] = serializeStateItem_(
     operation.newItem,
@@ -1832,6 +1932,9 @@ function applySyncOperation_(operation, state, calendar, settings, recovering, s
     settings
   );
   if (operation.forceToken) job.forceProcessedKeys[operation.forceToken] = true;
+  if (operation.type === 'metadata') {
+    return;
+  }
   if (operation.type === 'outline') {
     stats.outlineUpdated += 1;
   } else {
@@ -1910,7 +2013,8 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
     saveSyncJob_(job);
     sendSyncNotificationsSafe_(settings, result, {
       reason: job.reason,
-      notifyOnSuccess: job.notifyOnSuccess
+      notifyOnSuccess: job.notifyOnSuccess,
+      notificationWindow: job.notificationWindow
     });
     if (job.firstSetup) sendFirstSetupNotificationSafe_(result);
   }
@@ -1967,7 +2071,15 @@ function handleSyncJobFailure_(job, error) {
   writeFailedSyncStatus_(message);
   writeSyncJobProgress_(job, message, 'error');
   if (actionRequired) {
-    sendActionRequiredSafe_(loadSettings_(), '同步已停止，需要檢查', message);
+    sendActionRequiredSafe_(
+      loadSettings_(),
+      '同步已停止，需要檢查',
+      message,
+      '',
+      'sync_stopped',
+      { message },
+      { immediate: true }
+    );
   } else {
     notifySyncFailureSafe_(error);
   }
@@ -2119,15 +2231,22 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
   }
 
   if (settings.pendingTermKey !== source.termKey) {
+    if (!settings.pendingTermKey ||
+        typeof settings.autoSyncEnabledBeforeTermTransition !== 'boolean') {
+      settings.autoSyncEnabledBeforeTermTransition = Boolean(settings.autoSyncEnabled);
+    }
     settings.selectedCourses = [];
     settings.excludedActivities = [];
     settings.pendingTitles = [];
     settings.pendingTermKey = source.termKey;
     settings.autoSyncEnabled = false;
     settings.pausedReason = '偵測到新學期，請重新選擇課程。';
+    settings.termTransitionNoticeAttempts = 0;
+    settings.termTransitionNoticeSentAt = '';
+    settings.termTransitionNoticeLastError = '';
     saveSettings_(settings);
     deleteAutoSyncTriggersUnlocked_();
-    sendActionRequiredSafe_(settings, '新學期課表已更新', '系統已暫停自動同步並保留原有日曆事件。請開啟行程同步控制臺，重新選擇本學期課程。');
+    deliverTermTransitionNotice_(settings, source);
   }
 
   if (!quiet) {
@@ -2135,6 +2254,69 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
   }
 
   return settings;
+}
+
+function buildTermTransitionNotice_(settings, source) {
+  const dateRange = source && source.firstDateKey
+    ? source.firstDateKey + (source.lastDateKey ? '–' + source.lastDateKey : '')
+    : '新學期';
+  return {
+    subject: '新學期行程已更新',
+    dateRange,
+    body:
+      '系統偵測到 ' + dateRange + ' 的新學期行程\\n\\n' +
+      '自動同步已暫停，既有日曆事件會完整保留。' +
+      '請開啟「行程同步」→「開啟設定」，重新選擇本學期課程並儲存。'
+  };
+}
+
+function deliverTermTransitionNotice_(settings, source) {
+  if (!settings || !settings.pendingTermKey || settings.termTransitionNoticeSentAt) return true;
+  const notice = buildTermTransitionNotice_(settings, source);
+  const result = sendActionRequiredSafe_(
+    settings,
+    notice.subject,
+    notice.body,
+    'term-transition|' + settings.pendingTermKey,
+    'term_transition',
+    { dateRange: notice.dateRange }
+  );
+  settings.termTransitionNoticeAttempts =
+    Math.max(0, Number(settings.termTransitionNoticeAttempts) || 0) +
+    (result.alreadySent ? 0 : 1);
+  if (result.ok) {
+    settings.termTransitionNoticeSentAt = new Date().toISOString();
+    settings.termTransitionNoticeLastError = '';
+    deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+  } else {
+    settings.termTransitionNoticeLastError = result.error || '通知寄送失敗';
+  }
+  saveSettings_(settings);
+  if (!result.ok &&
+      settings.termTransitionNoticeAttempts < TERM_TRANSITION_NOTICE_MAX_ATTEMPTS) {
+    ensureOneTimeTrigger_(
+      TERM_TRANSITION_NOTICE_HANDLER,
+      TERM_TRANSITION_NOTICE_RETRY_DELAY_MS
+    );
+  }
+  return result.ok;
+}
+
+function retryTermTransitionNotice() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return false;
+  try {
+    const settings = loadSettings_();
+    if (!settings.pendingTermKey || settings.termTransitionNoticeSentAt ||
+        Number(settings.termTransitionNoticeAttempts) >= TERM_TRANSITION_NOTICE_MAX_ATTEMPTS) {
+      return false;
+    }
+    const source = loadSourceContext_(settings.gradeName);
+    if (source.termKey !== settings.pendingTermKey) return false;
+    return deliverTermTransitionNotice_(settings, source);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function registerNewTitles_(settings, source) {
@@ -2170,7 +2352,18 @@ function registerNewTitles_(settings, source) {
     settings.pendingTitles.some(item => normalizeTitle_(item) === normalizeTitle_(title))
   );
   if (pendingDiscovered.length) {
-    sendActionRequiredSafe_(settings, '發現新的課表項目', '下列項目已先加入日曆，請在控制臺確認是否屬於你：\\n\\n' + pendingDiscovered.join('\\n'));
+    sendActionRequiredSafe_(
+      settings,
+      '發現新的行程項目',
+      '下列項目已先加入日曆，請在控制臺確認是否屬於你：\\n\\n' +
+        pendingDiscovered.join('\\n'),
+      '',
+      'new_schedule_items',
+      {
+        itemCount: pendingDiscovered.length,
+        items: pendingDiscovered.map(label => ({ label }))
+      }
+    );
   }
   return settings;
 }
@@ -2314,13 +2507,25 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
     const outlineOnlyChanged = storedBaseSignatureMatches_(pair.oldItem, pair.newItem, settings) &&
       previousOutlineHash !== nextOutlineHash &&
       pair.oldItem.stateKey === pair.newKey;
+    const metadataOnlyChanged = needsEventMetadataMigration_(pair.oldItem) &&
+      storedEventContentSignatureMatches_(pair.oldItem, pair.newItem, settings);
     let calendarEventId = pair.oldItem.calendarEventId;
 
     if (!options.forceCalendarCheck &&
         storedEventSignatureMatches_(pair.oldItem, pair.newItem, settings)) {
       unchanged += 1;
+    } else if (!options.forceCalendarCheck && metadataOnlyChanged) {
+      calendarEventId = migrateCalendarEventMetadata_(
+        calendar,
+        calendarEventId,
+        pair.newItem,
+        pair.newKey,
+        settings,
+        pair.oldItem.stateKey
+      );
+      unchanged += 1;
     } else if (!options.forceCalendarCheck && outlineOnlyChanged) {
-      calendarEventId = updateCalendarDescriptionOnly_(calendar, calendarEventId, pair.newItem, pair.newKey, settings);
+      calendarEventId = updateCalendarOutlineFields_(calendar, calendarEventId, pair.newItem, pair.newKey, settings);
       outlineUpdated += 1;
     } else {
       calendarEventId = updateCalendarEvent_(calendar, calendarEventId, pair.newItem, pair.newKey, settings);
@@ -2354,16 +2559,20 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
 }
 
 function createCalendarEvent_(calendar, item, stateKey, settings) {
-  const options = { location: item.location || '', description: buildManagedDescription_(item, stateKey, settings) };
+  const options = {
+    location: buildEventLocation_(item),
+    description: buildManagedDescription_(item, stateKey, settings)
+  };
   const event = item.isAllDay
     ? calendar.createAllDayEvent(buildEventTitle_(item, settings), item.start, options)
     : calendar.createEvent(buildEventTitle_(item, settings), item.start, item.end, options);
+  setManagedEventTags_(event, stateKey);
   applyEventReminders_(event, settings);
   return event;
 }
 
 function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
-  const matches = findManagedCalendarEventsByStateKey_(calendar, item, stateKey);
+  const matches = findManagedCalendarEventsByStateKey_(calendar, item, stateKey, settings);
   if (matches.length > 1) {
     throw new Error(
       '[ACTION_REQUIRED] 日曆中出現多筆相同同步識別碼的事件，系統已停止，避免再建立重複事件：' +
@@ -2371,23 +2580,35 @@ function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
     );
   }
   if (matches.length === 1) {
-    applyEventReminders_(matches[0], settings);
-    return matches[0];
+    const event = matches[0];
+    const title = buildEventTitle_(item, settings);
+    const location = buildEventLocation_(item);
+    const description = buildManagedDescription_(item, stateKey, settings);
+    setManagedEventTags_(event, stateKey);
+    if (event.getTitle() !== title) event.setTitle(title);
+    if ((event.getLocation() || '') !== location) event.setLocation(location);
+    if ((event.getDescription() || '') !== description) event.setDescription(description);
+    applyEventReminders_(event, settings);
+    return event;
   }
   return createCalendarEvent_(calendar, item, stateKey, settings);
 }
 
-function findManagedCalendarEventsByStateKey_(calendar, item, stateKey) {
+function findManagedCalendarEventsByStateKey_(calendar, item, stateKey, settings) {
   const rangeStart = new Date(item.start);
   const rangeEnd = new Date(item.end);
   rangeStart.setDate(rangeStart.getDate() - 1);
   rangeEnd.setDate(rangeEnd.getDate() + 1);
-  const marker = '同步識別碼：' + hashText_(stateKey);
-  return calendar.getEvents(rangeStart, rangeEnd).filter(event => {
-    const description = String(event.getDescription() || '');
-    return description.indexOf(MANAGED_MARKER) !== -1 &&
-      description.indexOf(marker) !== -1;
-  });
+  const events = calendar.getEvents(rangeStart, rangeEnd);
+  const managedMatches = events.filter(event => isManagedEvent_(event, stateKey));
+  if (managedMatches.length) return managedMatches;
+
+  // CalendarApp 建立事件與 setTag 無法形成單一交易。若剛建立就逾時，
+  // 只接回內容完全相同、而且尚未帶任何管理標籤的唯一事件。
+  return events.filter(event =>
+    !isManagedEvent_(event, null) &&
+    calendarEventMatchesExpectedContent_(event, item, stateKey, settings)
+  );
 }
 
 function updateCalendarEvent_(calendar, eventId, item, stateKey, settings, expectedOldStateKey, options) {
@@ -2411,6 +2632,7 @@ function updateCalendarEvent_(calendar, eventId, item, stateKey, settings, expec
   }
 
   const title = buildEventTitle_(item, settings);
+  const location = buildEventLocation_(item);
   const description = buildManagedDescription_(item, stateKey, settings);
   if (event.getTitle() !== title) event.setTitle(title);
   if (item.isAllDay) {
@@ -2418,13 +2640,14 @@ function updateCalendarEvent_(calendar, eventId, item, stateKey, settings, expec
   } else if (event.getStartTime().getTime() !== item.start.getTime() || event.getEndTime().getTime() !== item.end.getTime()) {
     event.setTime(item.start, item.end);
   }
-  if ((event.getLocation() || '') !== (item.location || '')) event.setLocation(item.location || '');
+  if ((event.getLocation() || '') !== location) event.setLocation(location);
+  setManagedEventTags_(event, stateKey);
   if ((event.getDescription() || '') !== description) event.setDescription(description);
   applyEventReminders_(event, settings);
   return event.getId();
 }
 
-function updateCalendarDescriptionOnly_(calendar, eventId, item, stateKey, settings, expectedOldStateKey, options) {
+function updateCalendarOutlineFields_(calendar, eventId, item, stateKey, settings, expectedOldStateKey, options) {
   const event = calendar.getEventById(eventId);
   if (!event) {
     return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
@@ -2436,7 +2659,34 @@ function updateCalendarDescriptionOnly_(calendar, eventId, item, stateKey, setti
       item.originalTitle + '（' + item.dateKey + '）。'
     );
   }
+  const title = buildEventTitle_(item, settings);
+  const location = buildEventLocation_(item);
   const description = buildManagedDescription_(item, stateKey, settings);
+  if (event.getTitle() !== title) event.setTitle(title);
+  if ((event.getLocation() || '') !== location) event.setLocation(location);
+  setManagedEventTags_(event, stateKey);
+  if ((event.getDescription() || '') !== description) event.setDescription(description);
+  return event.getId();
+}
+
+function migrateCalendarEventMetadata_(calendar, eventId, item, stateKey, settings, expectedOldStateKey) {
+  const event = calendar.getEventById(eventId);
+  if (!event) {
+    return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
+  }
+  if (!isManagedEvent_(event, expectedOldStateKey) &&
+      !isManagedEvent_(event, stateKey)) {
+    throw new Error(
+      '[ACTION_REQUIRED] 要遷移的事件已失去管理標記，系統已保留原事件並停止修改：' +
+      item.originalTitle + '（' + item.dateKey + '）。'
+    );
+  }
+  const title = buildEventTitle_(item, settings);
+  const location = buildEventLocation_(item);
+  const description = buildManagedDescription_(item, stateKey, settings);
+  setManagedEventTags_(event, stateKey);
+  if (event.getTitle() !== title) event.setTitle(title);
+  if ((event.getLocation() || '') !== location) event.setLocation(location);
   if ((event.getDescription() || '') !== description) event.setDescription(description);
   return event.getId();
 }
@@ -2455,6 +2705,13 @@ function deleteCalendarEvent_(calendar, eventId, stateKey) {
 }
 
 function isManagedEvent_(event, stateKey) {
+  const managedTag = getEventTagSafe_(event, MANAGED_EVENT_TAG_KEY);
+  if (managedTag === MANAGED_EVENT_TAG_VALUE) {
+    return !stateKey ||
+      getEventTagSafe_(event, SYNC_ID_EVENT_TAG_KEY) === hashText_(stateKey);
+  }
+
+  // 向下相容：既有部署曾把識別資訊寫在說明欄。
   const description = String(event.getDescription() || '');
   const hasManagedMarker = description.indexOf(MANAGED_MARKER) !== -1;
   if (!hasManagedMarker) return false;
@@ -2464,18 +2721,64 @@ function isManagedEvent_(event, stateKey) {
     description.indexOf('原始內容：') !== -1;
 }
 
+function setManagedEventTags_(event, stateKey) {
+  // 最後才寫 managed flag。若中途逾時，下一次可用完整內容接回尚未完成標記的事件。
+  event.setTag(SYNC_ID_EVENT_TAG_KEY, hashText_(stateKey));
+  event.setTag(METADATA_VERSION_EVENT_TAG_KEY, String(EVENT_METADATA_VERSION));
+  event.setTag(MANAGED_EVENT_TAG_KEY, MANAGED_EVENT_TAG_VALUE);
+}
+
+function getEventTagSafe_(event, key) {
+  if (!event || typeof event.getTag !== 'function') return '';
+  try {
+    return String(event.getTag(key) || '');
+  } catch (error) {
+    return '';
+  }
+}
+
+function calendarEventMatchesExpectedContent_(event, item, stateKey, settings) {
+  if (!event || event.isAllDayEvent() !== Boolean(item.isAllDay)) return false;
+  if (event.getTitle() !== buildEventTitle_(item, settings)) return false;
+  if ((event.getLocation() || '') !== buildEventLocation_(item)) return false;
+  if ((event.getDescription() || '') !== buildManagedDescription_(item, stateKey, settings)) return false;
+  if (item.isAllDay) {
+    return formatDateKey_(event.getAllDayStartDate()) === item.dateKey;
+  }
+  return event.getStartTime().getTime() === item.start.getTime() &&
+    event.getEndTime().getTime() === item.end.getTime();
+}
+
 function applyEventReminders_(event, settings) {
   event.removeAllReminders();
   if (settings.reminderMode === 'popup') event.addPopupReminder(settings.reminderMinutes);
   if (settings.reminderMode === 'email') event.addEmailReminder(settings.reminderMinutes);
 }
 
+function buildEventLocation_(item) {
+  const outline = item && item.courseOutline;
+  const values = [item && item.location, outline && outline.classroom];
+  const seen = {};
+  return values.map(normalizeText_).filter(value => {
+    if (!value) return false;
+    const key = normalizeTitle_(value);
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  }).join('-');
+}
+
 function buildEventTitle_(item) {
-  return item.type === 'activity' ? '活動｜' + item.originalTitle : item.originalTitle;
+  const baseTitle = item.type === 'activity'
+    ? '活動｜' + item.originalTitle
+    : item.originalTitle;
+  const location = buildEventLocation_(item);
+  return location ? baseTitle + ' [' + location + ']' : baseTitle;
 }
 
 function buildManagedDescription_(item, stateKey, settings) {
-  const template = getDescriptionTemplate_(settings);
+  const outline = item && item.courseOutline || {};
+  const displayLocation = buildEventLocation_(item);
   const values = {
     course: item.originalTitle,
     date: item.dateKey.replace(/-/g, '/'),
@@ -2485,31 +2788,71 @@ function buildManagedDescription_(item, stateKey, settings) {
     startTime: item.isAllDay ? '全天' : item.startTime,
     endTime: item.isAllDay ? '全天' : item.endTime,
     location: item.location || '未註明',
+    classroom: outline.classroom || '',
+    displayLocation: displayLocation || '未註明',
+    topic: outline.topic || '',
+    content: outline.content || '',
     sourceUpdatedAt: item.sourceUpdatedLabel || '未提供'
   };
-  const body = renderTemplate_(template, values).trim();
-  const sections = [MANAGED_MARKER, body || DESCRIPTION_MARKER];
-  const outlineBlock = buildCourseOutlineDescriptionBlock_(item);
-  if (outlineBlock) sections.push(outlineBlock);
-  sections.push('', '同步識別碼：' + hashText_(stateKey));
-  return sections.join('\\n');
+  const customTemplate = String(settings.customDescription || '').trim();
+  const body = settings.descriptionPreset === 'custom' &&
+      customTemplate &&
+      customTemplate !== STANDARD_DESCRIPTION_TEMPLATE
+    ? renderDescriptionTemplateHtml_(customTemplate, values)
+    : buildStandardDescriptionHtml_(values);
+  const footer = escapeDescriptionHtml_(VISIBLE_DESCRIPTION_FOOTER);
+  const outlineDisclaimer = hasCourseOutlineInformation_(item)
+    ? '<br>' + escapeDescriptionHtml_(COURSE_OUTLINE_DISCLAIMER)
+    : '';
+  return body + '<br><br><br>' + footer + outlineDisclaimer;
 }
 
-function buildCourseOutlineDescriptionBlock_(item) {
+function hasCourseOutlineInformation_(item) {
   const outline = item && item.courseOutline;
-  if (!outline) return '';
-  const lines = ['課綱'];
-  if (outline.classroom) lines.push('實體課程教室：' + outline.classroom);
-  if (outline.topic) lines.push('單元主題：' + outline.topic);
-  if (outline.content) lines.push('課程內容：' + outline.content);
-  return lines.length > 1 ? lines.join('\\n') : '';
+  return Boolean(outline && (outline.classroom || outline.topic || outline.content));
 }
 
-function getDescriptionTemplate_(settings) {
-  if (settings.descriptionPreset === 'compact') return '{week} 週｜星期{weekday}｜第 {period} 節\\n{location}';
-  if (settings.descriptionPreset === 'detailed') return '{course}\\n{date}（{weekday}）\\n第 {period} 節｜{startTime}–{endTime}\\n地點：{location}\\n課表更新：{sourceUpdatedAt}';
-  if (settings.descriptionPreset === 'custom') return settings.customDescription;
-  return '第 {week} 週｜星期{weekday}｜第 {period} 節\\n時間：{startTime}–{endTime}\\n地點：{location}\\n課表更新：{sourceUpdatedAt}';
+function buildStandardDescriptionHtml_(values) {
+  const lines = [
+    '第 ' + escapeDescriptionHtml_(values.week) +
+      ' 週 / 週' + escapeDescriptionHtml_(values.weekday) +
+      ' / ' + (values.period === '全天'
+        ? '全天'
+        : '第 ' + escapeDescriptionHtml_(values.period) + ' 節')
+  ];
+  if (values.topic) {
+    lines.push('', '<b># 單元主題</b>', escapeDescriptionHtml_(values.topic));
+  }
+  if (values.content) {
+    lines.push('', '<b># 課程內容</b>', escapeDescriptionHtml_(values.content));
+  }
+  return lines.join('<br>');
+}
+
+function renderDescriptionTemplateHtml_(template, values) {
+  const safeTemplate = escapeDescriptionHtml_(template);
+  return safeTemplate
+    .replace(/\\{([A-Za-z]+)\\}/g, (match, key) =>
+      Object.prototype.hasOwnProperty.call(values, key)
+        ? escapeDescriptionTemplateValueHtml_(values[key])
+        : match
+    )
+    .replace(/\\*\\*([^*]+)\\*\\*/g, '<b>$1</b>')
+    .replace(/\\r?\\n/g, '<br>')
+    .trim();
+}
+
+function escapeDescriptionHtml_(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeDescriptionTemplateValueHtml_(value) {
+  return escapeDescriptionHtml_(value).replace(/\\*/g, '&#42;');
 }
 
 function renderTemplate_(template, values) {
@@ -2555,7 +2898,11 @@ function storedBaseSignatureMatches_(oldItem, newItem, settings) {
     (!oldItem.baseSyncSignature && oldItem.syncSignature === legacyPayload);
 }
 
-function storedEventSignatureMatches_(oldItem, newItem, settings) {
+function needsEventMetadataMigration_(oldItem) {
+  return Number(oldItem.metadataVersion) !== EVENT_METADATA_VERSION;
+}
+
+function storedEventContentSignatureMatches_(oldItem, newItem, settings) {
   const expected = makeEventSignature_(newItem, settings);
   if (oldItem.syncSignature === expected) return true;
   if (Number(oldItem.signatureVersion) >= 2) return false;
@@ -2568,9 +2915,15 @@ function storedEventSignatureMatches_(oldItem, newItem, settings) {
     hashText_(legacySignature) === expected;
 }
 
+function storedEventSignatureMatches_(oldItem, newItem, settings) {
+  return !needsEventMetadataMigration_(oldItem) &&
+    storedEventContentSignatureMatches_(oldItem, newItem, settings);
+}
+
 function serializeStateItem_(item, calendarEventId, signature, settings) {
   return {
     signatureVersion: 2,
+    metadataVersion: EVENT_METADATA_VERSION,
     originalTitle: item.originalTitle,
     type: item.type,
     isAllDay: Boolean(item.isAllDay),
@@ -2594,7 +2947,8 @@ function serializeStateItem_(item, calendarEventId, signature, settings) {
 }
 
 function getConfiguredCourseOutlineSourceSets_(gradeName) {
-  const sets = COURSE_OUTLINE_SOURCE_SETS_BY_GRADE[sanitizeGrade_(gradeName)];
+  const sourceIndex = loadCourseOutlineSourceIndex_();
+  const sets = sourceIndex.setsByGrade[sanitizeGrade_(gradeName)];
   return (Array.isArray(sets) ? sets : []).filter(set =>
     set &&
     set.key &&
@@ -2603,6 +2957,223 @@ function getConfiguredCourseOutlineSourceSets_(gradeName) {
     Array.isArray(set.spreadsheetIds) &&
     set.spreadsheetIds.length > 0
   );
+}
+
+function resetCourseOutlineSourceIndexRuntimeCache_() {
+  courseOutlineSourceIndexRuntimeCache_ = null;
+}
+
+function getCourseOutlineIndexHeaders_() {
+  return [
+    '啟用',
+    '來源組鍵',
+    '課綱名稱',
+    '年級',
+    '適用起日',
+    '適用迄日',
+    '課綱試算表連結'
+  ];
+}
+
+function findCourseOutlineIndexHeader_(values) {
+  const required = getCourseOutlineIndexHeaders_();
+  const limit = Math.min(COURSE_OUTLINE_INDEX_HEADER_SCAN_LIMIT, (values || []).length);
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const columns = {};
+    (values[rowIndex] || []).forEach((value, columnIndex) => {
+      const label = String(value == null ? '' : value).trim();
+      if (label && !Object.prototype.hasOwnProperty.call(columns, label)) columns[label] = columnIndex;
+    });
+    if (required.every(label => Object.prototype.hasOwnProperty.call(columns, label))) {
+      return { rowIndex, columns };
+    }
+  }
+  throw new Error(
+    '課綱來源索引找不到必要欄位：' + required.join('、') + '。'
+  );
+}
+
+function parseCourseOutlineIndexEnabled_(value, rowNumber) {
+  if (value === true) return true;
+  if (value === false || value == null || String(value).trim() === '') return false;
+  const normalized = String(value).trim().toUpperCase();
+  if (normalized === 'TRUE' || normalized === '1' || normalized === '是' || normalized === '啟用') return true;
+  if (normalized === 'FALSE' || normalized === '0' || normalized === '否' || normalized === '停用') return false;
+  throw new Error('課綱來源索引第 ' + rowNumber + ' 列的「啟用」必須是 TRUE 或 FALSE。');
+}
+
+function extractCourseOutlineSpreadsheetId_(value, rowNumber) {
+  const url = String(value || '').trim();
+  const match = url.match(/^https:\\/\\/docs\\.google\\.com\\/spreadsheets\\/d\\/([A-Za-z0-9_-]+)(?:\\/|$)/);
+  if (!match) {
+    throw new Error(
+      '課綱來源索引第 ' + rowNumber + ' 列的連結不是一般 Google Sheets /edit 網址。'
+    );
+  }
+  return match[1];
+}
+
+function parseCourseOutlineSourceIndexValues_(values) {
+  const header = findCourseOutlineIndexHeader_(values);
+  const groups = {};
+  const setsByGrade = { '高一': [], '高二': [], '高三': [] };
+  const spreadsheetOrigins = {};
+
+  (values || []).slice(header.rowIndex + 1).forEach((row, offset) => {
+    const rowNumber = header.rowIndex + offset + 2;
+    const cellValue = label => row ? row[header.columns[label]] : '';
+    const read = label => {
+      const value = cellValue(label);
+      return String(value == null ? '' : value).trim();
+    };
+    const enabledValue = cellValue('啟用');
+    const hasContent = getCourseOutlineIndexHeaders_()
+      .some(label => read(label) !== '');
+    if (!hasContent || !parseCourseOutlineIndexEnabled_(enabledValue, rowNumber)) return;
+
+    const key = read('來源組鍵');
+    const outlineName = read('課綱名稱');
+    const gradeName = read('年級');
+    const validFrom = read('適用起日');
+    const validUntil = read('適用迄日');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$/.test(key)) {
+      throw new Error('課綱來源索引第 ' + rowNumber + ' 列的「來源組鍵」格式不正確。');
+    }
+    if (!outlineName) throw new Error('課綱來源索引第 ' + rowNumber + ' 列缺少「課綱名稱」。');
+    if (['高一', '高二', '高三'].indexOf(gradeName) === -1) {
+      throw new Error('課綱來源索引第 ' + rowNumber + ' 列的年級必須是高一、高二或高三。');
+    }
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(validFrom) ||
+        !/^\\d{4}-\\d{2}-\\d{2}$/.test(validUntil) ||
+        validFrom > validUntil) {
+      throw new Error('課綱來源索引第 ' + rowNumber + ' 列的適用日期格式或範圍不正確。');
+    }
+
+    const spreadsheetId = extractCourseOutlineSpreadsheetId_(
+      read('課綱試算表連結'),
+      rowNumber
+    );
+    if (spreadsheetOrigins[spreadsheetId]) {
+      throw new Error(
+        '課綱來源索引的試算表連結重複出現在第 ' +
+        spreadsheetOrigins[spreadsheetId] + '、' + rowNumber + ' 列。'
+      );
+    }
+    spreadsheetOrigins[spreadsheetId] = rowNumber;
+
+    let sourceSet = groups[key];
+    if (!sourceSet) {
+      sourceSet = {
+        key,
+        label: '',
+        outlineNames: [],
+        validFrom,
+        validUntil,
+        spreadsheetIds: []
+      };
+      groups[key] = sourceSet;
+      setsByGrade[gradeName].push(sourceSet);
+      sourceSet.gradeName = gradeName;
+    } else if (sourceSet.gradeName !== gradeName ||
+               sourceSet.validFrom !== validFrom ||
+               sourceSet.validUntil !== validUntil) {
+      throw new Error(
+        '課綱來源索引中的來源組「' + key + '」必須使用相同年級與適用日期。'
+      );
+    }
+    sourceSet.outlineNames.push(outlineName);
+    sourceSet.spreadsheetIds.push(spreadsheetId);
+  });
+
+  Object.keys(groups).forEach(key => {
+    const sourceSet = groups[key];
+    sourceSet.outlineNames = uniqueExactStrings_(sourceSet.outlineNames);
+    sourceSet.label = sourceSet.outlineNames.join('、') || sourceSet.key;
+    delete sourceSet.gradeName;
+  });
+
+  return {
+    setsByGrade,
+    fingerprint: hashText_(JSON.stringify(setsByGrade))
+  };
+}
+
+function assertCourseOutlineSourceIndexPayload_(payload) {
+  if (!payload || !payload.setsByGrade || typeof payload.setsByGrade !== 'object') {
+    throw new Error('課綱來源索引快取格式不正確。');
+  }
+  ['高一', '高二', '高三'].forEach(gradeName => {
+    const sets = payload.setsByGrade[gradeName];
+    if (!Array.isArray(sets)) throw new Error('課綱來源索引缺少' + gradeName + '資料。');
+    sets.forEach(set => {
+      if (!set || !set.key ||
+          !/^\\d{4}-\\d{2}-\\d{2}$/.test(set.validFrom) ||
+          !/^\\d{4}-\\d{2}-\\d{2}$/.test(set.validUntil) ||
+          !Array.isArray(set.spreadsheetIds) ||
+          !set.spreadsheetIds.length) {
+        throw new Error('課綱來源索引快取包含無效來源組。');
+      }
+    });
+  });
+  return payload;
+}
+
+function readCourseOutlineSourceIndexSpreadsheet_() {
+  const spreadsheet = SpreadsheetApp.openById(COURSE_OUTLINE_INDEX_SPREADSHEET_ID);
+  const sheet = spreadsheet.getSheetByName(COURSE_OUTLINE_INDEX_SHEET_NAME);
+  if (!sheet) throw new Error('課綱來源索引缺少「' + COURSE_OUTLINE_INDEX_SHEET_NAME + '」分頁。');
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (!lastRow || !lastColumn) throw new Error('課綱來源索引沒有可讀取的資料。');
+  const values = sheet.getRange(1, 1, lastRow, lastColumn).getDisplayValues();
+  return parseCourseOutlineSourceIndexValues_(values);
+}
+
+function loadCourseOutlineSourceIndex_() {
+  if (courseOutlineSourceIndexRuntimeCache_) return courseOutlineSourceIndexRuntimeCache_;
+
+  try {
+    const live = readCourseOutlineSourceIndexSpreadsheet_();
+    const payload = assertCourseOutlineSourceIndexPayload_({
+      setsByGrade: live.setsByGrade,
+      fingerprint: live.fingerprint,
+      refreshedAt: new Date().toISOString()
+    });
+    courseOutlineSourceIndexRuntimeCache_ = Object.assign({}, payload, {
+      source: 'live',
+      warning: ''
+    });
+    try {
+      writeChunkedJson_(COURSE_OUTLINE_INDEX_CACHE_STORE, payload);
+    } catch (cacheError) {
+      if (typeof Logger !== 'undefined' && Logger &&
+          typeof Logger.log === 'function') {
+        Logger.log('課綱來源索引快取保存失敗：' + cacheError.message);
+      }
+    }
+    return courseOutlineSourceIndexRuntimeCache_;
+  } catch (liveError) {
+    try {
+      const cached = readChunkedJson_(COURSE_OUTLINE_INDEX_CACHE_STORE, null);
+      assertCourseOutlineSourceIndexPayload_(cached);
+      courseOutlineSourceIndexRuntimeCache_ = Object.assign({}, cached, {
+        source: 'last_success',
+        warning: '中央課綱索引暫時無法讀取，已沿用最後成功版本：' + liveError.message
+      });
+      return courseOutlineSourceIndexRuntimeCache_;
+    } catch (cacheError) {
+      const fallback = assertCourseOutlineSourceIndexPayload_({
+        setsByGrade: JSON.parse(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
+        fingerprint: hashText_(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
+        refreshedAt: ''
+      });
+      courseOutlineSourceIndexRuntimeCache_ = Object.assign({}, fallback, {
+        source: 'embedded_fallback',
+        warning: '中央課綱索引尚未成功讀取，暫時使用內建 114-2 來源：' + liveError.message
+      });
+      return courseOutlineSourceIndexRuntimeCache_;
+    }
+  }
 }
 
 function isDateInCourseOutlineSourceSet_(dateKey, sourceSet) {
@@ -2963,13 +3534,20 @@ function saveCourseOutlineState_(state) {
   writeChunkedJson_(COURSE_OUTLINE_STATE_STORE, state);
 }
 
-function buildCourseOutlineUiStatus_(settings) {
+function buildCourseOutlineUiStatus_(settings, source) {
+  const sourceIndex = loadCourseOutlineSourceIndex_();
   const configuredSets = getConfiguredCourseOutlineSourceSets_(settings.gradeName);
+  const relevantSets = source && Array.isArray(source.events)
+    ? getRelevantCourseOutlineSourceSets_(settings.gradeName, source.events)
+    : configuredSets;
   const state = loadCourseOutlineState_();
   const snapshot = readActiveCourseOutlineSnapshot_();
   return {
-    enabled: configuredSets.length > 0,
-    sourceSetLabels: configuredSets.map(sourceSet => sourceSet.label),
+    enabled: relevantSets.length > 0,
+    configured: configuredSets.length > 0,
+    sourceSetLabels: relevantSets.map(sourceSet => sourceSet.label),
+    indexSource: sourceIndex.source || '',
+    indexWarning: sourceIndex.warning || '',
     state: state.status || 'idle',
     lastSuccessAt: state.lastSuccessAt || snapshot && snapshot.refreshedAt || '',
     lastSuccessLabel: snapshot && snapshot.refreshedAtLabel || '',
@@ -3226,10 +3804,15 @@ function sendCourseOutlineFailureNotification_(incidentId) {
       : (state.lastSuccessAt ? formatDateTime_(new Date(state.lastSuccessAt)) : '尚無成功快照');
     sendEmail_(
       loadSettings_(),
+      'course_outline_failure',
       '[T-SCHOOL] 課綱更新連續失敗',
       '課綱已嘗試兩次仍無法更新。\\n\\n錯誤：' + (state.lastError || '未知錯誤') +
       '\\n最後成功課綱：' + lastSuccess +
-      '\\n\\n基本課表與行事曆同步仍會使用最後成功快照；若沒有快照，則只同步基本課表。'
+      '\\n\\n基本行程與行事曆同步仍會使用最後成功快照；若沒有快照，則只同步基本行程。',
+      {
+        message: state.lastError || '未知錯誤',
+        lastSuccess
+      }
     );
     const latest = loadCourseOutlineState_();
     if (latest.incidentId === incidentId) {
@@ -3528,6 +4111,21 @@ function loadSettings_() {
   settings.knownTitles = uniqueStrings_(settings.knownTitles || []);
   settings.pendingTitles = uniqueStrings_(settings.pendingTitles || []);
   settings.excludedTitles = uniqueStrings_(settings.excludedTitles || []);
+  if (settings.pendingTermKey &&
+      typeof settings.autoSyncEnabledBeforeTermTransition !== 'boolean') {
+    settings.autoSyncEnabledBeforeTermTransition = true;
+  }
+  settings.termTransitionNoticeAttempts =
+    Math.max(0, Number(settings.termTransitionNoticeAttempts) || 0);
+  settings.termTransitionNoticeSentAt =
+    String(settings.termTransitionNoticeSentAt || '');
+  settings.termTransitionNoticeLastError =
+    String(settings.termTransitionNoticeLastError || '');
+  const customDescriptionSelected = settings.descriptionPreset === 'custom';
+  settings.descriptionPreset = customDescriptionSelected ? 'custom' : 'standard';
+  settings.customDescription = String(
+    settings.customDescription || STANDARD_DESCRIPTION_TEMPLATE
+  ).slice(0, 4000);
   return settings;
 }
 
@@ -3910,11 +4508,36 @@ function resetSyncState() {
 
 function sendSyncNotificationsSafe_(settings, result, options) {
   try {
+    const notificationWindow = Boolean(options.notificationWindow);
+    let changeNotificationSent = false;
+
     if (options.reason === 'source' && result.changes.length > 0) {
-      const changeCount = result.changes.length + (Number(result.omittedChangeCount) || 0);
-      sendEmail_(settings, '[T-SCHOOL] 課表異動 ' + changeCount + ' 項', formatChangeDigest_(result, settings));
-    } else if (options.notifyOnSuccess) {
-      sendEmail_(settings, '[T-SCHOOL] 行程同步成功', formatSyncResultMessage_(result));
+      const changeData = buildChangeEmailData_(result);
+      if (notificationWindow) {
+        changeNotificationSent = deliverScheduleChangeNotification_(
+          settings,
+          changeData
+        );
+      } else {
+        queueScheduleChangeNotification_(changeData);
+      }
+    } else if (notificationWindow) {
+      changeNotificationSent = deliverScheduleChangeNotification_(settings, null);
+    }
+
+    if (notificationWindow) {
+      flushQueuedNotificationsSafe_(settings);
+    }
+
+    if (options.notifyOnSuccess && notificationWindow &&
+        !changeNotificationSent && !hasChangeNotificationToday_()) {
+      sendEmail_(
+        settings,
+        'sync_success',
+        '[T-SCHOOL] 行程同步成功',
+        formatSyncResultMessage_(result),
+        buildSyncEmailData_(result)
+      );
     }
   } catch (error) {
     Logger.log('同步通知寄送失敗：' + error.message);
@@ -3923,7 +4546,14 @@ function sendSyncNotificationsSafe_(settings, result, options) {
 
 function sendFirstSetupNotificationSafe_(result) {
   try {
-    sendEmail_(loadSettings_(), '[T-SCHOOL] 行程同步設定完成', '第一次同步已完成。\\n\\n' + formatSyncResultMessage_(result) + '\\n\\n請開啟專用 Google 日曆，確認課程、日期、節次與地點正確。');
+    sendEmail_(
+      loadSettings_(),
+      'setup_complete',
+      '[T-SCHOOL] 行程同步設定完成',
+      '第一次同步已完成。\\n\\n' + formatSyncResultMessage_(result) +
+        '\\n\\n請開啟專用 Google 日曆，確認課程、日期、節次與地點正確。',
+      buildSyncEmailData_(result)
+    );
   } catch (error) {
     Logger.log('設定完成通知寄送失敗：' + error.message);
   }
@@ -3931,7 +4561,14 @@ function sendFirstSetupNotificationSafe_(result) {
 
 function notifySyncFailureSafe_(error) {
   try {
-    sendEmail_(loadSettings_(), '[T-SCHOOL] 行程同步失敗', userFacingError_(error) + '\\n\\n請開啟行程同步控制臺查看狀態。');
+    const message = userFacingError_(error);
+    sendEmail_(
+      loadSettings_(),
+      'sync_failure',
+      '[T-SCHOOL] 行程同步失敗',
+      message + '\\n\\n請開啟行程同步控制臺查看狀態。',
+      { message }
+    );
   } catch (mailError) {
     Logger.log('同步失敗通知寄送失敗：' + mailError.message);
   }
@@ -3944,22 +4581,467 @@ function notifySyncFailureUnlessActionRequired_(error) {
   }
 }
 
-function sendActionRequiredSafe_(settings, subject, body) {
+function sendActionRequiredSafe_(
+  settings,
+  subject,
+  body,
+  dedupeKey,
+  templateKind,
+  templateData,
+  deliveryOptions
+) {
   const noticeState = readChunkedJson_(NOTICE_STORE, {});
-  const key = hashText_(subject + '|' + body);
-  if (noticeState[key]) return;
-  try {
-    sendEmail_(settings, '[T-SCHOOL] ' + subject, body);
+  const key = hashText_(dedupeKey || subject + '|' + body);
+  if (noticeState[key]) return { ok: true, alreadySent: true, error: '' };
+
+  if (!(deliveryOptions && deliveryOptions.immediate) &&
+      !isConfiguredNotificationHour_(settings)) {
+    queueNotification_({
+      key,
+      templateKind: templateKind || 'action_required',
+      subject: '[T-SCHOOL] ' + subject,
+      body,
+      templateData: Object.assign({ message: body, subject }, templateData || {})
+    });
     noticeState[key] = true;
     writeChunkedJson_(NOTICE_STORE, noticeState);
+    return { ok: true, alreadySent: false, queued: true, error: '' };
+  }
+
+  try {
+    sendEmail_(
+      settings,
+      templateKind || 'action_required',
+      '[T-SCHOOL] ' + subject,
+      body,
+      Object.assign({ message: body, subject }, templateData || {})
+    );
+    noticeState[key] = true;
+    writeChunkedJson_(NOTICE_STORE, noticeState);
+    return { ok: true, alreadySent: false, error: '' };
   } catch (error) {
     Logger.log('操作提醒寄送失敗：' + error.message);
+    return { ok: false, alreadySent: false, error: userFacingError_(error) };
   }
 }
 
-function sendEmail_(settings, subject, body) {
+function isConfiguredNotificationHour_(settings) {
+  const hours = normalizeHourArray_(
+    settings && settings.autoSyncHours,
+    settings && settings.notifySyncHour
+  );
+  const currentHour = Number(
+    Utilities.formatDate(new Date(), TIMEZONE, 'H')
+  );
+  return hours.indexOf(currentHour) !== -1;
+}
+
+function loadNotificationQueueState_() {
+  const stored = readChunkedJson_(NOTIFICATION_QUEUE_STORE, {});
+  return {
+    schemaVersion: 1,
+    pending: Array.isArray(stored.pending) ? stored.pending.slice(0, 50) : [],
+    pendingChangeData: stored.pendingChangeData || null,
+    lastChangeDate: String(stored.lastChangeDate || '')
+  };
+}
+
+function saveNotificationQueueState_(state) {
+  writeChunkedJson_(NOTIFICATION_QUEUE_STORE, {
+    schemaVersion: 1,
+    pending: Array.isArray(state.pending) ? state.pending.slice(0, 50) : [],
+    pendingChangeData: state.pendingChangeData || null,
+    lastChangeDate: String(state.lastChangeDate || '')
+  });
+}
+
+function queueNotification_(notification) {
+  const state = loadNotificationQueueState_();
+  if (!state.pending.some(item => item.key === notification.key)) {
+    state.pending.push(notification);
+  }
+  saveNotificationQueueState_(state);
+}
+
+function flushQueuedNotificationsSafe_(settings) {
+  const state = loadNotificationQueueState_();
+  if (!state.pending.length) return 0;
+  const remaining = [];
+  let sent = 0;
+
+  state.pending.forEach(notification => {
+    try {
+      sendEmail_(
+        settings,
+        notification.templateKind,
+        notification.subject,
+        notification.body,
+        notification.templateData
+      );
+      sent += 1;
+    } catch (error) {
+      remaining.push(notification);
+      Logger.log('排程通知寄送失敗，保留至下個通知時間：' + error.message);
+    }
+  });
+
+  state.pending = remaining;
+  saveNotificationQueueState_(state);
+  return sent;
+}
+
+function queueScheduleChangeNotification_(changeData) {
+  const state = loadNotificationQueueState_();
+  state.pendingChangeData = mergeChangeEmailData_(
+    state.pendingChangeData,
+    changeData
+  );
+  state.lastChangeDate = formatDateKey_(new Date());
+  saveNotificationQueueState_(state);
+}
+
+function deliverScheduleChangeNotification_(settings, currentChangeData) {
+  const state = loadNotificationQueueState_();
+  const changeData = mergeChangeEmailData_(
+    state.pendingChangeData,
+    currentChangeData
+  );
+  if (!changeData || !changeData.changeCount) return false;
+
+  try {
+    sendEmail_(
+      settings,
+      'schedule_changes',
+      '[T-SCHOOL] 行程調整 ' + changeData.changeCount + ' 項',
+      formatChangeDigestFromEmailData_(changeData),
+      changeData
+    );
+    state.pendingChangeData = null;
+    state.lastChangeDate = formatDateKey_(new Date());
+    saveNotificationQueueState_(state);
+    return true;
+  } catch (error) {
+    state.pendingChangeData = changeData;
+    state.lastChangeDate = formatDateKey_(new Date());
+    saveNotificationQueueState_(state);
+    throw error;
+  }
+}
+
+function hasChangeNotificationToday_() {
+  return loadNotificationQueueState_().lastChangeDate === formatDateKey_(new Date());
+}
+
+function mergeChangeEmailData_(left, right) {
+  if (!left && !right) return null;
+  const sources = [left, right].filter(Boolean);
+  const merged = {
+    created: 0,
+    updated: 0,
+    outlineUpdated: 0,
+    deleted: 0,
+    unchanged: 0,
+    omittedCount: 0,
+    changes: []
+  };
+
+  sources.forEach(source => {
+    ['created', 'updated', 'outlineUpdated', 'deleted', 'unchanged']
+      .forEach(key => { merged[key] += Number(source[key]) || 0; });
+    merged.omittedCount += Number(source.omittedCount) || 0;
+    merged.changes = merged.changes.concat(
+      Array.isArray(source.changes) ? source.changes : []
+    );
+  });
+
+  const seen = {};
+  merged.changes = merged.changes.filter(change => {
+    const key = JSON.stringify([
+      change.type,
+      change.course,
+      change.oldStandard,
+      change.newStandard
+    ]);
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  }).slice(0, SYNC_CHANGE_DETAIL_LIMIT);
+  merged.changeCount = merged.changes.length + merged.omittedCount;
+  merged.omittedNote = merged.omittedCount
+    ? '另有 ' + merged.omittedCount + ' 項行程調整未逐項列出'
+    : '';
+  merged.summary = formatSyncEmailDataSummary_(merged);
+  return merged;
+}
+
+function formatChangeDigestFromEmailData_(changeData) {
+  const lines = changeData.changes.map(change => change.displayText);
+  if (changeData.omittedNote) lines.push(changeData.omittedNote);
+  lines.push('', changeData.summary);
+  return lines.join('\\n');
+}
+
+function sendEmail_(settings, templateKind, subject, body, templateData) {
   const recipient = getNotificationEmail_(settings);
-  MailApp.sendEmail(recipient, subject, body || '');
+  const cleanTemplateData = sanitizeNotificationTemplateData_(
+    Object.assign(buildEmailBaseData_(), templateData || {})
+  );
+  const message = {
+    to: recipient,
+    subject,
+    body: stripNotificationSentencePeriods_(body || ''),
+    name: 'T-SCHOOL Schedule Sync'
+  };
+  const htmlBody = buildEmailHtmlSafe_(
+    templateKind,
+    subject,
+    cleanTemplateData
+  );
+  if (htmlBody) message.htmlBody = htmlBody;
+  MailApp.sendEmail(message);
+}
+
+function stripNotificationSentencePeriods_(value) {
+  return String(value == null ? '' : value).replace(/。/g, '');
+}
+
+function sanitizeNotificationTemplateData_(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeNotificationTemplateData_);
+  }
+  if (value && typeof value === 'object') {
+    const result = {};
+    Object.keys(value).forEach(key => {
+      result[key] = sanitizeNotificationTemplateData_(value[key]);
+    });
+    return result;
+  }
+  return typeof value === 'string'
+    ? stripNotificationSentencePeriods_(value)
+    : value;
+}
+
+function buildEmailBaseData_() {
+  return {
+    sentAt: formatDateTime_(new Date()),
+    controlUrl: getControlSpreadsheetUrl_(),
+    calendarUrl: 'https://calendar.google.com/calendar/u/0/r'
+  };
+}
+
+function getControlSpreadsheetUrl_() {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    return spreadsheet && typeof spreadsheet.getUrl === 'function'
+      ? String(spreadsheet.getUrl() || '')
+      : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function buildEmailHtmlSafe_(templateKind, subject, templateData) {
+  try {
+    const manifest = loadEmailTemplateManifest_();
+    if (!manifest) return '';
+    const notification = manifest.notifications[templateKind] ||
+      manifest.notifications.action_required;
+    if (!notification) return '';
+    const values = Object.assign({
+      subject,
+      summary: '',
+      message: '',
+      omittedNote: ''
+    }, templateData || {});
+    const rawSections = {};
+
+    Object.keys(notification.repeaters || {}).forEach(outputKey => {
+      const repeater = notification.repeaters[outputKey] || {};
+      const items = Array.isArray(values[repeater.source])
+        ? values[repeater.source].slice(0, SYNC_CHANGE_DETAIL_LIMIT)
+        : [];
+      rawSections[outputKey] = items
+        .map(item => renderEmailHtmlTemplate_(repeater.template, item, {}))
+        .join('');
+    });
+
+    const content = renderEmailHtmlTemplate_(
+      notification.content,
+      values,
+      rawSections
+    );
+    const shellValues = Object.assign({}, values, {
+      subject,
+      preheader: renderEmailTextTemplate_(notification.preheader, values),
+      statusLabel: renderEmailTextTemplate_(notification.statusLabel, values),
+      headline: renderEmailTextTemplate_(notification.headline, values),
+      lede: renderEmailTextTemplate_(notification.lede, values),
+      accent: normalizeEmailTemplateColor_(notification.accent, '#00a676'),
+      accentDark: normalizeEmailTemplateColor_(notification.accentDark, '#007c59'),
+      accentSoft: normalizeEmailTemplateColor_(notification.accentSoft, '#dcefe7')
+    });
+    return renderEmailHtmlTemplate_(manifest.shell, shellValues, { content });
+  } catch (error) {
+    Logger.log('HTML 信件版型無法套用，改寄純文字：' + error.message);
+    return '';
+  }
+}
+
+function loadEmailTemplateManifest_() {
+  let cache = null;
+  try {
+    cache = CacheService.getScriptCache();
+    const cached = cache.get(EMAIL_TEMPLATE_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      assertEmailTemplateManifest_(parsed);
+      return parsed;
+    }
+  } catch (cacheError) {
+    Logger.log('HTML 信件版型快取無法讀取：' + cacheError.message);
+  }
+
+  try {
+    const response = UrlFetchApp.fetch(EMAIL_TEMPLATE_MANIFEST_URL, {
+      followRedirects: true,
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) {
+      throw new Error('HTTP ' + response.getResponseCode());
+    }
+    const text = response.getContentText('UTF-8');
+    if (!text || text.length > EMAIL_TEMPLATE_MAX_BYTES) {
+      throw new Error('版型檔案為空或超過大小限制');
+    }
+    const manifest = JSON.parse(text);
+    assertEmailTemplateManifest_(manifest);
+    if (cache) {
+      try {
+        cache.put(EMAIL_TEMPLATE_CACHE_KEY, text, EMAIL_TEMPLATE_CACHE_SECONDS);
+      } catch (cacheWriteError) {
+        Logger.log('HTML 信件版型快取無法寫入：' + cacheWriteError.message);
+      }
+    }
+    return manifest;
+  } catch (fetchError) {
+    Logger.log('HTML 信件版型無法下載：' + fetchError.message);
+    return null;
+  }
+}
+
+function assertEmailTemplateManifest_(manifest) {
+  if (!manifest || Number(manifest.schemaVersion) !== 1) {
+    throw new Error('HTML 信件版型 schemaVersion 不支援');
+  }
+  if (typeof manifest.shell !== 'string' || !manifest.shell) {
+    throw new Error('HTML 信件版型缺少 shell');
+  }
+  if (!manifest.notifications || typeof manifest.notifications !== 'object') {
+    throw new Error('HTML 信件版型缺少 notifications');
+  }
+  Object.keys(manifest.notifications).forEach(key => {
+    const notification = manifest.notifications[key];
+    if (!notification || typeof notification.content !== 'string') {
+      throw new Error('HTML 信件版型內容無效：' + key);
+    }
+    Object.keys(notification.repeaters || {}).forEach(outputKey => {
+      const repeater = notification.repeaters[outputKey];
+      if (!repeater || typeof repeater.source !== 'string' ||
+          typeof repeater.template !== 'string') {
+        throw new Error('HTML 信件重複區塊無效：' + key + '/' + outputKey);
+      }
+    });
+  });
+}
+
+function renderEmailTextTemplate_(template, values) {
+  return String(template || '').replace(/\\{\\{([A-Za-z][A-Za-z0-9]*)\\}\\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(values || {}, key)
+      ? String(values[key] == null ? '' : values[key])
+      : ''
+  );
+}
+
+function renderEmailHtmlTemplate_(template, values, rawValues) {
+  const withRawSections = String(template || '').replace(
+    /\\{\\{\\{([A-Za-z][A-Za-z0-9]*)\\}\\}\\}/g,
+    (match, key) => Object.prototype.hasOwnProperty.call(rawValues || {}, key)
+      ? String(rawValues[key] || '')
+      : ''
+  );
+  return withRawSections.replace(
+    /\\{\\{([A-Za-z][A-Za-z0-9]*)\\}\\}/g,
+    (match, key) => Object.prototype.hasOwnProperty.call(values || {}, key)
+      ? escapeEmailHtml_(values[key])
+      : ''
+  );
+}
+
+function escapeEmailHtml_(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizeEmailTemplateColor_(value, fallback) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback;
+}
+
+function buildSyncEmailData_(result) {
+  const data = {
+    created: Number(result.created) || 0,
+    updated: Number(result.updated) || 0,
+    outlineUpdated: Number(result.outlineUpdated) || 0,
+    deleted: Number(result.deleted) || 0,
+    unchanged: Number(result.unchanged) || 0
+  };
+  data.summary = formatSyncEmailDataSummary_(data);
+  return data;
+}
+
+function formatSyncEmailDataSummary_(data) {
+  const outlineUpdated = Number(data.outlineUpdated) || 0;
+  return '新增 ' + (Number(data.created) || 0) +
+    '、更新 ' + (Number(data.updated) || 0) +
+    (outlineUpdated ? '、課綱說明更新 ' + outlineUpdated : '') +
+    '、移除 ' + (Number(data.deleted) || 0) +
+    '、未變更 ' + (Number(data.unchanged) || 0);
+}
+
+function buildChangeEmailData_(result) {
+  const omittedCount = Number(result.omittedChangeCount) || 0;
+  return Object.assign(buildSyncEmailData_(result), {
+    omittedCount,
+    changeCount: result.changes.length + omittedCount,
+    omittedNote: omittedCount
+      ? '另有 ' + omittedCount + ' 項行程調整未逐項列出'
+      : '',
+    changes: result.changes.map(change => {
+      const values = buildChangeTemplateValues_(change);
+      return Object.assign({}, values, {
+        oldStandard: formatChangeEmailSide_(values, 'old', false),
+        newStandard: formatChangeEmailSide_(values, 'new', false),
+        displayText: renderTemplate_(
+          getNotificationTemplate_(),
+          values
+        ).trim()
+      });
+    })
+  });
+}
+
+function formatChangeEmailSide_(values, prefix, detailed) {
+  const parts = [
+    values[prefix + 'Date'],
+    values[prefix + 'Period']
+  ];
+  if (detailed) parts.push(values[prefix + 'Time']);
+  parts.push(values[prefix + 'Location']);
+  return parts.filter(value => value && value !== '—').join(detailed ? '｜' : ' ') || '—';
 }
 
 function getNotificationEmail_(settings) {
@@ -3975,19 +5057,16 @@ function assertSingleEmail_(email) {
 
 function formatChangeDigest_(result, settings) {
   const lines = result.changes.map(change =>
-    renderTemplate_(getNotificationTemplate_(settings), buildChangeTemplateValues_(change)).trim()
+    renderTemplate_(getNotificationTemplate_(), buildChangeTemplateValues_(change)).trim()
   );
   if (Number(result.omittedChangeCount) > 0) {
-    lines.push('另有 ' + result.omittedChangeCount + ' 項異動未逐項列出。');
+    lines.push('另有 ' + result.omittedChangeCount + ' 項行程調整未逐項列出');
   }
-  lines.push('', formatSyncResultMessage_(result));
+  lines.push('', stripNotificationSentencePeriods_(formatSyncResultMessage_(result)));
   return lines.join('\\n');
 }
 
-function getNotificationTemplate_(settings) {
-  if (settings.notificationPreset === 'compact') return '{type}｜{course}｜{newDate} {newPeriod}';
-  if (settings.notificationPreset === 'detailed') return '{type}｜{course}\\n原：{oldDate} {oldPeriod}｜{oldTime}｜{oldLocation}\\n新：{newDate} {newPeriod}｜{newTime}｜{newLocation}';
-  if (settings.notificationPreset === 'custom') return settings.customNotification;
+function getNotificationTemplate_() {
   return '{type}｜{course}\\n原：{oldDate} {oldPeriod} {oldLocation}\\n新：{newDate} {newPeriod} {newLocation}';
 }
 
