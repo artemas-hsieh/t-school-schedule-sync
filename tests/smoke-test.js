@@ -45,6 +45,22 @@ assert.equal(sidebarHtml.includes('id="term-transition-action"'), true);
 assert.equal(sidebarHtml.includes('function updateActionAvailability()'), true);
 assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
+assert.equal(sidebarHtml.includes('<p class="eyebrow">T-SCHOOL Schedule Sync</p>'), true);
+assert.equal(sidebarHtml.includes('<p class="eyebrow">T-SCHOOL 行程同步</p>'), false);
+assert.equal(sidebarHtml.includes('<h2>選課程和活動</h2>'), true);
+assert.equal(sidebarHtml.includes('輸入課名、活動名、班別等'), true);
+assert.equal(sidebarHtml.includes('學期間課程'), true);
+assert.equal(sidebarHtml.includes('學期間活動'), true);
+assert.equal(sidebarHtml.includes('寒暑假期間課程 / 活動'), true);
+assert.equal(sidebarHtml.includes('<span>收通知的 Email</span>'), true);
+assert.equal(sidebarHtml.includes('<span>通知 Email</span>'), false);
+assert.equal(sidebarHtml.includes('id="notify-hours-list"'), true);
+assert.equal(sidebarHtml.includes('data-add-notify-hour'), true);
+assert.equal(sidebarHtml.includes('data-remove-notify-hour'), true);
+assert.equal(sidebarHtml.includes('autoSyncHours: notificationHours'), true);
+assert.equal(sidebarHtml.includes('notifySyncHour: Math.max.apply(null, notificationHours)'), true);
+assert.equal(sidebarHtml.includes('<span>每日成功摘要</span>'), false);
+assert.equal(sidebarHtml.includes('id="include-activities"'), false);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), true);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner" role="status" hidden'), true);
 assert.match(
@@ -105,6 +121,84 @@ assert.equal(
   true,
   '測試版程式碼必須同時受到專用 URL 參數保護'
 );
+assert.equal(
+  configuratorAppSource.includes("'寒暑假期間課程 / 活動'"),
+  true,
+  '有寒暑假資料時應顯示獨立的課程／活動分類'
+);
+assert.equal(
+  configuratorAppSource.includes(
+    "elements.notificationEmail.addEventListener('blur', scheduleNotificationEmailCommit);"
+  ),
+  true,
+  'Email 輸入應在離開欄位且原生點擊完成後才重建產出，避免閃爍或吞掉第一次點擊'
+);
+assert.match(
+  configuratorAppSource,
+  /if \(event\.target === elements\.notificationEmail\) \{[\s\S]*?tschool:configuration-change[\s\S]*?return;\n    \}/,
+  'Email 的 input 事件應在即時驗證與狀態重設後停止，不得逐字重建 Code.gs'
+);
+
+function makeCatalogPayload(weekNumbers, entriesByWeek) {
+  const rows = weekNumbers.map((weekNumber, index) => ({
+    isHeader: false,
+    weekNum: String(weekNumber),
+    cells: [{ value: entriesByWeek[index] || '' }]
+  }));
+
+  while (rows.length < 10) {
+    rows.push({
+      isHeader: false,
+      weekNum: String(weekNumbers[0]),
+      cells: [{ value: '' }]
+    });
+  }
+
+  return {
+    currentGrade: '一年級',
+    weekDataList: weekNumbers.map(week => ({ week, date: '1/1' })),
+    tableData: rows
+  };
+}
+
+const vacationCatalogPayload = makeCatalogPayload(
+  [1, 2, 5],
+  ['學期間課程', '全校活動', '暑假課程\n──────────\n模擬考Day1']
+);
+assert.equal(
+  scheduleData.normalizeText('從巴士底到車諾比：歷史\u200B'),
+  '從巴士底到車諾比:歷史',
+  '安裝器與 Code.gs 應使用相同的 Unicode 與零寬字元正規化'
+);
+assert.deepEqual(
+  Array.from(scheduleData.getVacationWeekNumbers(vacationCatalogPayload)),
+  [5],
+  '缺少兩個完整週次後重新出現的課表資料應視為寒暑假區段'
+);
+const vacationCatalog = scheduleData.extractCatalog(vacationCatalogPayload);
+assert.deepEqual(
+  vacationCatalog.vacationItems.map(item => item.title).sort(),
+  ['暑假課程', '模擬考Day1'].sort(),
+  '寒暑假區段的課程與活動都應進入同一分類'
+);
+assert.equal(
+  vacationCatalog.courses.find(item => item.title === '學期間課程').period,
+  'term'
+);
+assert.equal(
+  vacationCatalog.activities.find(item => item.title === '全校活動').period,
+  'term'
+);
+
+const regularCatalog = scheduleData.extractCatalog(makeCatalogPayload(
+  [1, 2, 3],
+  ['學期間課程', '全校活動', '另一門課']
+));
+assert.equal(
+  regularCatalog.vacationItems.length,
+  0,
+  '連續週次的課表應維持原本的課程／活動兩類'
+);
 
 const generatedCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-mvp',
@@ -132,6 +226,11 @@ assert.equal(generatedCode.includes('function previewSettingsImpactFromUi('), tr
 assert.equal(generatedCode.includes('function showSettingsSidebar('), true);
 assert.equal(generatedCode.includes('function getNotificationTemplate_('), true);
 assert.equal(generatedCode.includes('function buildEmailHtmlSafe_('), true);
+assert.equal(generatedCode.includes('function getVacationWeekNumbersFromPayload_('), true);
+assert.equal(
+  generatedCode.includes("vacationItems: catalogAll.filter(item => item.period === 'vacation')"),
+  true
+);
 assert.equal(generatedCode.includes('NOTIFICATION_QUEUE_STORE'), true);
 assert.equal(generatedCode.includes('notification-email-templates.json'), true);
 assert.equal(
@@ -277,6 +376,23 @@ const context = vm.createContext({
 
 vm.runInContext(generatedCode, context);
 
+assert.deepEqual(
+  Object.keys(context.getVacationWeekNumbersFromPayload_(vacationCatalogPayload)).map(Number),
+  [5],
+  'Code.gs 應辨識缺少兩個完整週次後的寒暑假資料'
+);
+const runtimeVacationCatalog = context.extractCatalogFromPayload_(vacationCatalogPayload);
+assert.deepEqual(
+  Array.from(runtimeVacationCatalog, item => `${item.type}:${item.period}:${item.title}`).sort(),
+  [
+    'activity:term:全校活動',
+    'activity:vacation:模擬考Day1',
+    'course:term:學期間課程',
+    'course:vacation:暑假課程'
+  ].sort(),
+  '控制臺的 Code.gs 課程目錄應保留學期間與寒暑假分類'
+);
+
 const parsedOutlineIndex = context.parseCourseOutlineSourceIndexValues_([
   ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '備註', '課綱試算表連結'],
   [
@@ -418,6 +534,15 @@ if (fs.existsSync('/tmp/tschool-requirements-grade2.json')) {
   const highLoadContext = vm.createContext({
     console,
     Intl,
+    PropertiesService: {
+      getScriptProperties() {
+        return {
+          getProperty() {
+            return null;
+          }
+        };
+      }
+    },
     Utilities: {
       formatDate(dateValue, timezone, pattern) {
         assert.equal(timezone, 'Asia/Taipei');
@@ -2209,6 +2334,11 @@ const results = fixtures.map(fixture => {
     Array.from(runtimeSummary.catalog.activities, item => item.title).sort(),
     Array.from(installerSummary.catalog.activities, item => item.title).sort(),
     `${fixture.grade} 的活動目錄不一致`
+  );
+  assert.deepEqual(
+    Array.from(runtimeSummary.catalog.all, item => `${item.type}:${item.period}:${item.title}`).sort(),
+    Array.from(installerSummary.catalog.all, item => `${item.type}:${item.period}:${item.title}`).sort(),
+    `${fixture.grade} 的學期間／寒暑假分類不一致`
   );
   assert.equal(runtimeSummary.firstDateKey, installerSummary.firstDateKey);
   assert.equal(runtimeSummary.lastDateKey, installerSummary.lastDateKey);

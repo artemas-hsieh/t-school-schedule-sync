@@ -4224,14 +4224,34 @@ function parseSchedulePayload_(payload, gradeName, now) {
     catalog: {
       all: catalogAll,
       courses: catalogAll.filter(item => item.type === 'course'),
-      activities: catalogAll.filter(item => item.type === 'activity')
+      activities: catalogAll.filter(item => item.type === 'activity'),
+      vacationItems: catalogAll.filter(item => item.period === 'vacation')
     },
     events
   };
 }
 
+function getVacationWeekNumbersFromPayload_(payload) {
+  const weekNumbers = (payload.weekDataList || [])
+    .map(item => Number(item && item.week))
+    .filter(Number.isFinite)
+    .filter((weekNumber, index, values) => values.indexOf(weekNumber) === index)
+    .sort((a, b) => a - b);
+  const vacationStartIndex = weekNumbers.findIndex((weekNumber, index) =>
+    index > 0 && weekNumber - weekNumbers[index - 1] >= 3
+  );
+  const vacationWeeks = {};
+  if (vacationStartIndex !== -1) {
+    weekNumbers.slice(vacationStartIndex).forEach(weekNumber => {
+      vacationWeeks[weekNumber] = true;
+    });
+  }
+  return vacationWeeks;
+}
+
 function extractCatalogFromPayload_(payload) {
   const catalogMap = {};
+  const vacationWeeks = getVacationWeekNumbersFromPayload_(payload);
   (payload.tableData || []).forEach(row => {
     if (!row || row.isHeader || !Array.isArray(row.cells)) return;
     row.cells.forEach(cell => {
@@ -4239,13 +4259,26 @@ function extractCatalogFromPayload_(payload) {
         if (isStructuralValue_(rawEntry)) return;
         const parsed = parseEntry_(rawEntry);
         const key = normalizeTitle_(parsed.title);
-        if (key && !catalogMap[key]) {
-          catalogMap[key] = { title: parsed.title, type: isActivityTitle_(parsed.title) ? 'activity' : 'course' };
-        }
+        if (!key) return;
+        const existing = catalogMap[key] || {
+          title: parsed.title,
+          type: isActivityTitle_(parsed.title) ? 'activity' : 'course',
+          hasVacationOccurrence: false
+        };
+        existing.hasVacationOccurrence =
+          existing.hasVacationOccurrence ||
+          Boolean(vacationWeeks[Number(row.weekNum)]);
+        catalogMap[key] = existing;
       });
     });
   });
-  return Object.keys(catalogMap).map(key => catalogMap[key]).sort((a, b) => a.title.localeCompare(b.title));
+  return Object.keys(catalogMap)
+    .map(key => ({
+      title: catalogMap[key].title,
+      type: catalogMap[key].type,
+      period: catalogMap[key].hasVacationOccurrence ? 'vacation' : 'term'
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title));
 }
 
 function inferHeaderDates_(payload, now) {

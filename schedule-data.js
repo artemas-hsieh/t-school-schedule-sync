@@ -32,7 +32,14 @@
   ];
 
   function normalizeText(value) {
-    return String(value == null ? '' : value)
+    let text = String(value == null ? '' : value);
+
+    if (typeof text.normalize === 'function') {
+      text = text.normalize('NFKC');
+    }
+
+    return text
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
       .replace(/\r/g, '\n')
       .replace(/[（]/g, '(')
       .replace(/[）]/g, ')')
@@ -120,9 +127,23 @@
     return payload;
   }
 
+  function getVacationWeekNumbers(payload) {
+    assertPayload(payload);
+    const weekNumbers = Array.from(new Set(payload.weekDataList
+      .map(item => Number(item && item.week))
+      .filter(Number.isFinite)))
+      .sort((a, b) => a - b);
+    const vacationStartIndex = weekNumbers.findIndex((weekNumber, index) =>
+      index > 0 && weekNumber - weekNumbers[index - 1] >= 3
+    );
+
+    return new Set(vacationStartIndex === -1 ? [] : weekNumbers.slice(vacationStartIndex));
+  }
+
   function extractCatalog(payload) {
     assertPayload(payload);
     const byKey = new Map();
+    const vacationWeekNumbers = getVacationWeekNumbers(payload);
 
     payload.tableData.forEach(row => {
       if (!row || row.isHeader || !Array.isArray(row.cells)) {
@@ -138,26 +159,36 @@
           const parsed = parseEntry(rawEntry);
           const key = normalizeTitle(parsed.title);
 
-          if (!key || byKey.has(key)) {
+          if (!key) {
             return;
           }
 
-          byKey.set(key, {
+          const existing = byKey.get(key) || {
             title: parsed.title,
-            type: isActivityTitle(parsed.title) ? 'activity' : 'course'
-          });
+            type: isActivityTitle(parsed.title) ? 'activity' : 'course',
+            hasVacationOccurrence: false
+          };
+          existing.hasVacationOccurrence =
+            existing.hasVacationOccurrence ||
+            vacationWeekNumbers.has(Number(row.weekNum));
+          byKey.set(key, existing);
         });
       });
     });
 
-    const all = Array.from(byKey.values()).sort((a, b) =>
-      a.title.localeCompare(b.title, 'zh-Hant')
-    );
+    const all = Array.from(byKey.values())
+      .map(item => ({
+        title: item.title,
+        type: item.type,
+        period: item.hasVacationOccurrence ? 'vacation' : 'term'
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hant'));
 
     return {
       all,
       courses: all.filter(item => item.type === 'course'),
-      activities: all.filter(item => item.type === 'activity')
+      activities: all.filter(item => item.type === 'activity'),
+      vacationItems: all.filter(item => item.period === 'vacation')
     };
   }
 
@@ -343,6 +374,7 @@
     parseEntry,
     isActivityTitle,
     assertPayload,
+    getVacationWeekNumbers,
     extractCatalog,
     inferDateRecords,
     summarizePayload,

@@ -8,15 +8,15 @@
   <style>
     :root {
       --sync: #00a676;
-      --sync-dark: #007f5b;
+      --sync-dark: #007c59;
       --shift: #f05a47;
       --ink: #14211d;
-      --ink-soft: #52625c;
+      --ink-soft: #4f5d57;
       --paper: #f4f7f2;
       --paper-bright: #ffffff;
       --surface-green: #dff2eb;
-      --line: #b8c7c1;
-      --line-dark: #71817b;
+      --line: #bac6be;
+      --line-dark: #75847c;
       --warning: #9a5b00;
       --warning-surface: #fff0d5;
       --error: #a62d23;
@@ -49,6 +49,17 @@
       outline-offset: 2px;
     }
     [hidden] { display: none !important; }
+    .visually-hidden {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
 
     .app { min-height: 100vh; padding-bottom: 88px; }
     .topbar {
@@ -62,7 +73,7 @@
     }
     .eyebrow {
       margin: 0 0 var(--space-1);
-      color: var(--sync-dark);
+      color: var(--ink);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 10px;
       font-weight: 850;
@@ -182,7 +193,7 @@
     .switch-copy strong { font-size: 12px; }
     .switch-copy span { color: var(--ink-soft); font-size: 10px; line-height: 16px; }
 
-    .course-toolbar { display: grid; grid-template-columns: 1fr auto; gap: var(--space-2); }
+    .course-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: var(--space-2); }
     .small-button, .icon-button {
       min-height: 44px;
       border: 1px solid var(--ink);
@@ -206,7 +217,16 @@
     }
     .small-button { padding: 0 var(--space-3); }
     .icon-button { width: 44px; padding: 0; font-size: 18px; }
-    .course-list { display: grid; gap: var(--space-2); max-height: 320px; margin-top: var(--space-3); padding-right: var(--space-1); overflow-y: auto; overscroll-behavior: contain; }
+    .course-list { display: grid; gap: var(--space-4); max-height: 360px; margin-top: var(--space-3); padding-right: var(--space-1); overflow-y: auto; overscroll-behavior: contain; }
+    .course-group { display: grid; gap: var(--space-2); }
+    .course-group h3 {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 10px;
+      font-weight: 850;
+      line-height: 16px;
+    }
+    .course-group-list { display: grid; gap: var(--space-2); }
     .choice { position: relative; display: block; }
     .choice > span {
       display: flex;
@@ -222,8 +242,7 @@
     .choice > span:hover { border-color: var(--ink); transform: translateY(-1px); }
     .choice input:checked + span { border-color: var(--ink); background: var(--surface-green); box-shadow: 3px 3px 0 var(--ink); transform: translate(-1px, -1px); }
     .choice input:checked + span::after { content: "✓"; position: absolute; top: 50%; right: var(--space-3); color: var(--sync-dark); font-size: 13px; font-weight: 900; transform: translateY(-50%); }
-    .choice-copy { display: grid; gap: 2px; }
-    .choice-copy small { color: var(--sync-dark); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; font-weight: 850; line-height: 12px; }
+    .choice-copy { display: grid; }
     .choice-copy strong { font-size: 12px; line-height: 16px; }
     .choice input:disabled + span { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
     .empty { margin: var(--space-3) 0 0; padding: var(--space-4); border: 1px dashed var(--line-dark); border-radius: var(--radius-control); color: var(--ink-soft); font-size: 11px; text-align: center; }
@@ -258,6 +277,18 @@
     .metric strong { margin-top: var(--space-1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
     .message { margin: var(--space-3) 0 0; padding: var(--space-3); border-left: 3px solid var(--sync); background: var(--surface-green); color: var(--ink-soft); font-size: 11px; line-height: 16px; }
     .message.error { border-color: var(--error); background: var(--error-surface); color: var(--error); }
+
+    .notification-time-list { display: grid; gap: var(--space-2); }
+    .notification-time-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 44px;
+      gap: var(--space-2);
+    }
+    .notification-time-row select { min-height: 44px; }
+    .notification-time-action.is-remove {
+      border-color: var(--line-dark);
+      color: var(--ink-soft);
+    }
 
     .secondary-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3); }
     .secondary-actions button { min-height: 40px; padding: 0 var(--space-2); border: 1px solid var(--ink); border-radius: var(--radius-control); background: var(--paper-bright); color: var(--ink); cursor: pointer; font-size: 11px; font-weight: 800; }
@@ -328,8 +359,7 @@
       .topbar { padding: var(--space-3); }
       .content { padding-inline: var(--space-2); }
       .section { padding-block: var(--space-4); }
-      .course-toolbar, .calendar-create, .status-grid, .secondary-actions { grid-template-columns: 1fr; }
-      .icon-button { width: 100%; }
+      .calendar-create, .status-grid, .secondary-actions { grid-template-columns: 1fr; }
       .pending-actions { grid-template-columns: 1fr; }
       .footer { grid-template-columns: 1fr 1.35fr; padding: var(--space-2); }
       .footer button { padding-inline: var(--space-2); }
@@ -354,7 +384,7 @@
   </div>
   <div class="app" id="app" hidden>
     <header class="topbar">
-      <p class="eyebrow">T-SCHOOL 行程同步</p>
+      <p class="eyebrow">T-SCHOOL Schedule Sync</p>
       <h1>行程同步控制臺</h1>
       <p class="top-status" id="top-status">尚未完成設定</p>
     </header>
@@ -391,7 +421,7 @@
           <button type="button" id="run-sync">立即同步</button>
           <button type="button" id="repair-sync">強制修復</button>
         </div>
-        <p class="sync-estimate">第一次同步會分批在背景完成；行程很多時可能需 10–20 分鐘，可安全關閉側欄。後續只處理異動，通常較快。</p>
+        <p class="sync-estimate">第一次同步的首批通常約 30 秒至 2 分鐘，之後可關閉側欄讓背景繼續；行程很多時，全部完成可能需 10–20 分鐘。</p>
       </section>
 
       <section class="section" id="pending-section" hidden>
@@ -400,17 +430,12 @@
       </section>
 
       <section class="section" id="course-section">
-        <div class="section-head"><h2>課程與活動</h2><span id="course-count">0 門課 · 0 項活動</span></div>
+        <div class="section-head"><h2>選課程和活動</h2><span id="course-count">已選 0 門課 ・ 0 項活動</span></div>
         <div class="course-toolbar">
-          <input type="search" id="course-search" placeholder="搜尋課程或活動" aria-label="搜尋課程或活動">
-          <button type="button" class="small-button" id="clear-courses">清除課程</button>
+          <input type="search" id="course-search" placeholder="輸入課名、活動名、班別等" aria-label="搜尋課程和活動">
+          <button type="button" class="icon-button" id="course-search-action" aria-label="搜尋課程和活動">⌕</button>
         </div>
         <div class="course-list" id="course-list"></div>
-        <label class="switch">
-          <input type="checkbox" id="include-activities">
-          <span class="switch-track" aria-hidden="true"></span>
-          <span class="switch-copy"><strong>同步全年級／全校活動</strong><span>只包含系統明確辨識的活動</span></span>
-        </label>
       </section>
 
       <section class="section">
@@ -426,9 +451,13 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>同步與通知</h2><span>時間可能前後約 15 分鐘</span></div>
-        <label class="field"><span>通知 Email</span><input type="email" id="email" autocomplete="email"></label>
-        <label class="field"><span>每日成功摘要</span><select id="notify-hour"></select></label>
+        <div class="section-head"><h2>通知與自動同步</h2><span>可設定 1–4 個時間</span></div>
+        <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email"><span class="hint">為了讓程式能存取課綱，請輸入校內 Email</span></label>
+        <div class="field">
+          <span>通知時間</span>
+          <div class="notification-time-list" id="notify-hours-list" aria-label="通知時間"></div>
+          <p class="hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動</p>
+        </div>
         <label class="switch">
           <input type="checkbox" id="auto-sync">
           <span class="switch-track" aria-hidden="true"></span>
@@ -456,10 +485,12 @@
       var model = null;
       var selectedCourses = new Set();
       var excludedActivities = new Set();
+      var includeActivities = true;
       var busy = false;
       var syncProgressTimer = null;
       var activeSyncJobId = '';
       var termTransitionAnnounced = false;
+      var MAX_NOTIFY_HOURS = 4;
       var standardDescriptionTemplate = [
         '第 {week} 週 / 週{weekday} / 第 {period} 節',
         '',
@@ -481,7 +512,10 @@
         byId('loader-track').hidden = Boolean(showProgress);
         byId('sync-progress').hidden = !showProgress;
         Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) { button.disabled = value; });
-        if (!value) updateActionAvailability();
+        if (!value) {
+          updateActionAvailability();
+          if (byId('notify-hours-list')) updateNotifyHourOptions();
+        }
       }
       function showToast(message) { var toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(function () { toast.classList.remove('show'); }, 2600); }
       function server(method, value) { return new Promise(function (resolve, reject) { var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (error) { reject(new Error(error && error.message ? error.message : String(error))); }); runner[method](value); }); }
@@ -544,8 +578,8 @@
         var settings = data.settings;
         selectedCourses = new Set(settings.selectedCourses || []);
         excludedActivities = new Set(settings.excludedActivities || []);
+        includeActivities = settings.includeActivities !== false;
         document.querySelector('input[name="grade"][value="' + settings.gradeName + '"]').checked = true;
-        byId('include-activities').checked = settings.includeActivities;
         byId('email').value = settings.notificationEmail || '';
         byId('auto-sync').checked = data.termTransition && data.termTransition.required
           ? data.termTransition.resumeAutoSync
@@ -557,7 +591,7 @@
           : standardDescriptionTemplate;
         byId('reminder-mode').value = settings.reminderMode;
         byId('reminder-minutes').value = String(settings.reminderMinutes || 10);
-        renderNotifyHour(settings.notifySyncHour);
+        renderNotifyHours(settings.autoSyncHours || [settings.notifySyncHour]);
         renderCalendars(data.calendars, settings.calendarId, settings.calendarName);
         renderSource(data.source);
         renderCourses();
@@ -630,8 +664,83 @@
         byId('source-updated').textContent = source.updateLabel || '';
       }
 
-      function renderNotifyHour(notifyHour) {
-        byId('notify-hour').innerHTML = Array.from({ length: 24 }, function (_, hour) { return '<option value="' + hour + '" ' + (hour === notifyHour ? 'selected' : '') + '>' + String(hour).padStart(2, '0') + ':00</option>'; }).join('');
+      function renderNotifyHours(hours) {
+        var normalizedHours = Array.from(new Set((hours || [])
+          .map(Number)
+          .filter(function (hour) {
+            return Number.isInteger(hour) && hour >= 0 && hour <= 23;
+          })))
+          .sort(function (left, right) { return left - right; })
+          .slice(0, MAX_NOTIFY_HOURS);
+        var initialHours = normalizedHours.length ? normalizedHours : [6];
+        byId('notify-hours-list').innerHTML = '';
+        initialHours.forEach(appendNotifyHourRow);
+        updateNotifyHourOptions();
+      }
+
+      function appendNotifyHourRow(hour) {
+        var index = getNotifyHourSelects().length;
+        var options = Array.from({ length: 24 }, function (_, optionHour) {
+          return '<option value="' + optionHour + '">' + String(optionHour).padStart(2, '0') + ':00</option>';
+        }).join('');
+        byId('notify-hours-list').insertAdjacentHTML('beforeend',
+          '<div class="notification-time-row">' +
+            '<label><span class="visually-hidden">通知時間 ' + (index + 1) + '</span>' +
+              '<select data-notify-hour>' + options + '</select></label>' +
+            '<button type="button" class="icon-button notification-time-action ' +
+              (index === 0 ? 'is-add' : 'is-remove') + '" ' +
+              (index === 0 ? 'data-add-notify-hour' : 'data-remove-notify-hour') +
+              ' aria-label="' + (index === 0 ? '新增通知時間' : '移除通知時間 ' + (index + 1)) + '">' +
+              (index === 0 ? '+' : '−') +
+            '</button>' +
+          '</div>'
+        );
+        getNotifyHourSelects()[index].value = String(hour);
+      }
+
+      function getNotifyHourSelects() {
+        return Array.prototype.slice.call(document.querySelectorAll('[data-notify-hour]'));
+      }
+
+      function getSelectedNotifyHours() {
+        return getNotifyHourSelects()
+          .map(function (select) { return Number(select.value); })
+          .filter(function (hour, index, values) {
+            return Number.isInteger(hour) &&
+              hour >= 0 &&
+              hour <= 23 &&
+              values.indexOf(hour) === index;
+          })
+          .sort(function (left, right) { return left - right; });
+      }
+
+      function getNextNotifyHour() {
+        var selected = getSelectedNotifyHours();
+        var preferred = ((selected[selected.length - 1] == null ? 6 : selected[selected.length - 1]) + 6) % 24;
+        for (var offset = 0; offset < 24; offset += 1) {
+          var candidate = (preferred + offset) % 24;
+          if (selected.indexOf(candidate) === -1) return candidate;
+        }
+        return 6;
+      }
+
+      function updateNotifyHourOptions() {
+        var selects = getNotifyHourSelects();
+        var selectedHours = selects.map(function (select) { return Number(select.value); });
+        selects.forEach(function (select, selectIndex) {
+          Array.prototype.forEach.call(select.options, function (option) {
+            var optionHour = Number(option.value);
+            option.disabled = selectedHours.some(function (selectedHour, selectedIndex) {
+              return selectedIndex !== selectIndex && selectedHour === optionHour;
+            });
+          });
+        });
+        var addButton = byId('notify-hours-list').querySelector('[data-add-notify-hour]');
+        if (addButton) {
+          var maximumReached = selects.length >= MAX_NOTIFY_HOURS;
+          addButton.disabled = maximumReached;
+          addButton.title = maximumReached ? '最多可設定 4 個通知時間' : '';
+        }
       }
 
       function renderCalendars(calendars, selectedId, calendarName) {
@@ -652,15 +761,61 @@
       function renderCourses() {
         if (!model) return;
         var query = normalize(byId('course-search').value);
-        var courses = (model.source.catalog.courses || []).filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
-        var activities = (model.source.catalog.activities || []).filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
-        var includeActivities = byId('include-activities').checked;
-        var courseHtml = courses.map(function (item) { return '<label class="choice"><input type="checkbox" data-kind="course" value="' + escapeHtml(item.title) + '" ' + (selectedCourses.has(item.title) ? 'checked' : '') + '><span><span class="choice-copy"><small>課程</small><strong>' + escapeHtml(item.title) + '</strong></span></span></label>'; }).join('');
-        var activityHtml = activities.map(function (item) { var checked = includeActivities && !excludedActivities.has(item.title); return '<label class="choice"><input type="checkbox" data-kind="activity" value="' + escapeHtml(item.title) + '" ' + (checked ? 'checked' : '') + ' ' + (includeActivities ? '' : 'disabled') + '><span><span class="choice-copy"><small>活動</small><strong>' + escapeHtml(item.title) + '</strong></span></span></label>'; }).join('');
-        byId('course-list').innerHTML = courseHtml + activityHtml || '<p class="empty">找不到符合的課程或活動</p>';
+        var catalog = model.source.catalog || {};
+        var hasVacationItems = (catalog.vacationItems || []).length > 0;
+        var termCourses = (catalog.courses || [])
+          .filter(function (item) { return item.period !== 'vacation' && normalize(item.title).indexOf(query) !== -1; })
+          .sort(compareCatalogItems);
+        var termActivities = (catalog.activities || [])
+          .filter(function (item) { return item.period !== 'vacation' && normalize(item.title).indexOf(query) !== -1; })
+          .sort(compareCatalogItems);
+        var vacationItems = (catalog.vacationItems || [])
+          .filter(function (item) { return normalize(item.title).indexOf(query) !== -1; })
+          .sort(compareCatalogItems);
+        var sections = [];
+        if (termCourses.length) {
+          sections.push(renderCourseGroup(hasVacationItems ? '學期間課程' : '課程', termCourses));
+        }
+        if (termActivities.length) {
+          sections.push(renderCourseGroup(hasVacationItems ? '學期間活動' : '活動', termActivities));
+        }
+        if (vacationItems.length) {
+          sections.push(renderCourseGroup('寒暑假期間課程 / 活動', vacationItems));
+        }
+        byId('course-list').innerHTML = sections.join('') || '<p class="empty">找不到符合條件的項目，請調整搜尋文字</p>';
         var selectedActivityCount = (model.source.catalog.activities || []).filter(function (item) { return includeActivities && !excludedActivities.has(item.title); }).length;
-        byId('course-count').textContent = selectedCourses.size + ' 門課 · ' + selectedActivityCount + ' 項活動';
+        byId('course-count').textContent = '已選 ' + selectedCourses.size + ' 門課 ・ ' + selectedActivityCount + ' 項活動';
+        updateCourseSearchAction();
         updateActionAvailability();
+      }
+
+      function compareCatalogItems(left, right) {
+        return left.title.localeCompare(right.title, 'zh-Hant-u-co-stroke');
+      }
+
+      function renderCourseGroup(title, items) {
+        return '<section class="course-group"><h3>' + escapeHtml(title) + '</h3>' +
+          '<div class="course-group-list">' +
+          items.map(renderCourseChoice).join('') +
+          '</div></section>';
+      }
+
+      function renderCourseChoice(item) {
+        var isActivity = item.type === 'activity';
+        var checked = isActivity
+          ? includeActivities && !excludedActivities.has(item.title)
+          : selectedCourses.has(item.title);
+        return '<label class="choice"><input type="checkbox" data-kind="' +
+          (isActivity ? 'activity' : 'course') + '" value="' + escapeHtml(item.title) + '" ' +
+          (checked ? 'checked' : '') + '><span><span class="choice-copy"><strong>' +
+          escapeHtml(item.title) + '</strong></span></span></label>';
+      }
+
+      function updateCourseSearchAction() {
+        var isSearching = Boolean(byId('course-search').value);
+        var action = byId('course-search-action');
+        action.textContent = isSearching ? '×' : '⌕';
+        action.setAttribute('aria-label', isSearching ? '取消搜尋' : '搜尋課程和活動');
       }
 
       function renderPending(items) {
@@ -683,19 +838,18 @@
       }
 
       function collectSettings() {
+        var notificationHours = getSelectedNotifyHours();
         return {
           gradeName: getCheckedGrade(),
           selectedCourses: Array.from(selectedCourses),
-          includeActivities: byId('include-activities').checked,
+          includeActivities: includeActivities,
           excludedActivities: Array.from(excludedActivities),
           calendarId: byId('calendar').value,
           calendarName: byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade()),
           notificationEmail: byId('email').value.trim(),
           autoSyncEnabled: byId('auto-sync').checked,
-          autoSyncHours: model && model.settings && model.settings.autoSyncHours
-            ? model.settings.autoSyncHours.slice()
-            : [Number(byId('notify-hour').value)],
-          notifySyncHour: Number(byId('notify-hour').value),
+          autoSyncHours: notificationHours,
+          notifySyncHour: Math.max.apply(null, notificationHours),
           descriptionPreset: byId('description-preset').value,
           customDescription: byId('custom-description').value,
           reminderMode: byId('reminder-mode').value,
@@ -765,12 +919,24 @@
       document.addEventListener('change', function (event) {
         if (event.target.matches('#course-list input[data-kind="course"]')) { event.target.checked ? selectedCourses.add(event.target.value) : selectedCourses.delete(event.target.value); renderCourses(); }
         if (event.target.matches('#course-list input[data-kind="activity"]')) {
-          event.target.checked ? excludedActivities.delete(event.target.value) : excludedActivities.add(event.target.value);
           var activities = model && model.source && model.source.catalog ? model.source.catalog.activities || [] : [];
-          if (activities.length && activities.every(function (item) { return excludedActivities.has(item.title); })) byId('include-activities').checked = false;
+          if (event.target.checked) {
+            if (!includeActivities) {
+              excludedActivities = new Set(activities
+                .map(function (item) { return item.title; })
+                .filter(function (title) { return title !== event.target.value; }));
+            }
+            includeActivities = true;
+            excludedActivities.delete(event.target.value);
+          } else {
+            excludedActivities.add(event.target.value);
+            if (activities.length && activities.every(function (item) { return excludedActivities.has(item.title); })) {
+              includeActivities = false;
+            }
+          }
           renderCourses();
         }
-        if (event.target.id === 'include-activities') renderCourses();
+        if (event.target.matches('[data-notify-hour]')) updateNotifyHourOptions();
         if (event.target.id === 'calendar') updateCalendarFields();
         if (event.target.name === 'grade') {
           if (byId('calendar-name').dataset.autoName === 'true') byId('calendar-name').value = defaultCalendarName(event.target.value);
@@ -779,6 +945,7 @@
             model.source = data;
             selectedCourses = new Set();
             excludedActivities = new Set();
+            includeActivities = true;
             renderSource(data);
             renderTermTransition(model.termTransition, model.courseOutlineStatus, data);
             renderCourses();
@@ -791,9 +958,41 @@
         if (event.target.id === 'description-preset' || event.target.id === 'reminder-mode') updateConditionalFields();
       });
       byId('course-search').addEventListener('input', renderCourses);
+      byId('course-search').addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && event.target.value) {
+          event.preventDefault();
+          event.target.value = '';
+          renderCourses();
+        }
+      });
       byId('custom-description').addEventListener('input', updateFormatPreviews);
       byId('calendar-name').addEventListener('input', function () { byId('calendar-name').dataset.autoName = 'false'; });
-      byId('clear-courses').addEventListener('click', function () { selectedCourses.clear(); renderCourses(); });
+      byId('course-search-action').addEventListener('click', function () {
+        if (byId('course-search').value) {
+          byId('course-search').value = '';
+          renderCourses();
+        }
+        byId('course-search').focus();
+      });
+      byId('notify-hours-list').addEventListener('click', function (event) {
+        var addButton = event.target.closest('[data-add-notify-hour]');
+        var removeButton = event.target.closest('[data-remove-notify-hour]');
+        if (addButton) {
+          if (getNotifyHourSelects().length >= MAX_NOTIFY_HOURS) return;
+          appendNotifyHourRow(getNextNotifyHour());
+          updateNotifyHourOptions();
+          getNotifyHourSelects()[getNotifyHourSelects().length - 1].focus();
+          return;
+        }
+        if (!removeButton) return;
+        var row = removeButton.closest('.notification-time-row');
+        var nextFocus = row.previousElementSibling
+          ? row.previousElementSibling.querySelector('select')
+          : (row.nextElementSibling ? row.nextElementSibling.querySelector('select') : getNotifyHourSelects()[0]);
+        row.remove();
+        updateNotifyHourOptions();
+        if (nextFocus) nextFocus.focus();
+      });
       byId('term-transition-action').addEventListener('click', function () {
         byId('course-search').focus();
       });

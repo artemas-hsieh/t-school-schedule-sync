@@ -92,6 +92,8 @@ const state = {
   requestId: 0
 };
 
+let notificationEmailCommitTimer = 0;
+
 const elements = {
   form: document.querySelector('#config-form'),
   highLoadTestBanner: document.querySelector('#high-load-test-banner'),
@@ -203,12 +205,16 @@ function bindEvents() {
 
     if (event.target === elements.notificationEmail) {
       updateNotifyHourState();
+      document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
+        detail: { step: 3 }
+      }));
+      // Keep validation immediate, but defer rebuilding the 200 KB Code.gs and
+      // the blurred summary card until editing is committed. Replacing both on
+      // every keystroke makes Chromium recompose the backdrop-filter layers.
+      return;
     }
 
-    if (
-      event.target === elements.notificationEmail ||
-      event.target.matches('[data-notify-hour]')
-    ) {
+    if (event.target.matches('[data-notify-hour]')) {
       document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
         detail: { step: 3 }
       }));
@@ -408,8 +414,24 @@ function bindMobileOutputToggle() {
 
 function setupValidation() {
   elements.notificationEmail.addEventListener('input', validateNotificationEmail);
-  elements.notificationEmail.addEventListener('blur', validateNotificationEmail);
+  elements.notificationEmail.addEventListener('blur', scheduleNotificationEmailCommit);
   elements.notificationEmail.addEventListener('click', positionEmailCaretBeforeDomain);
+}
+
+function scheduleNotificationEmailCommit() {
+  window.clearTimeout(notificationEmailCommitTimer);
+  notificationEmailCommitTimer = window.setTimeout(() => {
+    notificationEmailCommitTimer = 0;
+    commitNotificationEmailChange();
+  }, 0);
+}
+
+function commitNotificationEmailChange() {
+  window.clearTimeout(notificationEmailCommitTimer);
+  notificationEmailCommitTimer = 0;
+  validateNotificationEmail();
+  updateOutput();
+  renderSettingsSummary();
 }
 
 function validateNotificationEmail() {
@@ -462,23 +484,23 @@ function setFieldState(field, stateValue, hint) {
 
   const input = field.querySelector('input');
 
-  if (stateValue) {
+  if (stateValue && field.dataset.fieldState !== stateValue) {
     field.dataset.fieldState = stateValue;
-  } else {
+  } else if (!stateValue && field.dataset.fieldState) {
     delete field.dataset.fieldState;
   }
 
   if (input) {
-    if (stateValue === 'invalid') {
+    if (stateValue === 'invalid' && input.getAttribute('aria-invalid') !== 'true') {
       input.setAttribute('aria-invalid', 'true');
-    } else {
+    } else if (stateValue !== 'invalid' && input.hasAttribute('aria-invalid')) {
       input.removeAttribute('aria-invalid');
     }
   }
 
   const hintElement = field.querySelector('.field-hint');
 
-  if (hintElement && hint !== undefined) {
+  if (hintElement && hint !== undefined && hintElement.textContent !== hint) {
     hintElement.textContent = hint;
   }
 }
@@ -701,21 +723,43 @@ function renderCourses() {
   const query = normalizeSearchText(elements.courseSearch.value);
   const catalog = state.sourceSummary.catalog;
   const sections = [];
+  const hasVacationItems = catalog.vacationItems.length > 0;
 
   const courses = catalog.courses
+    .filter(item => item.period !== 'vacation')
     .filter(item => normalizeSearchText(item.title).includes(query))
     .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
 
   if (courses.length > 0) {
-    sections.push(renderCourseSection('課程', courses.map(renderCourseCard).join('')));
+    sections.push(renderCourseSection(
+      hasVacationItems ? '學期間課程' : '課程',
+      courses.map(renderCourseCard).join('')
+    ));
   }
 
   const activities = catalog.activities
+    .filter(item => item.period !== 'vacation')
     .filter(item => normalizeSearchText(item.title).includes(query))
     .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
 
   if (activities.length > 0) {
-    sections.push(renderCourseSection('活動', activities.map(renderActivityCard).join('')));
+    sections.push(renderCourseSection(
+      hasVacationItems ? '學期間活動' : '活動',
+      activities.map(renderActivityCard).join('')
+    ));
+  }
+
+  const vacationItems = catalog.vacationItems
+    .filter(item => normalizeSearchText(item.title).includes(query))
+    .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
+
+  if (vacationItems.length > 0) {
+    sections.push(renderCourseSection(
+      '寒暑假期間課程 / 活動',
+      vacationItems.map(item =>
+        item.type === 'activity' ? renderActivityCard(item) : renderCourseCard(item)
+      ).join('')
+    ));
   }
 
   elements.courseList.innerHTML = sections.length > 0
@@ -1395,6 +1439,10 @@ function initStepJourney() {
       focusEmailBeforeDomain();
       elements.notificationEmail.reportValidity();
       return;
+    }
+
+    if (completedStep === 3) {
+      commitNotificationEmailChange();
     }
 
     if (completedStep === 2 && completionStates.get(2) === 'initial') {
