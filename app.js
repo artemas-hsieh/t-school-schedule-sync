@@ -19,7 +19,7 @@ const DEFAULTS = {
 };
 
 // Temporary feature switch: set to true to restore Lenis and animated page scrolling.
-const ENABLE_SMOOTH_SCROLL = false;
+const ENABLE_SMOOTH_SCROLL = true;
 
 // Developer-only high-load test generator.
 // Set this to false before publishing if the dedicated test build should be completely unavailable.
@@ -52,17 +52,19 @@ const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
 })();
 
 // Journey tuning: each completed section reveals the next one in the vertical narrative.
-// Scroll feel: duration controls how long each full wheel delta takes to settle.
-// Coarse pointers keep native touch velocity and inertia instead of simulating it.
+// Manual input uses frame-based Lenis interpolation so a missed frame extends
+// the settle time instead of jumping forward to catch a fixed duration.
 // Locked-step boundaries cap the final target without damping repeated input.
 const MOTION_CONFIG = Object.freeze({
   sectionTransitionDuration: 1,
-  scrollDuration: 1,
+  scrollLerp: 0.14,
   scrollWheelMultiplier: 1,
-  boundarySettleDuration: 1,
+  scrollTouchLerp: 0.075,
+  scrollTouchMultiplier: 1,
+  scrollTouchInertiaExponent: 1.7,
+  boundarySettleLerp: 0.18,
   boundarySnapDistance: 1.5,
   inputViewportSettleDelay: 120,
-  manualBoundaryInertSettleDelay: 64,
   focusLineRatio: 0.5,
   focusSwitchHysteresisForward: 48,
   focusSwitchHysteresisBackward: 96,
@@ -1088,16 +1090,21 @@ function initSmoothScroll() {
     return;
   }
 
+  const touchInput = window.matchMedia('(pointer: coarse)').matches;
+
   const lenis = new window.Lenis({
-    duration: MOTION_CONFIG.scrollDuration,
+    // Do not set a global duration here. Lenis gives duration precedence over
+    // lerp, which made the next frame catch up after a rendering stall.
+    lerp: MOTION_CONFIG.scrollLerp,
     smoothWheel: true,
     wheelMultiplier: MOTION_CONFIG.scrollWheelMultiplier,
-    // Lenis also defaults to native touch scrolling. Keeping syncTouch off lets
-    // iOS and Android preserve their acceleration curves without a second
-    // interpolator fighting Visual Viewport keyboard updates.
-    syncTouch: false,
+    touchMultiplier: MOTION_CONFIG.scrollTouchMultiplier,
+    syncTouch: touchInput,
+    syncTouchLerp: MOTION_CONFIG.scrollTouchLerp,
+    touchInertiaExponent: MOTION_CONFIG.scrollTouchInertiaExponent,
     overscroll: false,
     anchors: true,
+    autoRaf: true,
     virtualScroll: payload => {
       const boundaryHandler = window.tschoolBoundaryVirtualScroll;
       return typeof boundaryHandler === 'function' ? boundaryHandler(payload) : true;
@@ -1105,62 +1112,6 @@ function initSmoothScroll() {
   });
 
   window.tschoolLenis = lenis;
-
-  let frameId = 0;
-  let frameLoopActive = false;
-
-  function requestLenisFrame() {
-    if (frameId || document.hidden) {
-      return;
-    }
-
-    if (!frameLoopActive) {
-      // Lenis derives its delta from the previous timestamp. Reset the clock
-      // when waking from idle so the first frame cannot jump by the idle time.
-      lenis.time = performance.now();
-      frameLoopActive = true;
-    }
-
-    frameId = requestAnimationFrame(raf);
-  }
-
-  function raf(time) {
-    frameId = 0;
-    lenis.raf(time);
-
-    if (lenis.isScrolling === 'smooth') {
-      frameId = requestAnimationFrame(raf);
-      return;
-    }
-
-    frameLoopActive = false;
-  }
-
-  // A wheel/touch gesture reaches this event before Lenis creates its smooth
-  // animation, so one requested frame is enough to start the event-driven loop.
-  lenis.on('virtual-scroll', requestLenisFrame);
-
-  // Programmatic navigation does not emit virtual-scroll. Keep the public
-  // instance API intact while ensuring those animations also wake the loop.
-  const scrollTo = lenis.scrollTo.bind(lenis);
-  lenis.scrollTo = (...args) => {
-    const result = scrollTo(...args);
-    requestLenisFrame();
-    return result;
-  };
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      if (frameId) cancelAnimationFrame(frameId);
-      frameId = 0;
-      frameLoopActive = false;
-      return;
-    }
-
-    if (lenis.isScrolling === 'smooth') {
-      requestLenisFrame();
-    }
-  });
 }
 
 function initHeroScroll() {
@@ -1384,7 +1335,6 @@ function initStepJourney() {
   let editingReleaseTimer = 0;
   let ensureControlFrame = 0;
   let ensureControlTimer = 0;
-  let stepInertCommitTimer = 0;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -1648,49 +1598,8 @@ function initStepJourney() {
     }
   }
 
-  function applyStepInertState() {
-    steps.forEach(step => {
-      step.toggleAttribute('inert', Number(step.dataset.step) !== activeStep);
-    });
-  }
-
-  function cancelScheduledStepInertCommit() {
-    if (!stepInertCommitTimer) {
-      return;
-    }
-
-    clearTimeout(stepInertCommitTimer);
-    stepInertCommitTimer = 0;
-  }
-
-  function scheduleStepInertCommit() {
-    cancelScheduledStepInertCommit();
-
-    function commitWhenScrollSettles() {
-      stepInertCommitTimer = 0;
-      const scrollingMode = window.tschoolLenis?.isScrolling;
-      const scrollIsMoving = scrollingMode === 'smooth' || scrollingMode === 'native';
-
-      if (scrollIsMoving) {
-        stepInertCommitTimer = window.setTimeout(
-          commitWhenScrollSettles,
-          MOTION_CONFIG.manualBoundaryInertSettleDelay
-        );
-        return;
-      }
-
-      applyStepInertState();
-    }
-
-    stepInertCommitTimer = window.setTimeout(
-      commitWhenScrollSettles,
-      MOTION_CONFIG.manualBoundaryInertSettleDelay
-    );
-  }
-
   function setActiveStep(stepNumber) {
     const nextActiveStep = clamp(stepNumber, 1, maxUnlockedStep);
-    const previousActiveStep = activeStep;
     const unlockedLayoutChanged = renderedUnlockedStep !== maxUnlockedStep;
 
     if (
@@ -1703,19 +1612,9 @@ function initStepJourney() {
 
     activeStep = nextActiveStep;
     renderedUnlockedStep = maxUnlockedStep;
-    const activeStepIsOutput = steps[activeStep - 1]?.classList.contains('output-step');
-    const precedingDepthStep = activeStepIsOutput ? Math.max(1, activeStep - 1) : activeStep;
     steps.forEach(step => {
       const number = Number(step.dataset.step);
-      /*
-       * Step 5 is much larger than the preceding cards. Once it becomes active,
-       * keep the already off-screen cards at their step-4 depth instead of
-       * transitioning every old card's full filter and opacity mid-scroll.
-       */
-      const depthReferenceStep = activeStepIsOutput && number < activeStep
-        ? precedingDepthStep
-        : activeStep;
-      const distance = Math.abs(depthReferenceStep - number);
+      const distance = Math.abs(activeStep - number);
       step.classList.toggle('is-current', number === activeStep);
       step.classList.toggle('is-past', number < activeStep);
       step.classList.toggle('is-future', number > activeStep);
@@ -1724,27 +1623,8 @@ function initStepJourney() {
       step.classList.toggle('is-concealed', number > maxUnlockedStep + 1);
       step.style.setProperty('--section-blur', `${distance === 0 ? 0 : Math.min(12, 2 + distance * 3)}px`);
       step.style.setProperty('--section-opacity', distance === 0 ? '1' : String(Math.max(0.28, 0.76 - distance * 0.14)));
+      step.toggleAttribute('inert', number !== activeStep);
     });
-
-    const crossesOutputBoundary =
-      Math.abs(previousActiveStep - activeStep) === 1 &&
-      (
-        steps[previousActiveStep - 1]?.classList.contains('output-step') ||
-        activeStepIsOutput
-      );
-    const shouldDeferInertCommit =
-      crossesOutputBoundary &&
-      !automatedTargetStep &&
-      !navigationTargetStep &&
-      focusInputDirection !== 0 &&
-      Boolean(window.tschoolLenis);
-
-    if (shouldDeferInertCommit) {
-      scheduleStepInertCommit();
-    } else {
-      cancelScheduledStepInertCommit();
-      applyStepInertState();
-    }
 
     elements.stageMenuItems.forEach(item => {
       const targetStep = Number(item.dataset.stepTarget);
@@ -2219,28 +2099,6 @@ function initStepJourney() {
     lenis.scrollTo(lenis.animatedScroll, { immediate: true, force: true });
   }
 
-  function resetOpposingScrollMomentum(lenis, deltaY) {
-    if (
-      !lenis ||
-      !Number.isFinite(lenis.targetScroll) ||
-      !Number.isFinite(lenis.animatedScroll)
-    ) {
-      return;
-    }
-
-    const pendingDistance = lenis.targetScroll - lenis.animatedScroll;
-    const hasOpposingMomentum =
-      Math.abs(pendingDistance) > MOTION_CONFIG.boundarySnapDistance &&
-      Math.sign(pendingDistance) !== Math.sign(deltaY);
-
-    if (hasOpposingMomentum) {
-      lenis.scrollTo(lenis.animatedScroll, {
-        immediate: true,
-        force: true
-      });
-    }
-  }
-
   function clampToCurrentBoundary(options = {}, maximumScrollY = getMaximumScrollY()) {
     const lenis = window.tschoolLenis;
 
@@ -2252,7 +2110,7 @@ function initStepJourney() {
 
       lenis.scrollTo(maximumScrollY, {
         immediate: options.immediate === true,
-        duration: MOTION_CONFIG.boundarySettleDuration,
+        lerp: MOTION_CONFIG.boundarySettleLerp,
         programmatic: false,
         force: true
       });
@@ -2289,11 +2147,10 @@ function initStepJourney() {
       return true;
     }
 
-    resetOpposingScrollMomentum(lenis, deltaY);
-
-    // Once every step is unlocked there is no card-specific boundary. Lenis'
-    // native document limit is the only bottom boundary and already prevents
-    // overscroll without introducing a second settling animation.
+    // Once every step is unlocked, Lenis handles forward and reverse momentum
+    // continuously at its own document boundary. Do not immediately rewrite
+    // its target: touchend can contain tiny opposing deltas that would feel
+    // like a catch or rebound if interpreted as an intentional reversal.
     if (deltaY < 0 || maxUnlockedStep >= steps.length) {
       return true;
     }
@@ -2304,7 +2161,7 @@ function initStepJourney() {
     function settleAtBoundary() {
       if (event?.cancelable) event.preventDefault();
       lenis.scrollTo(maximumScrollY, {
-        duration: MOTION_CONFIG.boundarySettleDuration,
+        lerp: MOTION_CONFIG.boundarySettleLerp,
         programmatic: false,
         force: true
       });

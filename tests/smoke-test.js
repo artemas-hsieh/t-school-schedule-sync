@@ -149,9 +149,64 @@ assert.match(
   'Email 的 input 事件應在即時驗證與狀態重設後停止，不得逐字重建 Code.gs'
 );
 assert.equal(
-  configuratorAppSource.includes('syncTouch: false'),
+  configuratorAppSource.includes('const ENABLE_SMOOTH_SCROLL = true;'),
   true,
-  '粗指標裝置應保留瀏覽器原生觸控速度與慣性'
+  'Lenis 總開關應保持啟用，以供程式定位與鎖定邊界使用'
+);
+assert.equal(
+  configuratorAppSource.includes('lerp: MOTION_CONFIG.scrollLerp'),
+  true,
+  '手動捲動應使用逐幀 lerp，避免時間制動畫漏幀後追趕'
+);
+assert.equal(
+  configuratorAppSource.includes('smoothWheel: true'),
+  true,
+  '手動滾輪與觸控板應保留 Lenis 平滑效果'
+);
+assert.equal(
+  configuratorAppSource.includes('syncTouch: touchInput'),
+  true,
+  '粗指標裝置應啟用逐幀觸控平滑'
+);
+assert.equal(
+  configuratorAppSource.includes('autoRaf: true'),
+  true,
+  'Lenis 應使用內建 RAF，避免自訂喚醒迴圈在臨界幀提早停止'
+);
+assert.equal(
+  configuratorAppSource.includes("lenis.on('virtual-scroll', requestLenisFrame)"),
+  false,
+  '不得恢復依 virtual-scroll 事件喚醒的自訂 Lenis RAF'
+);
+assert.equal(
+  configuratorAppSource.includes('scrollTouchLerp: 0.075'),
+  true,
+  '觸控慣性應使用 Lenis 官方預設 lerp，避免過快收斂放大臨界幀'
+);
+assert.equal(
+  configuratorAppSource.includes('scrollTouchInertiaExponent: 1.7'),
+  true,
+  '觸控慣性曲線應維持 Lenis 官方預設'
+);
+assert.equal(
+  configuratorAppSource.includes('duration: MOTION_CONFIG.scrollDuration'),
+  false,
+  'Lenis 建構設定不得恢復時間制 duration'
+);
+assert.equal(
+  configuratorAppSource.includes('resetOpposingScrollMomentum'),
+  false,
+  '手動觸控的極小反向輸入不得立即截斷 Lenis 尚未完成的動量'
+);
+assert.equal(
+  configuratorAppSource.includes('documentEndGuardDistance'),
+  false,
+  '所有步驟解鎖後不得在 Lenis 文件極限前另設頁尾攔截'
+);
+assert.equal(
+  configuratorAppSource.includes('duration: MOTION_CONFIG.boundarySettleDuration'),
+  false,
+  '卡片與文件邊界不得恢復時間制收斂'
 );
 assert.equal(
   configuratorAppSource.includes(
@@ -159,16 +214,6 @@ assert.equal(
   ),
   true,
   '鍵盤尺寸連續變化後應等待 viewport 穩定再校正聚焦欄位'
-);
-assert.equal(
-  configuratorAppSource.includes('scheduleStepInertCommit();'),
-  true,
-  '手動跨越第四、五步時應把 inert 更新延後到 Lenis 捲動停止'
-);
-assert.match(
-  configuratorAppSource,
-  /const depthReferenceStep = activeStepIsOutput && number < activeStep[\s\S]*?\? precedingDepthStep[\s\S]*?: activeStep;/,
-  '第五步啟用時應凍結畫面外舊卡片的景深，避免捲動途中重繪'
 );
 const codeMaskStyles = configuratorStylesSource.match(
   /\.control-panel-card \.code-window::after \{([\s\S]*?)\n\}/
@@ -178,67 +223,6 @@ assert.equal(
   /backdrop-filter|mask-image/.test(codeMaskStyles),
   false,
   '程式碼預覽遮罩應只使用黑色透明度漸層，不得恢復模糊或 mask 濾鏡'
-);
-assert.match(
-  configuratorStylesSource,
-  /\.journey-step\.output-step\.is-future \.step-card \{\s*opacity: 1;\s*filter: none;/,
-  '第五步非作用中時不得轉場整張卡片的透明度或模糊'
-);
-assert.match(
-  configuratorStylesSource,
-  /\.journey-step\.output-step\.is-future > \.progressive-blur \{\s*display: none;/,
-  '第五步作為預覽時不得繼續合成五層 progressive blur'
-);
-assert.match(
-  configuratorStylesSource,
-  /\.journey-step\.output-step\.is-future::after \{\s*display: block;/,
-  '第五步預覽應明確顯示單層局部景深遮罩'
-);
-const outputBoundaryOverlayStyles = configuratorStylesSource.match(
-  /\.journey-step\.output-step\.is-future::after \{([\s\S]*?)\n\s*\}/
-)?.[1] || '';
-assert.match(
-  outputBoundaryOverlayStyles,
-  /(?:^|\n)\s*backdrop-filter:\s*none;/,
-  '第五步非作用中遮罩不得在手動捲動途中建立 backdrop-filter'
-);
-assert.match(
-  configuratorStylesSource,
-  /\.journey-step\.is-past:has\(\+ \.output-step\.is-current\) > \.past-progressive-blur \{\s*display: none;/,
-  '第四步退到第五步上方時不得合成五層完整 past fog'
-);
-assert.match(
-  configuratorStylesSource,
-  /\.journey-step\.is-past:has\(\+ \.output-step\.is-current\) \.step-card \{\s*opacity: 1;\s*filter: none;/,
-  '第四步退到第五步上方時不得轉場整張卡片的透明度或模糊'
-);
-const pastOutputBoundaryOverlayStyles = configuratorStylesSource.match(
-  /\.journey-step\.is-past:has\(\+ \.output-step\.is-current\)::after \{([\s\S]*?)\n\s*\}/
-)?.[1] || '';
-assert.match(
-  pastOutputBoundaryOverlayStyles,
-  /(?:^|\n)\s*backdrop-filter:\s*none;/,
-  '第四步退到第五步上方時應使用純色漸層，不得在 Lenis 捲動途中建立 backdrop-filter'
-);
-assert.equal(
-  configuratorStylesSource.includes(
-    '.journey-step.output-step.is-entering .step-card {\n  animation-name: output-section-reveal;'
-  ),
-  true,
-  '第五步進場應使用不含完整卡片模糊的專用動畫'
-);
-const outputRevealStyles = configuratorStylesSource
-  .split('@keyframes output-section-reveal {')[1]
-  ?.split('@keyframes past-section-blur-layer-in {')[0] || '';
-assert.equal(
-  configuratorStylesSource.includes('@keyframes output-section-reveal {'),
-  true,
-  '第五步專用進場動畫必須存在'
-);
-assert.equal(
-  outputRevealStyles.includes('filter:'),
-  false,
-  '第五步專用進場動畫不得重新加入完整卡片 filter'
 );
 
 function makeCatalogPayload(weekNumbers, entriesByWeek) {
