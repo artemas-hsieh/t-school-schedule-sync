@@ -92,7 +92,9 @@ node tests/smoke-test.js
 - 大量刪除預覽 token 在來源或設定改變後會失效；強制修復不得繞過大量刪除保護。
 - 失敗通知不會掩蓋原始同步錯誤。
 - `notification-email-templates.json` 可解析且涵蓋所有通知種類；產生的 `Code.gs` 不含 manifest 中的信件版型文案或版面內容（Apps Script 側欄本身仍會內嵌 HTML）。
+- 產生的 `Code.gs` 從 `raw.githubusercontent.com` 的已核准 commit 讀取 manifest，不再使用會隨主分支變動的 GitHub Pages 網址；更新 pin 時同步更換 cache key。
 - HTML 信件一般變數會跳脫 `<`、`>`、引號與 `&`；重複區塊只能插入由 manifest 自己渲染的內容。
+- HTML 信件只保留 `calendar.google.com/calendar/` 與 `docs.google.com/spreadsheets/` 的 HTTPS 連結；相似網域、其他路徑、非 HTTPS 或 `javascript:` 連結都移除但保留文字。
 - 遠端 HTML manifest 下載、快取或驗證失敗時，`MailApp` 仍以純文字 `body` 寄送原通知。
 - 通知版型只保留標準版本，沒有句號、單側厚色框或可自訂通知格式；標籤使用直角，底部只保留指定的自動寄送說明。
 - 一般通知在設定時間外只排入佇列；錯誤與「行程已開始同步」通知可立即寄出。
@@ -107,6 +109,7 @@ node tests/smoke-test.js
 - 中央索引依欄名讀取，允許額外的 `備註` 欄；停用列略過，同一來源組的多份 Sheets 正確合併。
 - 同一來源組出現不同年級／適用日期、重複 Sheets 連結、無效啟用值或非一般 Google Sheets 連結時停止使用該次索引。
 - 中央索引暫時失敗時沿用最後成功版本；從未成功讀取時才使用內建來源。
+- 第一次成功讀取中央索引只建立基準；後續內容改變時寄送一次含差異摘要與新舊指紋的通知，寄送失敗時保留待寄狀態並於下次成功讀取重試。
 - 只有已設定來源組的年級會建立課綱觸發器；日期超出來源組適用範圍時不得開啟舊課綱。
 - 課程只以課表原始名稱一字不差對應工作表分頁，不使用分頁內中文名稱或模糊比對。
 - 欄位換序、增欄，以及標頭位於不同列時，仍能依欄名定位。

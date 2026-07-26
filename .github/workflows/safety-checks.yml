@@ -1,0 +1,36 @@
+name: Safety checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: safety-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check app.js
+          node --check schedule-data.js
+          node --check sidebar-template.js
+          node --check code-template.js
+          node --check tests/smoke-test.js
+
+      - name: Run smoke test
+        run: node tests/smoke-test.js

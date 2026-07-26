@@ -81,6 +81,13 @@ Google 可能會要求你授權 Apps Script 使用下列能力：
 - 不要公開貼出含私人資料的 `Code.gs`。
 - 如果你不再使用，執行 `deleteAutoSyncTriggers()`，再視需要刪除 Apps Script 專案。
 
+## 維護者安全
+
+- GitHub 帳號應啟用兩步驟驗證，並另外保存復原碼或第二種驗證方式。
+- `main` 應設定分支保護：必須透過 pull request、必須通過 `Smoke test`、禁止 force push 與刪除。只有一名維護者時，不要先要求一名他人核准，以免自己的 pull request 無法合併。
+- HTML Email manifest 固定到已核准的 commit，不追蹤 GitHub Pages 主分支。更新版型時先提交 JSON，再以新的 commit SHA 更新產生器並重新發布。
+- HTML Email 渲染後只允許 Google Calendar 的 `/calendar/` 與 Google Sheets 的 `/spreadsheets/` HTTPS 連結，其餘連結移除並保留文字。
+
 ## 危險操作提醒
 
 產生的 `Code.gs` 裡有幾個比較敏感的函式：

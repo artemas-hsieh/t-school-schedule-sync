@@ -82,15 +82,17 @@ Google Sheet 的「行程同步」選單提供：
 - `shell` 是所有通知共用的信件外框。
 - `notifications` 內含一套標準行程調整格式，以及設定完成、每日成功摘要、同步失敗、課綱失敗、新學期、新項目與同步停止等版型。
 - 一般 `{{value}}` 會先做 HTML 跳脫；`{{{content}}}`、`{{{changesHtml}}}` 與 `{{{itemsHtml}}}` 只用於插入由 manifest 本身產生的 HTML 區塊。
-- 修改後需把檔案發布到目前的 GitHub Pages 網址。既有 `Code.gs` 不必重貼，最長約一小時後會自動取得新版；遠端檔案無法讀取時仍會寄純文字。
+- 產生的 `Code.gs` 固定讀取 commit `0131d6b8cf2b0f524e85bb8720d2e680458afea2` 中的版本，不會跟著主分支即時變動。
+- 修改版型時，先單獨提交 `notification-email-templates.json`，再把該 commit SHA 寫入 `code-template.js` 的 `EMAIL_TEMPLATE_MANIFEST_URL` 並更新 cache key。完成驗證後重新發布產生器；既有安裝者必須重新產生並替換 `Code.gs` 才會採用新版。
+- 渲染後只保留 `calendar.google.com/calendar/` 與 `docs.google.com/spreadsheets/` 的 HTTPS 連結；其他連結會移除但保留文字。遠端檔案無法讀取或驗證時仍會寄純文字。
 
 調整時應保留 `schemaVersion: 1`、既有通知 key 與所使用的變數名稱，並執行 `node tests/smoke-test.js`。
 
 ## 資料來源與限制
 
 - 課表執行階段使用固定的 Google Apps Script API 部署網址；不使用已停止更新的舊課表 Google Sheet。
-- HTML Email 版型由公開的 `notification-email-templates.json` 提供，產生的 `Code.gs` 不內嵌 HTML。版型更新後，已安裝程式會在快取到期（最長約一小時）後自動套用；下載失敗時改寄純文字。
-- 課綱是獨立的補充來源。產生的 Apps Script 會讀取中央「課綱來源」索引，所以日後只要在索引新增或啟用新學期來源，不必重新產生既有 `Code.gs`。索引暫時失敗時沿用最後成功版本。
+- HTML Email 版型由固定 commit 中公開的 `notification-email-templates.json` 提供，產生的 `Code.gs` 不內嵌 HTML，也不會盲目追蹤主分支；下載失敗時改寄純文字。
+- 課綱是獨立的補充來源。產生的 Apps Script 會讀取中央「課綱來源」索引，所以日後只要在索引新增或啟用新學期來源，不必重新產生既有 `Code.gs`。索引暫時失敗時沿用最後成功版本；成功讀到與上次不同的內容時，會寄送一次含摘要與新舊指紋的通知，寄送失敗則在下次成功讀取時重試。
 - 只有年級與日期符合已啟用來源組時，使用者自己的 Apps Script 才會讀取受校內帳號保護的課綱 Sheets；目前高一與高三不會觸發課綱讀取。
 - 課綱依工作表分頁名稱、日期與節次精確配對。純非同步課程、過去課程與沒有課表事件的未開課課程不會加入行事曆說明。
 - 課綱由獨立觸發器更新成最後成功快照，因此 Sheets 暫時失敗時仍可完成基本課表同步；第一次失敗會自動重試，重試仍失敗才寄信。

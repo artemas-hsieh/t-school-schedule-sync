@@ -234,6 +234,21 @@ assert.equal(
 assert.equal(generatedCode.includes('NOTIFICATION_QUEUE_STORE'), true);
 assert.equal(generatedCode.includes('notification-email-templates.json'), true);
 assert.equal(
+  generatedCode.includes(
+    'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
+    '0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json'
+  ),
+  true,
+  'HTML Email 版型必須固定到已核准的 commit'
+);
+assert.equal(
+  generatedCode.includes(
+    'https://artemas-hsieh.github.io/t-school-schedule-sync/notification-email-templates.json'
+  ),
+  false,
+  '產生的 Code.gs 不得再追蹤主分支上的即時版型'
+);
+assert.equal(
   generatedCode.includes('這封信由你的 T-SCHOOL 行程同步控制臺自動寄出'),
   false,
   'Code.gs 不應內嵌信件 HTML'
@@ -375,6 +390,22 @@ const context = vm.createContext({
 });
 
 vm.runInContext(generatedCode, context);
+
+assert.equal(
+  context.sanitizeCalendarName_('高二行程｜T-SCHOOL Schedule Sync', '高二'),
+  '高二行程｜T-SCHOOL Schedule Sync',
+  '行事曆名稱不得使用 NFKC 將全形分隔線轉成半形'
+);
+assert.equal(
+  context.sanitizeCalendarName_('高二行程|T-SCHOOL Schedule Sync', '高二'),
+  '高二行程｜T-SCHOOL Schedule Sync',
+  '舊版半形預設名稱應轉回標準全形分隔線'
+);
+assert.equal(
+  context.sanitizeCalendarName_('  我的｜專用　行事曆  ', '高二'),
+  '我的｜專用 行事曆',
+  '自訂名稱應清除多餘空白但保留使用者選擇的全形符號'
+);
 
 assert.deepEqual(
   Object.keys(context.getVacationWeekNumbersFromPayload_(vacationCatalogPayload)).map(Number),
@@ -1073,11 +1104,11 @@ context.CacheService = {
   getScriptCache() {
     return {
       get(key) {
-        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_V1');
+        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8');
         return cachedEmailTemplateManifest;
       },
       put(key, value, seconds) {
-        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_V1');
+        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8');
         assert.equal(seconds, 60 * 60);
         cachedEmailTemplateManifest = value;
       }
@@ -1088,7 +1119,8 @@ context.UrlFetchApp = {
   fetch(url, options) {
     assert.equal(
       url,
-      'https://artemas-hsieh.github.io/t-school-schedule-sync/notification-email-templates.json'
+      'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
+      '0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json'
     );
     assert.equal(options.followRedirects, true);
     assert.equal(options.muteHttpExceptions, true);
@@ -1148,6 +1180,32 @@ assert.match(renderedFailureEmail, /<!doctype html>/);
 assert.match(renderedFailureEmail, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; 權限不足/);
 assert.equal(renderedFailureEmail.includes('<script>alert("x")</script>'), false);
 assert.match(renderedFailureEmail, /這次同步沒有完成/);
+assert.match(
+  renderedFailureEmail,
+  /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/test\/edit"/,
+  '核准的 Google Sheets 連結應保留'
+);
+const sanitizedEmailLinks = context.sanitizeEmailHtmlLinks_(
+  '<p>' +
+  '<a href="https://calendar.google.com/calendar/u/0/r">日曆</a>' +
+  '<a href="https://docs.google.com/spreadsheets/d/test/edit?usp=sharing">控制臺</a>' +
+  '<a href="https://calendar.google.com.evil.example/phish"><strong>假日曆</strong></a>' +
+  '<a href="https://docs.google.com/url?q=https://evil.example">假控制臺</a>' +
+  '<a href="javascript:alert(1)">危險連結</a>' +
+  '</p>'
+);
+assert.match(sanitizedEmailLinks, /href="https:\/\/calendar\.google\.com\/calendar\/u\/0\/r"/);
+assert.match(
+  sanitizedEmailLinks,
+  /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/test\/edit\?usp=sharing"/
+);
+assert.equal(sanitizedEmailLinks.includes('calendar.google.com.evil.example'), false);
+assert.equal(sanitizedEmailLinks.includes('docs.google.com/url'), false);
+assert.equal(sanitizedEmailLinks.includes('javascript:'), false);
+assert.match(sanitizedEmailLinks, /假日曆/);
+assert.match(sanitizedEmailLinks, /假控制臺/);
+assert.match(sanitizedEmailLinks, /危險連結/);
+assert.equal(/<strong>假日曆<\/strong>/.test(sanitizedEmailLinks), false);
 
 const sampleEmailData = {
   sentAt: '2026/07/26 12:00',
@@ -1375,9 +1433,75 @@ context.SpreadsheetApp = {
   }
 };
 context.resetCourseOutlineSourceIndexRuntimeCache_();
+const emailsBeforeInitialOutlineIndex = sentEmailMessages.length;
 const liveOutlineIndex = context.loadCourseOutlineSourceIndex_();
 assert.equal(liveOutlineIndex.source, 'live');
 assert.equal(liveOutlineIndex.setsByGrade['高一'][0].key, '115-1-high1');
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeInitialOutlineIndex,
+  '第一次成功讀取課綱來源索引時不應誤寄變動通知'
+);
+
+liveOutlineIndexValues.push([
+  'TRUE',
+  '115-1-high2',
+  '115-1 高二—必修',
+  '高二',
+  '2026-09-01',
+  '2027-01-31',
+  'https://docs.google.com/spreadsheets/d/live-index-second-sheet/edit'
+]);
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+const emailsBeforeOutlineIndexChange = sentEmailMessages.length;
+const changedOutlineIndex = context.loadCourseOutlineSourceIndex_();
+assert.equal(changedOutlineIndex.setsByGrade['高二'][0].key, '115-1-high2');
+assert.equal(sentEmailMessages.length, emailsBeforeOutlineIndexChange + 1);
+assert.equal(
+  sentEmailMessages.at(-1).subject,
+  '課綱索引已更新｜T-SCHOOL Schedule Sync'
+);
+assert.match(sentEmailMessages.at(-1).body, /新增：高二｜115-1-high2/);
+assert.match(sentEmailMessages.at(-1).body, /舊指紋：/);
+assert.match(sentEmailMessages.at(-1).body, /新指紋：/);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(
+    context.readChunkedJson_('TSCHOOL_COURSE_OUTLINE_INDEX_CACHE', null),
+    'changeNotice'
+  ),
+  false,
+  '變動通知成功後應清除待寄狀態'
+);
+
+liveOutlineIndexValues[1][2] = '115-1 高一—必修（更新）';
+mailFailuresRemaining = 1;
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+const emailsBeforeFailedOutlineIndexNotice = sentEmailMessages.length;
+context.loadCourseOutlineSourceIndex_();
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeFailedOutlineIndexNotice,
+  '課綱索引通知寄送失敗時不得假裝成功'
+);
+assert.equal(
+  context.readChunkedJson_('TSCHOOL_COURSE_OUTLINE_INDEX_CACHE', null).changeNotice.pending,
+  true,
+  '課綱索引通知寄送失敗後應保留待寄狀態'
+);
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+context.loadCourseOutlineSourceIndex_();
+assert.equal(sentEmailMessages.length, emailsBeforeFailedOutlineIndexNotice + 1);
+assert.match(sentEmailMessages.at(-1).body, /更新前：高一｜115-1-high1/);
+assert.match(sentEmailMessages.at(-1).body, /更新後：高一｜115-1-high1/);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(
+    context.readChunkedJson_('TSCHOOL_COURSE_OUTLINE_INDEX_CACHE', null),
+    'changeNotice'
+  ),
+  false,
+  '下一次成功讀取相同索引時應重試並完成待寄通知'
+);
+
 context.SpreadsheetApp = {
   openById() {
     throw new Error('模擬中央索引暫時無法讀取');

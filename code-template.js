@@ -923,10 +923,11 @@ function buildHighLoadTestSettings_(source) {
 const SETTINGS_SCHEMA_VERSION = 4;
 const TIMEZONE = 'Asia/Taipei';
 const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
-const EMAIL_TEMPLATE_MANIFEST_URL = 'https://artemas-hsieh.github.io/t-school-schedule-sync/notification-email-templates.json';
-const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_V1';
+const EMAIL_TEMPLATE_MANIFEST_URL = 'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json';
+const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8';
 const EMAIL_TEMPLATE_CACHE_SECONDS = 60 * 60;
 const EMAIL_TEMPLATE_MAX_BYTES = 100 * 1024;
+const EMAIL_LINK_ALLOWED_HOSTS = ['calendar.google.com', 'docs.google.com'];
 const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
 const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
 const SYNC_JOB_STORE = 'TSCHOOL_SYNC_JOB';
@@ -969,6 +970,7 @@ const TERM_TRANSITION_NOTICE_MAX_ATTEMPTS = 2;
 const COURSE_OUTLINE_INDEX_SPREADSHEET_ID = '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY';
 const COURSE_OUTLINE_INDEX_SHEET_NAME = '課綱來源';
 const COURSE_OUTLINE_INDEX_HEADER_SCAN_LIMIT = 20;
+const COURSE_OUTLINE_INDEX_NOTICE_DETAIL_LIMIT = 12;
 const EVENT_METADATA_VERSION = 2;
 const MANAGED_EVENT_TAG_KEY = 'tschool_managed';
 const SYNC_ID_EVENT_TAG_KEY = 'tschool_sync_id';
@@ -1507,7 +1509,17 @@ function defaultCalendarNameForGrade_(gradeName) {
 }
 
 function sanitizeCalendarName_(value, gradeName) {
-  const name = normalizeText_(value).slice(0, 100);
+  let name = String(value == null ? '' : value);
+  if (typeof name.normalize === 'function') name = name.normalize('NFC');
+  name = name
+    .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
+    .replace(/[\\r\\n\\t\\u3000]+/g, ' ')
+    .replace(/[ ]+/g, ' ')
+    .trim();
+  if (/^高[一二三]行程\\s*\\|\\s*T-SCHOOL Schedule Sync$/.test(name)) {
+    name = defaultCalendarNameForGrade_(gradeName);
+  }
+  name = name.slice(0, 100);
   return name || defaultCalendarNameForGrade_(gradeName);
 }
 
@@ -3340,6 +3352,115 @@ function readCourseOutlineSourceIndexSpreadsheet_() {
   return parseCourseOutlineSourceIndexValues_(values);
 }
 
+function mapCourseOutlineSourceIndexSets_(payload) {
+  const mapped = {};
+  ['高一', '高二', '高三'].forEach(gradeName => {
+    const sets = payload && payload.setsByGrade && payload.setsByGrade[gradeName];
+    (Array.isArray(sets) ? sets : []).forEach(set => {
+      const key = gradeName + '|' + set.key;
+      mapped[key] = {
+        comparable: JSON.stringify(set),
+        summary: gradeName + '｜' + set.key + '｜' +
+          set.validFrom + '–' + set.validUntil + '｜' +
+          (set.label || (set.outlineNames || []).join('、') || '未命名來源') +
+          '｜' + set.spreadsheetIds.length + ' 份試算表'
+      };
+    });
+  });
+  return mapped;
+}
+
+function summarizeCourseOutlineSourceIndexChange_(previousPayload, nextPayload) {
+  const previousSets = mapCourseOutlineSourceIndexSets_(previousPayload);
+  const nextSets = mapCourseOutlineSourceIndexSets_(nextPayload);
+  const changes = [];
+
+  Object.keys(nextSets).sort().forEach(key => {
+    if (!previousSets[key]) {
+      changes.push('新增：' + nextSets[key].summary);
+    } else if (previousSets[key].comparable !== nextSets[key].comparable) {
+      changes.push(
+        previousSets[key].summary === nextSets[key].summary
+          ? '更新：' + nextSets[key].summary + '｜來源試算表清單已變更'
+          : '更新前：' + previousSets[key].summary +
+            '\\n更新後：' + nextSets[key].summary
+      );
+    }
+  });
+  Object.keys(previousSets).sort().forEach(key => {
+    if (!nextSets[key]) changes.push('移除：' + previousSets[key].summary);
+  });
+
+  const counts = ['高一', '高二', '高三'].map(gradeName => {
+    const sets = nextPayload.setsByGrade[gradeName];
+    return gradeName + ' ' + (Array.isArray(sets) ? sets.length : 0) + ' 組';
+  });
+  const visibleChanges = changes.slice(0, COURSE_OUTLINE_INDEX_NOTICE_DETAIL_LIMIT);
+  if (changes.length > visibleChanges.length) {
+    visibleChanges.push('另有 ' + (changes.length - visibleChanges.length) + ' 項變動未列出');
+  }
+  if (!visibleChanges.length) visibleChanges.push('來源組結構未顯示差異，但內容指紋已改變');
+
+  return [
+    '目前來源組：' + counts.join('、'),
+    '',
+    visibleChanges.join('\\n'),
+    '',
+    '舊指紋：' + previousPayload.fingerprint,
+    '新指紋：' + nextPayload.fingerprint
+  ].join('\\n');
+}
+
+function prepareCourseOutlineSourceIndexChangeNotice_(previousPayload, nextPayload) {
+  if (!previousPayload || !previousPayload.fingerprint) return null;
+  const fingerprintMatches = previousPayload.fingerprint === nextPayload.fingerprint;
+  const contentMatches =
+    JSON.stringify(previousPayload.setsByGrade) === JSON.stringify(nextPayload.setsByGrade);
+  if (fingerprintMatches && contentMatches) {
+    const pending = previousPayload.changeNotice;
+    return pending && pending.pending &&
+      pending.currentFingerprint === nextPayload.fingerprint
+      ? pending
+      : null;
+  }
+  return {
+    pending: true,
+    previousFingerprint: previousPayload.fingerprint,
+    currentFingerprint: nextPayload.fingerprint,
+    detectedAt: new Date().toISOString(),
+    summary: summarizeCourseOutlineSourceIndexChange_(previousPayload, nextPayload)
+  };
+}
+
+function sendPendingCourseOutlineSourceIndexChangeNotice_(payload) {
+  const notice = payload && payload.changeNotice;
+  if (!notice || !notice.pending) return;
+  try {
+    sendEmail_(
+      loadSettings_(),
+      'course_outline_index_changed',
+      '課綱索引已更新',
+      '中央課綱來源索引已更新，內容摘要如下\\n\\n' + notice.summary +
+      '\\n\\n若這不是預期變更，請聯絡索引維護者確認後再繼續同步',
+      { message: notice.summary }
+    );
+  } catch (mailError) {
+    Logger.log('課綱來源索引變動通知寄送失敗，將於下次成功讀取索引時重試：' + mailError.message);
+    return;
+  }
+
+  delete payload.changeNotice;
+  if (courseOutlineSourceIndexRuntimeCache_ &&
+      courseOutlineSourceIndexRuntimeCache_.fingerprint === payload.fingerprint) {
+    delete courseOutlineSourceIndexRuntimeCache_.changeNotice;
+  }
+  try {
+    writeChunkedJson_(COURSE_OUTLINE_INDEX_CACHE_STORE, payload);
+  } catch (cacheError) {
+    Logger.log('課綱來源索引通知狀態保存失敗，後續可能重複通知：' + cacheError.message);
+  }
+}
+
 function loadCourseOutlineSourceIndex_() {
   if (courseOutlineSourceIndexRuntimeCache_) return courseOutlineSourceIndexRuntimeCache_;
 
@@ -3350,6 +3471,23 @@ function loadCourseOutlineSourceIndex_() {
       fingerprint: live.fingerprint,
       refreshedAt: new Date().toISOString()
     });
+    let previousPayload = null;
+    try {
+      previousPayload = readChunkedJson_(COURSE_OUTLINE_INDEX_CACHE_STORE, null);
+      if (previousPayload) assertCourseOutlineSourceIndexPayload_(previousPayload);
+    } catch (cacheReadError) {
+      previousPayload = null;
+      Logger.log('課綱來源索引舊快取無法用於變動比對：' + cacheReadError.message);
+    }
+    try {
+      const changeNotice = prepareCourseOutlineSourceIndexChangeNotice_(
+        previousPayload,
+        payload
+      );
+      if (changeNotice) payload.changeNotice = changeNotice;
+    } catch (noticeError) {
+      Logger.log('課綱來源索引變動摘要建立失敗：' + noticeError.message);
+    }
     courseOutlineSourceIndexRuntimeCache_ = Object.assign({}, payload, {
       source: 'live',
       warning: ''
@@ -3362,6 +3500,7 @@ function loadCourseOutlineSourceIndex_() {
         Logger.log('課綱來源索引快取保存失敗：' + cacheError.message);
       }
     }
+    sendPendingCourseOutlineSourceIndexChangeNotice_(payload);
     return courseOutlineSourceIndexRuntimeCache_;
   } catch (liveError) {
     try {
@@ -5200,7 +5339,9 @@ function buildEmailHtmlSafe_(templateKind, subject, templateData) {
       accentDark: normalizeEmailTemplateColor_(notification.accentDark, '#007c59'),
       accentSoft: normalizeEmailTemplateColor_(notification.accentSoft, '#dcefe7')
     });
-    return renderEmailHtmlTemplate_(manifest.shell, shellValues, { content });
+    return sanitizeEmailHtmlLinks_(
+      renderEmailHtmlTemplate_(manifest.shell, shellValues, { content })
+    );
   } catch (error) {
     Logger.log('HTML 信件版型無法套用，改寄純文字：' + error.message);
     return '';
@@ -5295,6 +5436,59 @@ function renderEmailHtmlTemplate_(template, values, rawValues) {
       ? escapeEmailHtml_(values[key])
       : ''
   );
+}
+
+function decodeEmailHtmlAttribute_(value) {
+  return String(value == null ? '' : value)
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0*38;/gi, '&')
+    .replace(/&#x0*26;/gi, '&');
+}
+
+function isAllowedEmailLink_(value) {
+  const href = decodeEmailHtmlAttribute_(value).trim();
+  const match = href.match(
+    /^https:\\/\\/([^\\/?#:]+)(?::443)?(\\/[^?#]*)?(?:[?#]|$)/i
+  );
+  if (!match) return false;
+  const host = String(match[1]).toLowerCase();
+  const path = String(match[2] || '/');
+  if (EMAIL_LINK_ALLOWED_HOSTS.indexOf(host) === -1) return false;
+  if (host === 'calendar.google.com') return /^\\/calendar(?:\\/|$)/.test(path);
+  if (host === 'docs.google.com') return /^\\/spreadsheets(?:\\/|$)/.test(path);
+  return false;
+}
+
+function sanitizeEmailHtmlLinks_(html) {
+  const safeAnchors = [];
+  let sanitized = String(html || '').replace(
+    /<a\\b([^>]*)>([\\s\\S]*?)<\\/a\\s*>/gi,
+    (match, attributes, content) => {
+      const hrefMatch = String(attributes || '').match(
+        /(?:^|\\s)href\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>]+))/i
+      );
+      const href = hrefMatch && (hrefMatch[1] || hrefMatch[2] || hrefMatch[3] || '');
+      if (!isAllowedEmailLink_(href)) {
+        return String(content || '').replace(/<[^>]*>/g, '');
+      }
+      const styleMatch = String(attributes || '').match(
+        /(?:^|\\s)style\\s*=\\s*(?:"([^"]*)"|'([^']*)')/i
+      );
+      const style = styleMatch && (styleMatch[1] || styleMatch[2] || '');
+      const safeContent = String(content || '').replace(/<\\/?a\\b[^>]*>/gi, '');
+      const anchor = '<a href="' + escapeEmailHtml_(decodeEmailHtmlAttribute_(href)) + '"' +
+        (style ? ' style="' + escapeEmailHtml_(style) + '"' : '') +
+        ' rel="noopener noreferrer">' + safeContent + '</a>';
+      const token = 'TSCHOOL_SAFE_EMAIL_LINK_' + safeAnchors.length + '_END';
+      safeAnchors.push({ token, anchor });
+      return token;
+    }
+  );
+  sanitized = sanitized.replace(/<\\/?a\\b[^>]*>/gi, '');
+  safeAnchors.forEach(item => {
+    sanitized = sanitized.split(item.token).join(item.anchor);
+  });
+  return sanitized;
 }
 
 function escapeEmailHtml_(value) {
