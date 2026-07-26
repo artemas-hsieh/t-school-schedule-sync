@@ -421,7 +421,7 @@
           <button type="button" id="run-sync">立即同步</button>
           <button type="button" id="repair-sync">強制修復</button>
         </div>
-        <p class="sync-estimate">第一次同步的首批通常約 30 秒至 2 分鐘，之後可關閉側欄讓背景繼續；行程很多時，全部完成可能需 10–20 分鐘。</p>
+        <p class="sync-estimate">第一次同步會先準備未來 30 天課綱；連同首批行程通常約 1–3 分鐘，完成安全保存後即可關閉側欄。行程很多時，全部完成可能需 10–20 分鐘。</p>
       </section>
 
       <section class="section" id="pending-section" hidden>
@@ -869,6 +869,16 @@
             var preview = await server('previewSettingsImpactFromUi', settings);
             var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
             if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
+            if (model && model.settings && !model.settings.setupComplete) {
+              byId('loading-label').textContent = '正在準備未來 30 天的課綱資料…';
+              var outlinePreparation = await server(
+                'prepareFirstSyncCourseOutlinesFromUi',
+                settings
+              );
+              if (outlinePreparation && outlinePreparation.message) {
+                showToast(outlinePreparation.message);
+              }
+            }
             settings.syncApprovalToken = preview.approvalToken || '';
             startSyncProgress('正在儲存設定並準備同步…');
           }

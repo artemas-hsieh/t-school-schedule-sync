@@ -956,6 +956,7 @@ const COURSE_OUTLINE_ACTIVE_VERSION_PROPERTY = 'TSCHOOL_COURSE_OUTLINE_ACTIVE_VE
 const COURSE_OUTLINE_CACHE_SCHEMA_VERSION = 1;
 const COURSE_OUTLINE_HEADER_SCAN_LIMIT = 100;
 const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;
+const COURSE_OUTLINE_FIRST_SETUP_MAX_MS = 60 * 1000;
 const COURSE_OUTLINE_RETRY_DELAY_MS = 30 * 60 * 1000;
 const COURSE_OUTLINE_WATCHDOG_DELAY_MS = 8 * 60 * 1000;
 const COURSE_OUTLINE_RUNNING_STALE_MS = 7 * 60 * 1000;
@@ -1169,6 +1170,73 @@ function previewSettingsImpactFromUi(input) {
     unchanged: plan.exact.length - changedExact,
     approvalToken
   };
+}
+
+function prepareFirstSyncCourseOutlinesFromUi(input) {
+  const startedAt = Date.now();
+  try {
+    const previous = loadSettings_();
+    if (previous.setupComplete) {
+      return { prepared: false, skipped: true, message: '已完成第一次同步，不需要再次預先載入課綱資料。' };
+    }
+    const gradeName = sanitizeGrade_(input && input.gradeName);
+    const source = loadSourceContext_(gradeName);
+    const settings = sanitizeSettingsInput_(input || {}, previous, source);
+    const desiredEvents = getDesiredCourseOutlineEvents_(settings, source, scheduleBusinessNow_());
+    const sourceSets = getRelevantCourseOutlineSourceSets_(settings.gradeName, desiredEvents);
+    if (!sourceSets.length || !desiredEvents.length) {
+      return {
+        prepared: false,
+        skipped: true,
+        elapsedMs: Date.now() - startedAt,
+        message: '近期沒有需要在第一次同步前載入的課綱資料。'
+      };
+    }
+
+    const snapshot = collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSets);
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs > COURSE_OUTLINE_FIRST_SETUP_MAX_MS) {
+      return {
+        prepared: false,
+        skipped: false,
+        elapsedMs,
+        message: '課綱讀取超過 1 分鐘，為了保護第一次同步，將改由背景工作更新。'
+      };
+    }
+
+    const published = publishCourseOutlineSnapshot_(snapshot);
+    saveCourseOutlineState_({
+      status: 'idle',
+      attempt: 0,
+      incidentId: '',
+      runId: '',
+      scheduledAt: '',
+      startedAt: '',
+      watchdogTriggerId: '',
+      retryTriggerId: '',
+      failureNotifiedAt: '',
+      notificationPending: false,
+      lastError: '',
+      lastSuccessAt: new Date().toISOString(),
+      activeVersion: published.version
+    });
+    return {
+      prepared: true,
+      skipped: false,
+      elapsedMs,
+      matchedRecordCount: snapshot.diagnostics.matchedRecordCount,
+      missingSheetNames: snapshot.diagnostics.missingSheetNames,
+      message: '未來 30 天的課綱資料已準備完成，第一批行程會直接帶入。'
+    };
+  } catch (error) {
+    Logger.log('第一次同步前無法預先載入課綱，將改由背景工作更新：' + userFacingError_(error));
+    return {
+      prepared: false,
+      skipped: false,
+      elapsedMs: Date.now() - startedAt,
+      message: '課綱資料暫時無法預先載入，基本行程會先同步，課綱稍後在背景補上。'
+    };
+  }
 }
 
 function saveSettingsAndSyncFromUi(input) {
@@ -3896,6 +3964,7 @@ function loadCourseOutlineState_() {
     attempt: 0,
     incidentId: '',
     runId: '',
+    scheduledAt: '',
     startedAt: '',
     watchdogTriggerId: '',
     retryTriggerId: '',
@@ -3926,7 +3995,8 @@ function buildCourseOutlineUiStatus_(settings, source) {
     indexWarning: sourceIndex.warning || '',
     state: state.status || 'idle',
     lastSuccessAt: state.lastSuccessAt || snapshot && snapshot.refreshedAt || '',
-    lastSuccessLabel: snapshot && snapshot.refreshedAtLabel || '',
+    lastSuccessLabel: snapshot && snapshot.refreshedAtLabel ||
+      (state.lastSuccessAt ? formatDateTime_(new Date(state.lastSuccessAt)) : ''),
     lastError: state.lastError || '',
     matchedRecordCount: snapshot && snapshot.diagnostics
       ? Number(snapshot.diagnostics.matchedRecordCount) || 0
@@ -3940,15 +4010,64 @@ function buildCourseOutlineUiStatus_(settings, source) {
   };
 }
 
-function scheduleCourseOutlineRefreshIfNeeded_(settings) {
+function describeCourseOutlineStatusForUser_(outline) {
+  const status = outline || {};
+  if (!status.enabled) return '這個年級目前沒有可使用的課綱資料';
+  if (status.state === 'queued') return '已排入背景工作，正在等待 Google 開始更新';
+  if (status.state === 'running') return '正在讀取並整理課綱資料';
+  if (status.state === 'retry_pending') {
+    return '這次更新暫時沒有完成，系統稍後會自動再試一次';
+  }
+  if (status.state === 'failed') return '課綱更新失敗，請查看下方原因';
+  if (status.lastSuccessAt) return '最近一次課綱檢查已完成';
+  return '尚未完成第一次課綱更新';
+}
+
+function getDesiredCourseOutlineEvents_(settings, source, now) {
+  return filterCourseOutlineLookaheadEvents_(
+    source && source.events || [],
+    now || scheduleBusinessNow_(),
+    COURSE_OUTLINE_LOOKAHEAD_DAYS
+  )
+    .filter(event => shouldIncludeEvent_(event, settings))
+    .filter(event => event.type === 'course' && !event.isAllDay);
+}
+
+function hasFreshCourseOutlineSnapshot_(settings, source) {
+  if (!settings || !source) return false;
+  const desiredEvents = getDesiredCourseOutlineEvents_(settings, source, scheduleBusinessNow_());
+  const sourceSets = getRelevantCourseOutlineSourceSets_(settings.gradeName, desiredEvents);
+  if (!sourceSets.length) return false;
+  const snapshot = readActiveCourseOutlineSnapshot_();
+  const refreshedAtMs = Date.parse(snapshot && snapshot.refreshedAt || '');
+  return Boolean(
+    snapshot &&
+    snapshot.schemaVersion === COURSE_OUTLINE_CACHE_SCHEMA_VERSION &&
+    snapshot.gradeName === settings.gradeName &&
+    snapshot.termKey === source.termKey &&
+    snapshot.contextFingerprint ===
+      makeCourseOutlineContextFingerprint_(settings, source, desiredEvents, sourceSets) &&
+    Number.isFinite(refreshedAtMs) &&
+    Date.now() - refreshedAtMs <= 15 * 60 * 1000
+  );
+}
+
+function scheduleCourseOutlineRefreshIfNeeded_(settings, source) {
   const activeSettings = settings || loadSettings_();
   if (!activeSettings.setupComplete || !activeSettings.autoSyncEnabled ||
       !getConfiguredCourseOutlineSourceSets_(activeSettings.gradeName).length) {
     return false;
   }
+  if (source && hasFreshCourseOutlineSnapshot_(activeSettings, source)) return false;
   const state = loadCourseOutlineState_();
   if (state.status === 'running' || state.status === 'retry_pending') return false;
-  return ensureOneTimeTrigger_(COURSE_OUTLINE_ONCE_HANDLER, 60 * 1000);
+  const created = ensureOneTimeTrigger_(COURSE_OUTLINE_ONCE_HANDLER, 60 * 1000);
+  saveCourseOutlineState_(Object.assign({}, state, {
+    status: 'queued',
+    scheduledAt: new Date().toISOString(),
+    lastError: ''
+  }));
+  return created;
 }
 
 function refreshCourseOutlinesDaily() {
@@ -3987,40 +4106,40 @@ function applyCourseOutlineSnapshotToCalendar() {
 }
 
 function runCourseOutlineRefreshAttempt_(attempt, reason) {
-  const settings = loadSettings_();
-  const configuredSets = getConfiguredCourseOutlineSourceSets_(settings.gradeName);
-  if (!configuredSets.length) {
-    return { ok: true, skipped: true, message: '目前年級尚未設定課綱來源。' };
-  }
-  if (!settings.setupComplete) {
-    return { ok: true, skipped: true, message: '完成第一次同步後才會更新課綱。' };
-  }
-  if (reason !== 'manual' && !settings.autoSyncEnabled) {
-    return { ok: true, skipped: true, message: '自動同步目前已暫停。' };
-  }
-
-  flushPendingCourseOutlineFailureNotification_();
+  let settings = null;
   let run = null;
   try {
+    settings = loadSettings_();
+    const configuredSets = getConfiguredCourseOutlineSourceSets_(settings.gradeName);
+    if (!configuredSets.length) {
+      return { ok: true, skipped: true, message: '這個年級目前沒有可使用的課綱資料。' };
+    }
+    if (!settings.setupComplete) {
+      return { ok: true, skipped: true, message: '完成第一次同步後，系統才會更新課綱資料。' };
+    }
+    if (reason !== 'manual' && !settings.autoSyncEnabled) {
+      return { ok: true, skipped: true, message: '自動同步已暫停，因此暫時不更新課綱資料。' };
+    }
+
+    flushPendingCourseOutlineFailureNotification_();
     run = beginCourseOutlineRefreshRun_(settings, attempt, reason);
-    if (!run) return { ok: true, skipped: true, message: '已有課綱更新正在執行或等待重試。' };
+    if (!run) {
+      return { ok: true, skipped: true, message: '課綱資料正在更新，或已排定稍後再試。' };
+    }
     const source = loadSourceContext_(settings.gradeName);
     if (settings.termKey && source.termKey !== settings.termKey) {
       finishCourseOutlineRefreshRun_(run, null);
-      return { ok: true, skipped: true, message: '偵測到課表學期轉換，等待使用者重新選課。' };
+      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選課再更新課綱資料。' };
     }
-    const outlineNow = scheduleBusinessNow_();
-    const desiredEvents = filterCourseOutlineLookaheadEvents_(
-      source.events,
-      outlineNow,
-      COURSE_OUTLINE_LOOKAHEAD_DAYS
-    )
-      .filter(event => shouldIncludeEvent_(event, settings))
-      .filter(event => event.type === 'course' && !event.isAllDay);
+    const desiredEvents = getDesiredCourseOutlineEvents_(
+      settings,
+      source,
+      scheduleBusinessNow_()
+    );
     const sourceSets = getRelevantCourseOutlineSourceSets_(settings.gradeName, desiredEvents);
     if (!sourceSets.length) {
       finishCourseOutlineRefreshRun_(run, null);
-      return { ok: true, skipped: true, message: '目前沒有落在已設定課綱期間內的未來課程。' };
+      return { ok: true, skipped: true, message: '近期沒有需要補上課綱資料的課程。' };
     }
     const snapshot = collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSets);
     if (loadCourseOutlineState_().runId !== run.runId) {
@@ -4038,8 +4157,35 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
     };
   } catch (error) {
     if (run) handleCourseOutlineRefreshFailure_(run, error);
-    else Logger.log('課綱更新無法開始：' + userFacingError_(error));
+    else handleCourseOutlineRefreshStartupFailure_(attempt, reason, error);
     return { ok: false, skipped: false, message: userFacingError_(error) };
+  }
+}
+
+function handleCourseOutlineRefreshStartupFailure_(attempt, reason, error) {
+  try {
+    const state = loadCourseOutlineState_();
+    const incidentId = state.incidentId ||
+      hashText_('course-outline-startup|' + Date.now() + '|' + Math.random());
+    const runId = hashText_(incidentId + '|' + attempt + '|' + Date.now() + '|' + Math.random());
+    const run = Object.assign({}, state, {
+      status: 'running',
+      attempt,
+      incidentId,
+      runId,
+      reason,
+      scheduledAt: '',
+      startedAt: new Date().toISOString(),
+      watchdogTriggerId: '',
+      lastError: ''
+    });
+    saveCourseOutlineState_(run);
+    handleCourseOutlineRefreshFailure_(run, error);
+  } catch (stateError) {
+    Logger.log(
+      '課綱更新無法開始，且無法保存失敗狀態：' +
+      userFacingError_(error) + '；' + userFacingError_(stateError)
+    );
   }
 }
 
@@ -4069,6 +4215,7 @@ function beginCourseOutlineRefreshRun_(settings, attempt, reason) {
       incidentId,
       runId,
       reason,
+      scheduledAt: '',
       startedAt: new Date().toISOString(),
       watchdogTriggerId: watchdog.getUniqueId(),
       retryTriggerId: reason === 'retry' ? '' : state.retryTriggerId || '',
@@ -4094,6 +4241,7 @@ function finishCourseOutlineRefreshRun_(run, activeVersion) {
       attempt: 0,
       incidentId: '',
       runId: '',
+      scheduledAt: '',
       startedAt: '',
       watchdogTriggerId: '',
       retryTriggerId: '',
@@ -4132,6 +4280,7 @@ function handleCourseOutlineRefreshFailure_(run, error) {
         saveCourseOutlineState_(Object.assign({}, state, {
           status: 'retry_pending',
           runId: '',
+          scheduledAt: '',
           startedAt: '',
           watchdogTriggerId: '',
           retryTriggerId: retry.getUniqueId(),
@@ -4147,6 +4296,7 @@ function handleCourseOutlineRefreshFailure_(run, error) {
     saveCourseOutlineState_(Object.assign({}, state, {
       status: 'failed',
       runId: '',
+      scheduledAt: '',
       startedAt: '',
       watchdogTriggerId: '',
       retryTriggerId: '',
@@ -4770,12 +4920,15 @@ function deleteCourseOutlineMaintenanceTriggers_() {
     COURSE_OUTLINE_APPLY_HANDLER
   ]);
   const state = loadCourseOutlineState_();
-  if (state.status === 'running' || state.status === 'retry_pending') {
+  if (state.status === 'queued' ||
+      state.status === 'running' ||
+      state.status === 'retry_pending') {
     saveCourseOutlineState_(Object.assign({}, state, {
       status: 'idle',
       attempt: 0,
       incidentId: '',
       runId: '',
+      scheduledAt: '',
       startedAt: '',
       watchdogTriggerId: '',
       retryTriggerId: '',
@@ -4847,16 +5000,16 @@ function showSyncStatus() {
   const status = loadStatus_();
   const outline = buildCourseOutlineUiStatus_(loadSettings_());
   const outlineMessage = outline.enabled
-    ? '\\n\\n課綱狀態：' + outline.state +
-      '\\n課綱上次成功：' + (outline.lastSuccessLabel || '尚無紀錄') +
+    ? '\\n\\n課綱資料：' + describeCourseOutlineStatusForUser_(outline) +
+      '\\n最近完成課綱更新：' + (outline.lastSuccessLabel || '尚未完成第一次更新') +
       (outline.missingSheetNames.length
-        ? '\\n找不到精確課綱分頁：' + outline.missingSheetNames.join('、')
+        ? '\\n找不到完全相同名稱的課綱分頁：' + outline.missingSheetNames.join('、')
         : '') +
       (outline.nearMatchSheetNames.length
-        ? '\\n疑似只差空格或全形字元：' + outline.nearMatchSheetNames
+        ? '\\n可能是名稱有空格或全形、半形差異：' + outline.nearMatchSheetNames
           .map(item => item.courseName + ' → ' + item.candidates.join('／')).join('、')
         : '') +
-      (outline.lastError ? '\\n課綱錯誤：' + outline.lastError : '')
+      (outline.lastError ? '\\n未完成的原因：' + outline.lastError : '')
     : '';
   SpreadsheetApp.getUi().alert(
     'T-SCHOOL 行程同步',

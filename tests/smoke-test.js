@@ -59,6 +59,15 @@ assert.equal(sidebarHtml.includes('data-add-notify-hour'), true);
 assert.equal(sidebarHtml.includes('data-remove-notify-hour'), true);
 assert.equal(sidebarHtml.includes('autoSyncHours: notificationHours'), true);
 assert.equal(sidebarHtml.includes('notifySyncHour: Math.max.apply(null, notificationHours)'), true);
+assert.equal(
+  sidebarHtml.includes("'prepareFirstSyncCourseOutlinesFromUi'"),
+  true,
+  '第一次同步前應以獨立 Apps Script 執行預讀 30 天課綱'
+);
+assert.equal(
+  sidebarHtml.includes('正在準備未來 30 天的課綱資料…'),
+  true
+);
 assert.equal(sidebarHtml.includes('<span>每日成功摘要</span>'), false);
 assert.equal(sidebarHtml.includes('id="include-activities"'), false);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), true);
@@ -255,6 +264,11 @@ assert.equal(
 );
 assert.equal(generatedCode.includes('function getSyncProgressForUi('), true);
 assert.equal(generatedCode.includes('SYNC_PROGRESS_STORE'), true);
+assert.equal(
+  generatedCode.includes("'\\\\n\\\\n課綱狀態：' + outline.state"),
+  false,
+  '使用者看到的同步狀態不得直接顯示 idle、running 等程式內部代碼'
+);
 assert.equal(generatedCode.includes('COURSE_OUTLINE_SOURCE_SETS_BY_GRADE'), true);
 assert.equal(
   generatedCode.includes(
@@ -266,6 +280,13 @@ assert.equal(generatedCode.includes('function parseCourseOutlineSourceIndexValue
 assert.equal(generatedCode.includes('function refreshCourseOutlinesDaily('), true);
 assert.equal(generatedCode.includes('function retryCourseOutlineRefresh('), true);
 assert.equal(generatedCode.includes('function watchCourseOutlineRefresh('), true);
+assert.equal(generatedCode.includes('function prepareFirstSyncCourseOutlinesFromUi('), true);
+assert.equal(
+  generatedCode.includes('const COURSE_OUTLINE_FIRST_SETUP_MAX_MS = 60 * 1000;'),
+  true,
+  '課綱預讀超過 60 秒時不得併入第一次 Calendar 寫入'
+);
+assert.equal(generatedCode.includes('function hasFreshCourseOutlineSnapshot_('), true);
 assert.equal(generatedCode.includes('function updateCalendarOutlineFields_('), true);
 assert.equal(generatedCode.includes('const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;'), true);
 assert.equal(generatedCode.includes("const TERM_TRANSITION_NOTICE_HANDLER = 'retryTermTransitionNotice';"), true);
@@ -390,6 +411,31 @@ const context = vm.createContext({
 });
 
 vm.runInContext(generatedCode, context);
+
+assert.equal(
+  context.describeCourseOutlineStatusForUser_({
+    enabled: true,
+    state: 'idle',
+    lastSuccessAt: ''
+  }),
+  '尚未完成第一次課綱更新'
+);
+assert.equal(
+  context.describeCourseOutlineStatusForUser_({
+    enabled: true,
+    state: 'queued',
+    lastSuccessAt: ''
+  }),
+  '已排入背景工作，正在等待 Google 開始更新'
+);
+assert.equal(
+  context.describeCourseOutlineStatusForUser_({
+    enabled: true,
+    state: 'retry_pending',
+    lastSuccessAt: ''
+  }),
+  '這次更新暫時沒有完成，系統稍後會自動再試一次'
+);
 
 assert.equal(
   context.sanitizeCalendarName_('高二行程｜T-SCHOOL Schedule Sync', '高二'),
@@ -2382,6 +2428,72 @@ assert.equal(
   projectTriggers.filter(trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily').length,
   1,
   '高二應建立一個獨立的每日課綱更新觸發器'
+);
+
+projectTriggers = projectTriggers.filter(trigger =>
+  trigger.getHandlerFunction() !== 'refreshCourseOutlinesOnce'
+);
+context.saveCourseOutlineState_({
+  status: 'idle',
+  attempt: 0,
+  incidentId: '',
+  runId: '',
+  scheduledAt: '',
+  startedAt: '',
+  watchdogTriggerId: '',
+  retryTriggerId: '',
+  failureNotifiedAt: '',
+  notificationPending: false,
+  lastError: '',
+  lastSuccessAt: ''
+});
+context.scheduleCourseOutlineRefreshIfNeeded_({
+  gradeName: '高二',
+  setupComplete: true,
+  autoSyncEnabled: true
+});
+assert.equal(context.loadCourseOutlineState_().status, 'queued');
+assert.equal(
+  projectTriggers.filter(trigger =>
+    trigger.getHandlerFunction() === 'refreshCourseOutlinesOnce'
+  ).length,
+  1,
+  '課綱背景工作排定後應保存等待中的狀態並只建立一個觸發器'
+);
+projectTriggers = projectTriggers.filter(trigger =>
+  trigger.getHandlerFunction() !== 'refreshCourseOutlinesOnce'
+);
+
+const settingsBeforeOutlineStartupFailure = context.loadSettings_();
+context.saveSettings_(Object.assign({}, settingsBeforeOutlineStartupFailure, {
+  gradeName: '高二',
+  setupComplete: true,
+  autoSyncEnabled: true
+}));
+const getConfiguredCourseOutlineSourceSetsBeforeFailure =
+  context.getConfiguredCourseOutlineSourceSets_;
+context.getConfiguredCourseOutlineSourceSets_ = function () {
+  throw new Error('模擬課綱索引在啟動前失敗');
+};
+const outlineStartupFailureResult = context.runCourseOutlineRefreshAttempt_(1, 'scheduled');
+assert.equal(outlineStartupFailureResult.ok, false);
+assert.equal(
+  context.loadCourseOutlineState_().status,
+  'retry_pending',
+  '課綱工作在正式開始前失敗時也應保存狀態並安排重試'
+);
+assert.equal(
+  projectTriggers.some(trigger =>
+    trigger.getHandlerFunction() === 'retryCourseOutlineRefresh'
+  ),
+  true,
+  '啟動前失敗不得停在 idle 且沒有後續處理'
+);
+context.getConfiguredCourseOutlineSourceSets_ =
+  getConfiguredCourseOutlineSourceSetsBeforeFailure;
+context.saveSettings_(settingsBeforeOutlineStartupFailure);
+projectTriggers = projectTriggers.filter(trigger =>
+  trigger.getHandlerFunction() !== 'retryCourseOutlineRefresh'
 );
 
 const firstFailureRun = {
