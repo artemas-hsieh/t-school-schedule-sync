@@ -4273,6 +4273,17 @@ select,
   mask-image: var(--fog-mask);
 }
 
+/*
+ * Keep the one visible preview's five backdrop filters composited while nearby
+ * form controls repaint. Otherwise Chromium can briefly drop and rebuild the
+ * filtered surface when Email validation changes, producing a white frame.
+ */
+.journey-step.is-preview
+  > .progressive-blur
+  > .progressive-blur-layer {
+  will-change: backdrop-filter;
+}
+
 .progressive-blur-layer-1 {
   --fog-blur: var(--fog-blur-1);
   --fog-mask: linear-gradient(var(--fog-direction), transparent 0%, rgba(0, 0, 0, 0.46) 12%, #000 24%, #000 31%, rgba(0, 0, 0, 0.5) 42%, transparent 54%);

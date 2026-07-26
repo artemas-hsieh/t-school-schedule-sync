@@ -68,6 +68,7 @@ const MOTION_CONFIG = Object.freeze({
   focusLineRatio: 0.5,
   focusSwitchHysteresisForward: 48,
   focusSwitchHysteresisBackward: 96,
+  generatedCodeTransitionDelay: 48,
   homeEntryScrollDuration: 0.9,
   footerReturnScrollDuration: 1.8,
   heroTileTravel: 0.72,
@@ -90,7 +91,8 @@ const state = {
   sourceSummary: null,
   sourceLoading: false,
   sourceError: null,
-  requestId: 0
+  requestId: 0,
+  generatedCodeReady: false
 };
 
 let notificationEmailCommitTimer = 0;
@@ -244,9 +246,8 @@ function bindEvents() {
       document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
         detail: { step: 3 }
       }));
-      // Keep validation immediate, but defer rebuilding the 200 KB Code.gs and
-      // the blurred summary card until editing is committed. Replacing both on
-      // every keystroke makes Chromium recompose the backdrop-filter layers.
+      // Keep the lightweight inline validation immediate. Code.gs and the
+      // summary card are committed separately so typing does not rebuild either.
       return;
     }
 
@@ -527,10 +528,16 @@ function setFieldState(field, stateValue, hint) {
   }
 
   if (input) {
-    if (stateValue === 'invalid' && input.getAttribute('aria-invalid') !== 'true') {
-      input.setAttribute('aria-invalid', 'true');
-    } else if (stateValue !== 'invalid' && input.hasAttribute('aria-invalid')) {
+    if (stateValue === 'invalid') {
+      if (input.getAttribute('aria-invalid') !== 'true') {
+        input.setAttribute('aria-invalid', 'true');
+      }
+      if (input.getAttribute('aria-errormessage') !== 'notification-email-hint') {
+        input.setAttribute('aria-errormessage', 'notification-email-hint');
+      }
+    } else {
       input.removeAttribute('aria-invalid');
+      input.removeAttribute('aria-errormessage');
     }
   }
 
@@ -904,7 +911,8 @@ function getSettings() {
 
 function updateOutput() {
   const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
-  elements.copyCode.disabled = !ready;
+  state.generatedCodeReady = false;
+  updateGeneratedCodeAvailability(ready);
   if (elements.outputEmail) {
     elements.outputEmail.textContent = elements.notificationEmail.value.trim() || '---@---.---';
   }
@@ -918,19 +926,27 @@ function updateOutput() {
   if (courseStepComplete) {
     courseStepComplete.disabled = !ready;
   }
+}
 
-  elements.copyCodeInline.forEach(button => {
-    button.disabled = !ready;
-  });
-
+function generateOutput() {
+  const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
   if (!ready || typeof window.buildAppsScriptCode !== 'function') {
-    setGeneratedCode(state.sourceError
-      ? '// 課表來源目前無法讀取，請重新嘗試後再複製。'
-      : '// 正在準備控制臺程式碼…');
-    return;
+    updateGeneratedCodeAvailability(false);
+    return false;
   }
 
   setGeneratedCode(window.buildAppsScriptCode(getSettings()));
+  state.generatedCodeReady = true;
+  updateGeneratedCodeAvailability(true);
+  return true;
+}
+
+function updateGeneratedCodeAvailability(sourceReady) {
+  const enabled = Boolean(sourceReady && state.generatedCodeReady);
+  elements.copyCode.disabled = !enabled;
+  elements.copyCodeInline.forEach(button => {
+    button.disabled = !enabled;
+  });
 }
 
 function setGeneratedCode(nextCode) {
@@ -974,7 +990,7 @@ function playCopyKeyboardPressFeedback() {
 }
 
 async function copyGeneratedCode(event) {
-  if (!state.sourceSummary || !validateNotificationEmail()) {
+  if (!state.generatedCodeReady || !state.sourceSummary || !validateNotificationEmail()) {
     elements.notificationEmail.reportValidity();
     return;
   }
@@ -1335,6 +1351,7 @@ function initStepJourney() {
   let editingReleaseTimer = 0;
   let ensureControlFrame = 0;
   let ensureControlTimer = 0;
+  let generatedCodeTransitionId = 0;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -1391,6 +1408,7 @@ function initStepJourney() {
     const labels = completionCopy[stepNumber];
 
     if (!button || !labels || !labels[nextState]) return;
+    if (completionStates.get(stepNumber) === nextState) return;
 
     completionStates.set(stepNumber, nextState);
     button.textContent = labels[nextState];
@@ -1425,7 +1443,6 @@ function initStepJourney() {
     if (completedStep === 3 && !validateNotificationEmail()) {
       setCompletionState(3, 'correction');
       focusEmailBeforeDomain();
-      elements.notificationEmail.reportValidity();
       return;
     }
 
@@ -1438,11 +1455,38 @@ function initStepJourney() {
       return;
     }
 
+    if (completedStep === 4) {
+      if (!generateOutput()) {
+        showToast(state.sourceError ? '請先重新讀取課表' : '控制臺程式碼尚未準備完成');
+        return;
+      }
+
+      setCompletionState(4, 'confirmed');
+      scheduleGeneratedCodeTransition();
+      return;
+    }
+
     setCompletionState(completedStep, 'confirmed');
     unlockAndScrollToStep(completedStep + 1);
   }
 
+  function scheduleGeneratedCodeTransition() {
+    const transitionId = ++generatedCodeTransitionId;
+    const delay = prefersReducedMotion()
+      ? 0
+      : MOTION_CONFIG.generatedCodeTransitionDelay;
+
+    requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        if (transitionId !== generatedCodeTransitionId) return;
+        unlockAndScrollToStep(5);
+      }, delay);
+    });
+  }
+
   function resetCompletionAfterChange(changedStep) {
+    generatedCodeTransitionId += 1;
+
     if (changedStep === 2) {
       setCompletionState(2, 'initial');
       setCompletionState(4, 'initial');
@@ -2333,6 +2377,7 @@ function initStepJourney() {
   });
 
   document.addEventListener('tschool:grade-selection-start', () => {
+    generatedCodeTransitionId += 1;
     clearActiveSectionTransition({ requestUpdate: false });
     clearNavigationFocusLock();
     focusInputDirection = 0;

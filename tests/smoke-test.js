@@ -78,6 +78,16 @@ assert.match(
   /<link id="app-stylesheet" rel="stylesheet" href="styles\.css\?v=[^"]+">/,
   '主要樣式必須在 head 中以可阻塞首次繪製的固定網址載入'
 );
+assert.doesNotMatch(
+  configuratorHtml,
+  /id="generated-code"[^>]*\sdata-lenis-prevent(?:\s|>)/,
+  '程式碼預覽沒有內嵌捲動，不得繞過頁面的 Lenis 捲動'
+);
+assert.match(
+  configuratorHtml,
+  /<textarea id="generated-code"[^>]*\sreadonly(?:\s|>)/,
+  '程式碼預覽應維持唯讀並允許使用者選取文字'
+);
 assert.equal(
   configuratorHtml.includes("document.getElementById('app-stylesheet').href ="),
   false,
@@ -141,12 +151,64 @@ assert.equal(
     "elements.notificationEmail.addEventListener('blur', scheduleNotificationEmailCommit);"
   ),
   true,
-  'Email 輸入應在離開欄位且原生點擊完成後才重建產出，避免閃爍或吞掉第一次點擊'
+  'Email 輸入應在離開欄位且原生點擊完成後才提交狀態，避免閃爍或吞掉第一次點擊'
 );
 assert.match(
   configuratorAppSource,
   /if \(event\.target === elements\.notificationEmail\) \{[\s\S]*?tschool:configuration-change[\s\S]*?return;\n    \}/,
-  'Email 的 input 事件應在即時驗證與狀態重設後停止，不得逐字重建 Code.gs'
+  'Email 的 input 事件應在即時驗證與狀態重設後停止'
+);
+assert.equal(
+  configuratorAppSource.includes(
+    "focusEmailBeforeDomain();\n      elements.notificationEmail.reportValidity();"
+  ),
+  false,
+  '第三步 Email 錯誤應使用卡片內提示，不得開啟會重組 backdrop-filter 的原生驗證浮窗'
+);
+assert.equal(
+  configuratorAppSource.includes(
+    "input.setAttribute('aria-errormessage', 'notification-email-hint');"
+  ),
+  true,
+  '卡片內 Email 錯誤提示應以 aria-errormessage 連結至欄位'
+);
+const updateOutputSource = configuratorAppSource.slice(
+  configuratorAppSource.indexOf('function updateOutput()'),
+  configuratorAppSource.indexOf('function generateOutput()')
+);
+const generateOutputSource = configuratorAppSource.slice(
+  configuratorAppSource.indexOf('function generateOutput()'),
+  configuratorAppSource.indexOf('function updateGeneratedCodeAvailability(')
+);
+assert.equal(
+  updateOutputSource.includes('buildAppsScriptCode'),
+  false,
+  '一般設定更新不得即時重建 Code.gs'
+);
+assert.equal(
+  generateOutputSource.includes('window.buildAppsScriptCode(getSettings())'),
+  true,
+  'Code.gs 應只由明確的產生動作建立'
+);
+assert.match(
+  configuratorAppSource,
+  /if \(completedStep === 4\) \{[\s\S]*?generateOutput\(\)[\s\S]*?scheduleGeneratedCodeTransition\(\)/,
+  '第四步完成按鈕應先產生 Code.gs，再排程切換至第五步'
+);
+assert.equal(
+  configuratorAppSource.includes('generatedCodeTransitionDelay: 48'),
+  true,
+  '產生 Code.gs 後應保留短暫繪製間隔再啟動卡片切換'
+);
+assert.match(
+  configuratorAppSource,
+  /if \(completionStates\.get\(stepNumber\) === nextState\) return;/,
+  '完成按鈕狀態未改變時不得重寫相同 DOM'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.journey-step\.is-preview[\s\S]*?> \.progressive-blur[\s\S]*?> \.progressive-blur-layer \{[\s\S]*?will-change: backdrop-filter;/,
+  '可見預覽的 backdrop-filter 圖層應維持合成，避免表單重繪時單幀閃爍'
 );
 assert.equal(
   configuratorAppSource.includes('const ENABLE_SMOOTH_SCROLL = true;'),
