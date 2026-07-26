@@ -80,6 +80,18 @@ assert.deepEqual(
   ],
   '所有通知都應只有一套標準 HTML 版型'
 );
+assert.equal(
+  emailTemplateManifest.notifications.setup_complete.statusLabel,
+  '設定完成'
+);
+assert.equal(
+  emailTemplateManifest.notifications.setup_complete.headline,
+  '你的行程已開始同步'
+);
+assert.equal(
+  emailTemplateManifest.notifications.setup_complete.lede,
+  '首批事件已同步，課綱資訊稍待幾分鐘便會載入！之後系統會依設定自動更新'
+);
 assert.equal(/<(script|iframe)\b/i.test(emailTemplateManifestText), false);
 assert.equal(emailTemplateManifestText.includes('。'), false);
 assert.equal(/border-left\s*:/i.test(emailTemplateManifestText), false);
@@ -298,6 +310,11 @@ const parsedOutlineIndex = context.parseCourseOutlineSourceIndexValues_([
     'https://docs.google.com/spreadsheets/d/index-disabled-sheet/edit'
   ]
 ]);
+assert.deepEqual(
+  Array.from(context.getCourseOutlineIndexHeaders_()),
+  ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '課綱試算表連結'],
+  'Code.gs 要求的課綱索引欄名應精確對應中央表'
+);
 assert.equal(parsedOutlineIndex.setsByGrade['高二'].length, 1);
 assert.deepEqual(
   Array.from(parsedOutlineIndex.setsByGrade['高二'][0].outlineNames),
@@ -1070,13 +1087,35 @@ assert.match(sentEmailMessages.at(-1).body, /其餘約 382 筆會在背景自動
 assert.match(sentEmailMessages.at(-1).htmlBody, /前 40 筆已安全寫入日曆/);
 assert.match(sentEmailMessages.at(-1).htmlBody, /目前進度 9%/);
 assert.match(sentEmailMessages.at(-1).htmlBody, /剩餘約 382 筆/);
+const emailsBeforeStartedNotice = sentEmailMessages.length;
+context.sendFirstSetupNotificationSafe_({
+  created: 422,
+  updated: 0,
+  outlineUpdated: 0,
+  deleted: 0,
+  unchanged: 0
+});
+assert.equal(sentEmailMessages.length, emailsBeforeStartedNotice + 1);
+assert.equal(
+  sentEmailMessages.at(-1).subject,
+  '行程已開始同步｜T-SCHOOL Schedule Sync'
+);
+assert.equal(
+  sentEmailMessages.at(-1).body,
+  '首批事件已同步，課綱資訊稍待幾分鐘便會載入！之後系統會依設定自動更新'
+);
+assert.match(sentEmailMessages.at(-1).htmlBody, /你的行程已開始同步/);
+assert.match(
+  sentEmailMessages.at(-1).htmlBody,
+  /首批事件已同步，課綱資訊稍待幾分鐘便會載入！之後系統會依設定自動更新/
+);
 assert.equal(
   context.formatNotificationSubject_('[T-SCHOOL] 行程同步失敗'),
   '行程同步失敗｜T-SCHOOL Schedule Sync'
 );
 assert.equal(
-  context.formatNotificationSubject_('行程同步設定完成｜T-SCHOOL Schedule Sync'),
-  '行程同步設定完成｜T-SCHOOL Schedule Sync'
+  context.formatNotificationSubject_('行程已開始同步｜T-SCHOOL Schedule Sync'),
+  '行程已開始同步｜T-SCHOOL Schedule Sync'
 );
 
 cachedEmailTemplateManifest = '';

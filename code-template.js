@@ -4795,13 +4795,13 @@ function sendFirstSetupNotificationSafe_(result) {
     sendEmail_(
       loadSettings_(),
       'setup_complete',
-      '行程同步設定完成',
-      '第一次同步已完成。\\n\\n' + formatSyncResultMessage_(result) +
-        '\\n\\n請開啟專用 Google 日曆，確認課程、日期、節次與地點正確。',
+      '行程已開始同步',
+      '首批事件已同步，課綱資訊稍待幾分鐘便會載入！' +
+        '之後系統會依設定自動更新',
       buildSyncEmailData_(result)
     );
   } catch (error) {
-    Logger.log('設定完成通知寄送失敗：' + error.message);
+    Logger.log('行程開始同步通知寄送失敗：' + error.message);
   }
 }
 
@@ -4821,7 +4821,7 @@ function sendFirstBatchStartedNotificationSafe_(settings, job) {
       '首批 ' + processed + ' 次操作已成功保存。\\n\\n' +
         '目前已建立 ' + created + ' 筆行程，' +
         '其餘約 ' + remaining + ' 筆會在背景自動繼續。\\n\\n' +
-        '你現在可以關閉控制臺，全部完成後會再收到設定完成通知。',
+        '你現在可以關閉控制臺，基本行程全部寫入後會再收到「行程已開始同步」通知。',
       {
         processed,
         created,
