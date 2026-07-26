@@ -15,6 +15,7 @@ require(path.join(root, 'code-template.js'));
 const sidebarHtml = global.TSCHOOL_SIDEBAR_HTML;
 const configuratorHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const configuratorAppSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const configuratorStylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
 const emailTemplateManifestText = fs.readFileSync(
   path.join(root, 'notification-email-templates.json'),
   'utf8'
@@ -146,6 +147,98 @@ assert.match(
   configuratorAppSource,
   /if \(event\.target === elements\.notificationEmail\) \{[\s\S]*?tschool:configuration-change[\s\S]*?return;\n    \}/,
   'Email 的 input 事件應在即時驗證與狀態重設後停止，不得逐字重建 Code.gs'
+);
+assert.equal(
+  configuratorAppSource.includes('syncTouch: false'),
+  true,
+  '粗指標裝置應保留瀏覽器原生觸控速度與慣性'
+);
+assert.equal(
+  configuratorAppSource.includes(
+    'scheduleFocusedControlVisibility({ afterViewportSettles: true })'
+  ),
+  true,
+  '鍵盤尺寸連續變化後應等待 viewport 穩定再校正聚焦欄位'
+);
+assert.equal(
+  configuratorAppSource.includes('scheduleStepInertCommit();'),
+  true,
+  '手動跨越第四、五步時應把 inert 更新延後到 Lenis 捲動停止'
+);
+assert.match(
+  configuratorAppSource,
+  /const depthReferenceStep = activeStepIsOutput && number < activeStep[\s\S]*?\? precedingDepthStep[\s\S]*?: activeStep;/,
+  '第五步啟用時應凍結畫面外舊卡片的景深，避免捲動途中重繪'
+);
+const codeMaskStyles = configuratorStylesSource.match(
+  /\.control-panel-card \.code-window::after \{([\s\S]*?)\n\}/
+)?.[1] || '';
+assert.equal(codeMaskStyles.includes('linear-gradient('), true);
+assert.equal(
+  /backdrop-filter|mask-image/.test(codeMaskStyles),
+  false,
+  '程式碼預覽遮罩應只使用黑色透明度漸層，不得恢復模糊或 mask 濾鏡'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.journey-step\.output-step\.is-future \.step-card \{\s*opacity: 1;\s*filter: none;/,
+  '第五步非作用中時不得轉場整張卡片的透明度或模糊'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.journey-step\.output-step\.is-future > \.progressive-blur \{\s*display: none;/,
+  '第五步作為預覽時不得繼續合成五層 progressive blur'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.journey-step\.output-step\.is-future::after \{\s*display: block;/,
+  '第五步預覽應明確顯示單層局部景深遮罩'
+);
+const outputBoundaryOverlayStyles = configuratorStylesSource.match(
+  /\.journey-step\.output-step\.is-future::after \{([\s\S]*?)\n\s*\}/
+)?.[1] || '';
+assert.match(
+  outputBoundaryOverlayStyles,
+  /(?:^|\n)\s*backdrop-filter:\s*none;/,
+  '第五步非作用中遮罩不得在手動捲動途中建立 backdrop-filter'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.journey-step\.is-past:has\(\+ \.output-step\.is-current\) > \.past-progressive-blur \{\s*display: none;/,
+  '第四步退到第五步上方時不得合成五層完整 past fog'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.journey-step\.is-past:has\(\+ \.output-step\.is-current\) \.step-card \{\s*opacity: 1;\s*filter: none;/,
+  '第四步退到第五步上方時不得轉場整張卡片的透明度或模糊'
+);
+const pastOutputBoundaryOverlayStyles = configuratorStylesSource.match(
+  /\.journey-step\.is-past:has\(\+ \.output-step\.is-current\)::after \{([\s\S]*?)\n\s*\}/
+)?.[1] || '';
+assert.match(
+  pastOutputBoundaryOverlayStyles,
+  /(?:^|\n)\s*backdrop-filter:\s*none;/,
+  '第四步退到第五步上方時應使用純色漸層，不得在 Lenis 捲動途中建立 backdrop-filter'
+);
+assert.equal(
+  configuratorStylesSource.includes(
+    '.journey-step.output-step.is-entering .step-card {\n  animation-name: output-section-reveal;'
+  ),
+  true,
+  '第五步進場應使用不含完整卡片模糊的專用動畫'
+);
+const outputRevealStyles = configuratorStylesSource
+  .split('@keyframes output-section-reveal {')[1]
+  ?.split('@keyframes past-section-blur-layer-in {')[0] || '';
+assert.equal(
+  configuratorStylesSource.includes('@keyframes output-section-reveal {'),
+  true,
+  '第五步專用進場動畫必須存在'
+);
+assert.equal(
+  outputRevealStyles.includes('filter:'),
+  false,
+  '第五步專用進場動畫不得重新加入完整卡片 filter'
 );
 
 function makeCatalogPayload(weekNumbers, entriesByWeek) {

@@ -19,7 +19,7 @@ const DEFAULTS = {
 };
 
 // Temporary feature switch: set to true to restore Lenis and animated page scrolling.
-const ENABLE_SMOOTH_SCROLL = true;
+const ENABLE_SMOOTH_SCROLL = false;
 
 // Developer-only high-load test generator.
 // Set this to false before publishing if the dedicated test build should be completely unavailable.
@@ -52,18 +52,17 @@ const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
 })();
 
 // Journey tuning: each completed section reveals the next one in the vertical narrative.
-// Scroll feel: duration controls how long each full wheel delta takes to settle;
-// multipliers retain the input distance while adjusting its overall scale.
+// Scroll feel: duration controls how long each full wheel delta takes to settle.
+// Coarse pointers keep native touch velocity and inertia instead of simulating it.
 // Locked-step boundaries cap the final target without damping repeated input.
 const MOTION_CONFIG = Object.freeze({
   sectionTransitionDuration: 1,
   scrollDuration: 1,
-  scrollLerpTouch: 0.2,
   scrollWheelMultiplier: 1,
-  scrollTouchMultiplier: 0.9,
-  scrollTouchInertiaExponent: 1.35,
   boundarySettleDuration: 1,
   boundarySnapDistance: 1.5,
+  inputViewportSettleDelay: 120,
+  manualBoundaryInertSettleDelay: 64,
   focusLineRatio: 0.5,
   focusSwitchHysteresisForward: 48,
   focusSwitchHysteresisBackward: 96,
@@ -1089,16 +1088,14 @@ function initSmoothScroll() {
     return;
   }
 
-  const touchInput = window.matchMedia('(pointer: coarse)').matches;
-
   const lenis = new window.Lenis({
     duration: MOTION_CONFIG.scrollDuration,
     smoothWheel: true,
     wheelMultiplier: MOTION_CONFIG.scrollWheelMultiplier,
-    touchMultiplier: MOTION_CONFIG.scrollTouchMultiplier,
-    syncTouch: touchInput,
-    syncTouchLerp: MOTION_CONFIG.scrollLerpTouch,
-    touchInertiaExponent: MOTION_CONFIG.scrollTouchInertiaExponent,
+    // Lenis also defaults to native touch scrolling. Keeping syncTouch off lets
+    // iOS and Android preserve their acceleration curves without a second
+    // interpolator fighting Visual Viewport keyboard updates.
+    syncTouch: false,
     overscroll: false,
     anchors: true,
     virtualScroll: payload => {
@@ -1386,6 +1383,8 @@ function initStepJourney() {
   let editingBoundaryY = Number.NaN;
   let editingReleaseTimer = 0;
   let ensureControlFrame = 0;
+  let ensureControlTimer = 0;
+  let stepInertCommitTimer = 0;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -1649,8 +1648,49 @@ function initStepJourney() {
     }
   }
 
+  function applyStepInertState() {
+    steps.forEach(step => {
+      step.toggleAttribute('inert', Number(step.dataset.step) !== activeStep);
+    });
+  }
+
+  function cancelScheduledStepInertCommit() {
+    if (!stepInertCommitTimer) {
+      return;
+    }
+
+    clearTimeout(stepInertCommitTimer);
+    stepInertCommitTimer = 0;
+  }
+
+  function scheduleStepInertCommit() {
+    cancelScheduledStepInertCommit();
+
+    function commitWhenScrollSettles() {
+      stepInertCommitTimer = 0;
+      const scrollingMode = window.tschoolLenis?.isScrolling;
+      const scrollIsMoving = scrollingMode === 'smooth' || scrollingMode === 'native';
+
+      if (scrollIsMoving) {
+        stepInertCommitTimer = window.setTimeout(
+          commitWhenScrollSettles,
+          MOTION_CONFIG.manualBoundaryInertSettleDelay
+        );
+        return;
+      }
+
+      applyStepInertState();
+    }
+
+    stepInertCommitTimer = window.setTimeout(
+      commitWhenScrollSettles,
+      MOTION_CONFIG.manualBoundaryInertSettleDelay
+    );
+  }
+
   function setActiveStep(stepNumber) {
     const nextActiveStep = clamp(stepNumber, 1, maxUnlockedStep);
+    const previousActiveStep = activeStep;
     const unlockedLayoutChanged = renderedUnlockedStep !== maxUnlockedStep;
 
     if (
@@ -1663,9 +1703,19 @@ function initStepJourney() {
 
     activeStep = nextActiveStep;
     renderedUnlockedStep = maxUnlockedStep;
+    const activeStepIsOutput = steps[activeStep - 1]?.classList.contains('output-step');
+    const precedingDepthStep = activeStepIsOutput ? Math.max(1, activeStep - 1) : activeStep;
     steps.forEach(step => {
       const number = Number(step.dataset.step);
-      const distance = Math.abs(activeStep - number);
+      /*
+       * Step 5 is much larger than the preceding cards. Once it becomes active,
+       * keep the already off-screen cards at their step-4 depth instead of
+       * transitioning every old card's full filter and opacity mid-scroll.
+       */
+      const depthReferenceStep = activeStepIsOutput && number < activeStep
+        ? precedingDepthStep
+        : activeStep;
+      const distance = Math.abs(depthReferenceStep - number);
       step.classList.toggle('is-current', number === activeStep);
       step.classList.toggle('is-past', number < activeStep);
       step.classList.toggle('is-future', number > activeStep);
@@ -1674,8 +1724,27 @@ function initStepJourney() {
       step.classList.toggle('is-concealed', number > maxUnlockedStep + 1);
       step.style.setProperty('--section-blur', `${distance === 0 ? 0 : Math.min(12, 2 + distance * 3)}px`);
       step.style.setProperty('--section-opacity', distance === 0 ? '1' : String(Math.max(0.28, 0.76 - distance * 0.14)));
-      step.toggleAttribute('inert', number !== activeStep);
     });
+
+    const crossesOutputBoundary =
+      Math.abs(previousActiveStep - activeStep) === 1 &&
+      (
+        steps[previousActiveStep - 1]?.classList.contains('output-step') ||
+        activeStepIsOutput
+      );
+    const shouldDeferInertCommit =
+      crossesOutputBoundary &&
+      !automatedTargetStep &&
+      !navigationTargetStep &&
+      focusInputDirection !== 0 &&
+      Boolean(window.tschoolLenis);
+
+    if (shouldDeferInertCommit) {
+      scheduleStepInertCommit();
+    } else {
+      cancelScheduledStepInertCommit();
+      applyStepInertState();
+    }
 
     elements.stageMenuItems.forEach(item => {
       const targetStep = Number(item.dataset.stepTarget);
@@ -2013,7 +2082,6 @@ function initStepJourney() {
     const metrics = readVisualViewportMetrics();
     updateEditingViewportState(metrics);
     invalidateJourneyGeometry();
-    window.tschoolLenis?.resize?.();
 
     const headerHeight = document.querySelector('.site-header')?.getBoundingClientRect().height || 0;
     const visibilityMargin = 16;
@@ -2061,7 +2129,7 @@ function initStepJourney() {
     requestUpdate({ preserveActiveStep: true });
   }
 
-  function scheduleFocusedControlVisibility() {
+  function runFocusedControlVisibilityCheck() {
     if (ensureControlFrame) {
       cancelAnimationFrame(ensureControlFrame);
     }
@@ -2069,6 +2137,23 @@ function initStepJourney() {
     ensureControlFrame = requestAnimationFrame(() => {
       ensureControlFrame = requestAnimationFrame(ensureFocusedControlVisible);
     });
+  }
+
+  function scheduleFocusedControlVisibility(options = {}) {
+    if (ensureControlTimer) {
+      clearTimeout(ensureControlTimer);
+      ensureControlTimer = 0;
+    }
+
+    if (options.afterViewportSettles === true) {
+      ensureControlTimer = window.setTimeout(() => {
+        ensureControlTimer = 0;
+        runFocusedControlVisibilityCheck();
+      }, MOTION_CONFIG.inputViewportSettleDelay);
+      return;
+    }
+
+    runFocusedControlVisibilityCheck();
   }
 
   function beginEditingControl(control) {
@@ -2091,6 +2176,15 @@ function initStepJourney() {
   }
 
   function finishEditingControl() {
+    if (ensureControlTimer) {
+      clearTimeout(ensureControlTimer);
+      ensureControlTimer = 0;
+    }
+    if (ensureControlFrame) {
+      cancelAnimationFrame(ensureControlFrame);
+      ensureControlFrame = 0;
+    }
+
     editingControl = null;
     editingBoundaryY = Number.NaN;
     document.documentElement.removeAttribute('data-input-active');
@@ -2315,7 +2409,10 @@ function initStepJourney() {
       clampToCurrentBoundary({ immediate: true });
     }
 
-    scheduleFocusedControlVisibility();
+    // Safari emits several resize/scroll events while its keyboard and
+    // candidate bar animate. Reposition once after those metrics settle so our
+    // own immediate scroll cannot feed another oscillating viewport update.
+    scheduleFocusedControlVisibility({ afterViewportSettles: true });
   });
 
   document.addEventListener('keydown', event => {
@@ -2435,12 +2532,12 @@ function initStepJourney() {
   window.addEventListener('keydown', releaseLayoutFocusOnScrollKey, { passive: true });
   window.addEventListener('scroll', requestUpdate, { passive: true });
   window.addEventListener('resize', () => {
-    window.tschoolLenis?.resize?.();
     invalidateJourneyGeometry();
 
     if (editingControl) {
-      scheduleFocusedControlVisibility();
+      scheduleFocusedControlVisibility({ afterViewportSettles: true });
     } else {
+      window.tschoolLenis?.resize?.();
       clampToCurrentBoundary({ immediate: true });
     }
 
@@ -2448,12 +2545,12 @@ function initStepJourney() {
   });
   window.addEventListener('orientationchange', () => {
     window.setTimeout(() => {
-      window.tschoolLenis?.resize?.();
       invalidateJourneyGeometry();
 
       if (editingControl) {
-        scheduleFocusedControlVisibility();
+        scheduleFocusedControlVisibility({ afterViewportSettles: true });
       } else {
+        window.tschoolLenis?.resize?.();
         clampToCurrentBoundary({ immediate: true });
       }
 
@@ -2466,7 +2563,7 @@ function initStepJourney() {
       invalidateJourneyGeometry();
 
       if (editingControl) {
-        scheduleFocusedControlVisibility();
+        scheduleFocusedControlVisibility({ afterViewportSettles: true });
       }
 
       requestUpdate({ preserveActiveStep: true });

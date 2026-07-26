@@ -4298,6 +4298,25 @@ select,
   --fog-mask: linear-gradient(var(--fog-direction), transparent 72%, rgba(0, 0, 0, 0.52) 86%, #000 100%);
 }
 
+/*
+ * The generated-code card has a much larger paint surface than the earlier
+ * steps. Never blur its full subtree or render its five-layer preview fog,
+ * including in browsers without backdrop-filter support.
+ */
+.journey-step.output-step.is-future .step-card {
+  opacity: 1;
+  filter: none;
+}
+
+.journey-step.output-step.is-future > .progressive-blur {
+  display: none;
+}
+
+.journey-step.is-past:has(+ .output-step.is-current) .step-card {
+  opacity: 1;
+  filter: none;
+}
+
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .journey-step.is-preview::after,
   .journey-step.is-past:has(+ .journey-step.is-current)::after {
@@ -4307,6 +4326,44 @@ select,
   .journey-step.is-preview .step-card,
   .journey-step.is-past:has(+ .journey-step.is-current) .step-card {
     filter: none;
+  }
+
+  .journey-step.output-step.is-future::after {
+    display: block;
+    inset: 0 max(var(--space-6), calc((100vw - 1000px) / 2)) auto;
+    height: min(320px, 100%);
+    background: linear-gradient(
+      to bottom,
+      rgba(231, 241, 237, 0.1),
+      rgba(231, 241, 237, 0.34)
+    );
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 64%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 64%, transparent 100%);
+  }
+
+  /*
+   * Crossing the 4 -> 5 boundary used to composite all five full-card past-fog
+   * layers while the generated-code card was being revealed. That blocked a
+   * Lenis frame and made the following frame jump forward. A single masked
+   * layer preserves the boundary cue without stalling the scroll animation.
+   */
+  .journey-step.is-past:has(+ .output-step.is-current) > .past-progressive-blur {
+    display: none;
+  }
+
+  .journey-step.is-past:has(+ .output-step.is-current)::after {
+    display: block;
+    background: linear-gradient(
+      to bottom,
+      rgba(231, 241, 237, 0.08),
+      rgba(231, 241, 237, 0.32)
+    );
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 70%, #000 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 70%, #000 100%);
   }
 }
 
@@ -4319,6 +4376,10 @@ select,
 
 .journey-step.is-entering .step-card {
   animation: section-reveal var(--section-transition-duration, 720ms) var(--ease-out) both;
+}
+
+.journey-step.output-step.is-entering .step-card {
+  animation-name: output-section-reveal;
 }
 
 .step-completion {
@@ -4410,6 +4471,16 @@ select,
   to {
     opacity: 1;
     filter: blur(0);
+  }
+}
+
+@keyframes output-section-reveal {
+  from {
+    opacity: 0.42;
+  }
+
+  to {
+    opacity: 1;
   }
 }
 
@@ -5435,11 +5506,13 @@ select,
   position: absolute;
   inset: 30% 0 0;
   z-index: 1;
-  background: rgba(0, 0, 0, 0.04);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 32%, #000 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 32%, #000 100%);
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.18) 24%,
+    rgba(0, 0, 0, 0.62) 68%,
+    rgba(0, 0, 0, 0.9) 100%
+  );
   content: "";
   pointer-events: none;
 }
