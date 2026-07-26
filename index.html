@@ -3,11 +3,319 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=configurator/">
-  <title>T-SCHOOL 行程同步</title>
+  <meta name="theme-color" content="#f4f7f2">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
+  <title>T-SCHOOL Schedule Sync</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: #f4f7f2;
+    }
+  </style>
+  <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
+  <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260726-1">
+  <script>
+    (function () {
+      var stylesheet = document.getElementById('app-stylesheet');
+      var stylesheetUrl = new URL(stylesheet.href, document.baseURI);
+      window.TSCHOOL_ASSET_VERSION = stylesheetUrl.searchParams.get('v') || 'stable';
+    })();
+  </script>
 </head>
 <body>
-  <p>正在前往行程同步設定產生器...</p>
-  <p><a href="configurator/">如果沒有自動跳轉，請點這裡</a></p>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div class="high-load-test-banner" id="high-load-test-banner" role="status" hidden>
+    測試版：Code.gs 會包含「行程同步 → 高負載測試」。
+  </div>
+
+  <div class="kinetic-cursor" id="kinetic-cursor" aria-hidden="true">
+    <span class="cursor-lens"></span>
+    <span class="cursor-pointer"></span>
+    <span class="cursor-caption"></span>
+  </div>
+
+  <header class="site-header" aria-label="T-SCHOOL Schedule Sync">
+    <a class="brand" href="#top" data-cursor-label="回到頁首" aria-label="回到頁首">
+      <span class="brand-name">T-SCHOOL Schedule Sync</span>
+    </a>
+    <div class="stage-menu" id="stage-menu">
+      <button type="button" class="stage-menu-trigger" id="stage-menu-trigger" aria-label="設定階段" aria-expanded="false" aria-controls="stage-menu-panel" data-cursor-label="開啟階段選單">
+        <span class="stage-menu-icon" aria-hidden="true">
+          <span class="material-symbols-outlined stage-menu-icon-menu">menu</span>
+          <span class="material-symbols-outlined stage-menu-icon-close">close</span>
+        </span>
+      </button>
+      <nav class="stage-menu-panel" id="stage-menu-panel" aria-label="設定階段" hidden>
+        <ol>
+          <li><button type="button" data-step-target="1"><span>01</span>選擇年級</button></li>
+          <li><button type="button" data-step-target="2"><span>02</span>選擇課程與活動</button></li>
+          <li><button type="button" data-step-target="3"><span>03</span>設定同步與通知</button></li>
+          <li><button type="button" data-step-target="4"><span>04</span>檢查設定</button></li>
+          <li><button type="button" data-step-target="5"><span>05</span>安裝控制臺</button></li>
+        </ol>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero-stage" id="hero-stage" aria-labelledby="page-title">
+      <div class="hero-sticky">
+        <div class="hero-copy">
+          <h1 id="page-title"><span>T-SCHOOL</span><span>Schedule Sync</span></h1>
+          <p class="intro">省下常常找課表、看課網消耗的時間與精力！</p>
+          <ul class="hero-benefits" aria-label="行程同步功能">
+            <li>
+              <span class="benefit-desktop">把你的課程與活動定時同步到行事曆上</span>
+              <span class="benefit-mobile">定時同步課程和活動</span>
+            </li>
+            <li>告訴你每堂課要幹嘛</li>
+            <li>即時通知行程調整</li>
+          </ul>
+          <button type="button" class="start-button" id="start-config" data-cursor-label="開始設定">
+            <span>開始設定 ↓</span>
+          </button>
+        </div>
+
+        <div class="hero-visual" aria-hidden="true">
+          <div class="hero-paper-track">
+            <section class="schedule-board visual-board">
+              <div class="board-label"><span>課表</span><span>08:00–16:00</span></div>
+              <div class="schedule-grid">
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+              </div>
+            </section>
+
+            <div class="transfer-path">
+              <span class="path-tick"></span>
+              <span class="path-tick"></span>
+              <span class="path-tick"></span>
+              <span class="path-tick"></span>
+            </div>
+
+            <section class="calendar-board visual-board">
+              <div class="board-label"><span>日曆</span><span>本週</span></div>
+              <div class="calendar-grid">
+                <span class="calendar-time">09</span><span></span>
+                <span class="calendar-time">11</span><span></span>
+                <span class="calendar-time">14</span><span></span>
+              </div>
+              <span class="sync-complete">同步完成</span>
+            </section>
+
+            <span class="transfer-tile tile-one" data-tile-index="0">實體課 [吉林基地-協作坊]</span>
+            <span class="transfer-tile tile-two" data-tile-index="1">線上課 [線上教室]</span>
+            <span class="transfer-tile tile-three" data-tile-index="2">活動 [弘道基地-未來教室]</span>
+
+            <span class="hero-progressive-fog" aria-hidden="true">
+              <i class="hero-fog-layer hero-fog-layer-1"></i>
+              <i class="hero-fog-layer hero-fog-layer-2"></i>
+              <i class="hero-fog-layer hero-fog-layer-3"></i>
+              <i class="hero-fog-layer hero-fog-layer-4"></i>
+              <i class="hero-fog-layer hero-fog-layer-5"></i>
+            </span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="wizard" id="wizard" aria-label="行程同步設定">
+      <form id="config-form" class="journey-form">
+        <section class="journey-step" id="step-1" data-step="1" aria-labelledby="step-1-title">
+          <div class="step-card">
+            <header class="step-heading step-heading-component">
+              <div>
+                <h2 id="step-1-title">選年級</h2>
+              </div>
+              <span class="step-position" aria-label="步驟 1，共 5 步">步驟 1/5</span>
+            </header>
+
+            <div class="source-status" id="source-status" role="status" aria-live="polite" data-state="idle">
+              <span class="source-status-indicator" aria-hidden="true"></span>
+              <span class="source-status-copy">
+                <strong id="source-status-title">請先選擇年級</strong>
+                <span id="source-status-detail">系統將整理出對應的課程、活動給你選擇</span>
+              </span>
+              <button type="button" class="icon-button source-refresh" id="source-refresh" aria-label="重新讀取課表" data-cursor-label="重新讀取" title="重新讀取課表" disabled>
+                <img src="assets/icon-refresh-cw.svg" alt="">
+              </button>
+            </div>
+
+            <fieldset class="segmented-field">
+              <legend class="visually-hidden">年級</legend>
+              <div class="segmented-control" role="radiogroup" aria-label="選擇年級">
+                <label data-cursor-label="選擇高一"><input type="radio" name="gradeName" value="高一"><span>高一</span></label>
+                <label data-cursor-label="選擇高二"><input type="radio" name="gradeName" value="高二"><span>高二</span></label>
+                <label data-cursor-label="選擇高三"><input type="radio" name="gradeName" value="高三"><span>高三</span></label>
+              </div>
+            </fieldset>
+
+          </div>
+          <div class="step-completion step-completion-auto" aria-hidden="true"></div>
+        </section>
+
+        <section class="journey-step" id="step-2" data-step="2" aria-labelledby="step-2-title">
+          <div class="step-card course-step-card">
+            <header class="step-heading step-heading-component">
+              <div>
+                <h2 id="step-2-title">選課程和活動</h2>
+                <p id="course-count">已選 0 門課 ・ 0 項活動</p>
+              </div>
+              <span class="step-position" aria-label="步驟 2，共 5 步">步驟 2/5</span>
+            </header>
+
+            <div class="search-control" role="search">
+              <label class="visually-hidden" for="course-search">搜尋課程和活動</label>
+              <input id="course-search" type="search" placeholder="輸入課名、活動名、班別等">
+              <button type="button" class="icon-button search-submit" id="course-search-submit" aria-label="搜尋課程和活動" data-cursor-label="搜尋">
+                <img src="assets/icon-search.svg" alt="" id="course-search-icon">
+              </button>
+            </div>
+            <div class="course-list" id="course-list"></div>
+
+          </div>
+          <div class="step-completion">
+            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="確認選課" aria-keyshortcuts="Enter" aria-pressed="false" disabled>選好了 ↵</button>
+          </div>
+        </section>
+
+        <section class="journey-step" id="step-3" data-step="3" aria-labelledby="step-3-title">
+          <div class="step-card">
+            <header class="step-heading step-heading-component">
+              <div>
+                <h2 id="step-3-title">設定通知偏好</h2>
+                <p id="notification-selection-count">包含行程調整、同步狀態通知</p>
+              </div>
+              <span class="step-position" aria-label="步驟 3，共 5 步">步驟 3/5</span>
+            </header>
+
+            <div class="two-column notification-grid">
+              <label class="field validated-field" id="field-notification-email" data-cursor-mode="text">
+                <span>收通知的 Email</span>
+                <div class="input-wrap">
+                  <input id="notification-email" name="notificationEmail" type="text" inputmode="email" autocomplete="email" required pattern="[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@tschool\.tp\.edu\.tw" maxlength="254" aria-describedby="notification-email-hint">
+                  <span class="field-icon" aria-hidden="true"></span>
+                </div>
+                <span class="field-hint" id="notification-email-hint" aria-live="polite">為了讓程式能存取課綱，請輸入校內 Email</span>
+              </label>
+
+              <div class="field notification-time-field">
+                <span id="notification-time-label">通知時間</span>
+                <div class="notification-time-list" id="notify-hours-list"></div>
+                <span class="field-hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動</span>
+              </div>
+            </div>
+
+          </div>
+          <div class="step-completion">
+            <button type="button" class="step-complete-button" data-complete-step="3" data-cursor-label="確認通知設定" aria-keyshortcuts="Enter" aria-pressed="false">Email 和通知時間都沒錯 ↵</button>
+          </div>
+        </section>
+
+        <section class="journey-step" id="step-4" data-step="4" aria-labelledby="step-4-title">
+          <div class="step-card">
+            <header class="step-heading step-heading-component">
+              <div>
+                <h2 id="step-4-title">檢查設定</h2>
+                <p>想修改可以點「↗」按鈕前往設定卡片</p>
+              </div>
+              <span class="step-position" aria-label="步驟 4，共 5 步">步驟 4/5</span>
+            </header>
+
+            <div class="settings-summary" id="settings-summary" aria-live="polite"></div>
+
+          </div>
+          <div class="step-completion">
+            <button type="button" class="step-complete-button" data-complete-step="4" data-cursor-label="產生安裝程式碼" aria-keyshortcuts="Enter" aria-pressed="false">產生安裝程式碼 ↵</button>
+          </div>
+        </section>
+
+        <section class="journey-step output-step" id="step-5" data-step="5" aria-labelledby="output-title">
+          <div class="step-card output-card control-panel-card">
+            <header class="step-heading output-heading step-heading-component">
+              <div>
+                <h2 id="output-title">變出控制臺</h2>
+                <p>放心你不用看懂程式，只要跟著指引操作即可！（如果擔心有資安疑慮，可以將程式碼貼給 AI 檢查）</p>
+              </div>
+              <span class="step-position" aria-label="步驟 5，共 5 步">步驟 5/5</span>
+            </header>
+
+            <div class="code-window" id="code-window">
+              <textarea id="generated-code" spellcheck="false" readonly aria-label="產生的 Code.gs" data-cursor-mode="text" data-lenis-prevent></textarea>
+              <button type="button" class="copy-button" id="copy-code" data-cursor-label="複製程式碼" aria-live="polite">複製程式碼 ↵</button>
+            </div>
+
+            <section class="install-steps" aria-labelledby="steps-title">
+              <h3 class="visually-hidden" id="steps-title">安裝步驟</h3>
+              <ol class="steps-list">
+                <li>
+                  <div class="install-step-heading"><strong>建立控制臺試算表</strong><span>操作 1</span></div>
+                  <small>登入 <span id="output-email">！您未填寫收通知的 Email！</span> → 點擊 <a class="sheet-template-link" id="sheet-template-link" href="https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy" target="_blank" rel="noopener" data-cursor-label="開啟模板連結">模板連結</a> 並建立副本</small>
+                </li>
+                <li>
+                  <div class="install-step-heading"><strong>新增擴充功能</strong><span>操作 2</span></div>
+                  <small>複製<button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製程式碼" aria-label="複製程式碼">程式碼</button> → 回試算表，點選「擴充功能 → Apps Script」→ 貼上<button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製並貼上程式碼" aria-label="複製程式碼以便貼上">程式碼</button> → 按下 Ctrl/Cmd + S 儲存程式</small>
+                  <img class="apps-script-guide-image" src="assets/google-sheets-apps-script-menu.png" alt="在 Google 試算表的「擴充功能」選單中選擇「Apps Script」">
+                </li>
+                <li>
+                  <div class="install-step-heading"><strong>完成第一次同步設定</strong><span>操作 3</span></div>
+                  <small>回試算表 → 跟著試算表指引完成後續操作</small>
+                </li>
+              </ol>
+            </section>
+          </div>
+        </section>
+      </form>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-content">
+      <div class="site-footer-copy">
+        <strong>T-SCHOOL Schedule Sync</strong>
+        <nav class="site-footer-links" aria-label="專案與聯絡資訊">
+          <a href="https://github.com/artemas-hsieh/t-school-schedule-sync" target="_blank" rel="noopener" data-cursor-label="開啟 GitHub repository">GitHub repository</a>
+          <a href="mailto:artemas.hsieh5473@gmail.com" data-cursor-label="撰寫 Email">Email</a>
+          <a href="https://www.instagram.com/artemas.hsieh/" target="_blank" rel="noopener" data-cursor-label="開啟 Instagram">Instagram</a>
+        </nav>
+      </div>
+      <a class="site-footer-top" href="#top" aria-label="回到頁首" data-cursor-label="回到頁首">
+        <span class="material-symbols-outlined" aria-hidden="true">arrow_upward</span>
+      </a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var version = window.TSCHOOL_ASSET_VERSION || 'stable';
+      var assets = ['vendor/lenis-1.3.25.min.js', 'schedule-data.js', 'sidebar-template.js', 'code-template.js', 'app.js'];
+
+      function loadScript(src) {
+        return new Promise(function (resolve, reject) {
+          var script = document.createElement('script');
+          script.src = src + '?v=' + encodeURIComponent(version);
+          script.onload = resolve;
+          script.onerror = function () { reject(new Error('Failed to load ' + src)); };
+          document.body.appendChild(script);
+        });
+      }
+
+      assets.reduce(function (chain, src) {
+        return chain.then(function () { return loadScript(src); });
+      }, Promise.resolve()).catch(function (error) {
+        var toast = document.getElementById('toast');
+        if (toast) {
+          toast.textContent = '載入程式失敗，請重新整理頁面。';
+          toast.classList.add('visible');
+        }
+        console.error(error);
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -13,7 +13,7 @@
 
 ## UI 基準與封存資料
 
-- 在沒有使用者最新要求或更新設計規格時，以 `configurator/` 中目前已實作的介面與元件模式作為後續修改基準。
+- 在沒有使用者最新要求或更新設計規格時，以根目錄公開設定器目前已實作的介面與元件模式作為後續修改基準。
 - 歷史規劃資料位於 `archive/`，除非使用者明確要求，不得作為目前設計依據。
 - 先前嚴格的 Material Design 3 規則已封存於 `archive/visual-design-material3/`，目前不啟用。
 - `1Campus/` 不得作為視覺或互動參考。
@@ -45,13 +45,13 @@
 
 ## 設計系統維護
 
-- `configurator/styles.css` 最後的共用區塊定義 4 px 間距尺度與字級／行高 token。
+- 根目錄 `styles.css` 最後的共用區塊定義 4 px 間距尺度與字級／行高 token。
 - 在可行時，先調整共用 token，再新增元件專用的孤立數值。
 - 主觀美感、層級、節奏、對齊、對比、響應式構圖與品牌一致性由使用者進行最終判斷。
 
 ## 動態與捲動
 
-- 主要動態參數集中於 `configurator/app.js` 的 `MOTION_CONFIG`；優先修改集中設定，避免在事件處理器中加入零散常數。
+- 主要動態參數集中於根目錄 `app.js` 的 `MOTION_CONFIG`；優先修改集中設定，避免在事件處理器中加入零散常數。
 - 平滑頁面捲動由同檔案頂部的 `ENABLE_SMOOTH_SCROLL` 開關；設為 `false` 即可停用 Lenis 與程式觸發的平滑捲動，reduced-motion 偏好仍優先停用。
 - `MOTION_CONFIG` 控制區段解鎖轉場、桌面與觸控捲動速率、邊界減速曲線、active section activation line 與首頁進入第一步的捲動時間。
 - 一般捲動保留每次滾輪／觸控板輸入的完整目標距離，透過 Lenis 的 `duration` 與 easing 延長抵達時間；反向手勢開始時先取消尚未完成的上一方向動量，避免畫面短暫沿舊目標移動而形成反彈。
@@ -69,7 +69,7 @@
 
 ## 控制臺範本
 
-- 安裝步驟提供 `configurator/assets/t-school-control-panel-template.xlsx` 作為 Google Sheets 可匯入的預設控制臺；範本只說明安裝與日常操作，不要求使用者在儲存格中填寫設定。
+- 安裝步驟提供 `assets/t-school-control-panel-template.xlsx` 作為 Google Sheets 可匯入的預設控制臺；範本只說明安裝與日常操作，不要求使用者在儲存格中填寫設定。
 - 公開 Google Sheets 範本使用 `https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy`，介面直接開啟建立副本流程；若日後清空 `GOOGLE_SHEETS_TEMPLATE_COPY_URL`，則維持下載本機範本的 fallback。
 
 ## 更新方式

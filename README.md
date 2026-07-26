@@ -16,7 +16,7 @@ T-SCHOOL 行程同步是一個純靜態設定器，會依使用者的年級、�
 - 支援每日自動同步、每日狀態摘要、事件提醒，以及以標準格式為基礎的進階自訂說明。
 - 安裝後可從 Google Sheet 的「行程同步」選單與側邊欄調整設定，不需再回 Apps Script 編輯器。
 - 一般同步保留使用者對日曆事件的手動編輯；必要時可使用「強制修復」重新套用來源資料。
-- 大量首次同步會自動拆成每批最多 40 次 Calendar 操作；每批都有安全存檔點，關閉側欄後仍可背景續跑。
+- 大量首次同步會先以 40 次 Calendar 操作建立安全檢查點，後續每批最多 80 次；每批都有安全存檔點，關閉側欄後仍可背景續跑。
 - 事件標題與地點會合併課表地點及課綱中的實體課程教室；隱藏同步標籤可防止「Calendar 已建立、狀態尚未保存」造成重複事件。暫時失敗會重試一次，下一次仍失敗才寄信。
 - 偵測新學期後會暫停寫入、保留已有事件，以 Email 與側欄警示要求使用者重新選課；儲存後可恢復原本的自動同步偏好。
 
@@ -42,7 +42,7 @@ T-SCHOOL 行程同步是一個純靜態設定器，會依使用者的年級、�
 1. 確認年級、課程與通知 Email。
 2. 選擇已有的專用日曆，或讓程式自動建立。主要日曆不能使用。
 3. 按「儲存並首次同步」，依 Google 畫面完成授權。
-4. 行程很多時，第一批安全保存後可關閉側欄，程式會在背景分批完成。
+4. 行程很多時，前 40 筆安全保存後會寄出「首批 40 筆同步完成｜T-SCHOOL Schedule Sync」通知，此時可關閉側欄，程式會在背景分批完成；全部完成後會再寄「行程同步設定完成｜T-SCHOOL Schedule Sync」通知。
 5. 到專用日曆抽查課程、日期、時間與地點。所有批次成功後，程式才會啟用自動觸發器並寄出設定完成通知。
 
 ## 使用與安全
@@ -77,7 +77,7 @@ Google Sheet 的「行程同步」選單提供：
 ## 修改 HTML Email 版型
 
 所有信件外框、文案、inline style 與通知種類設定集中在
-[`configurator/notification-email-templates.json`](configurator/notification-email-templates.json)：
+[`notification-email-templates.json`](notification-email-templates.json)：
 
 - `shell` 是所有通知共用的信件外框。
 - `notifications` 內含一套標準行程調整格式，以及設定完成、每日成功摘要、同步失敗、課綱失敗、新學期、新項目與同步停止等版型。
@@ -89,7 +89,7 @@ Google Sheet 的「行程同步」選單提供：
 ## 資料來源與限制
 
 - 課表執行階段使用固定的 Google Apps Script API 部署網址；不使用已停止更新的舊課表 Google Sheet。
-- HTML Email 版型由公開的 `configurator/notification-email-templates.json` 提供，產生的 `Code.gs` 不內嵌 HTML。版型更新後，已安裝程式會在快取到期（最長約一小時）後自動套用；下載失敗時改寄純文字。
+- HTML Email 版型由公開的 `notification-email-templates.json` 提供，產生的 `Code.gs` 不內嵌 HTML。版型更新後，已安裝程式會在快取到期（最長約一小時）後自動套用；下載失敗時改寄純文字。
 - 課綱是獨立的補充來源。產生的 Apps Script 會讀取中央「課綱來源」索引，所以日後只要在索引新增或啟用新學期來源，不必重新產生既有 `Code.gs`。索引暫時失敗時沿用最後成功版本。
 - 只有年級與日期符合已啟用來源組時，使用者自己的 Apps Script 才會讀取受校內帳號保護的課綱 Sheets；目前高一與高三不會觸發課綱讀取。
 - 課綱依工作表分頁名稱、日期與節次精確配對。純非同步課程、過去課程與沒有課表事件的未開課課程不會加入行事曆說明。
@@ -103,6 +103,17 @@ Google Sheet 的「行程同步」選單提供：
 ```text
 .
 ├── index.html
+├── styles.css
+├── schedule-data.js
+├── sidebar-template.js
+├── code-template.js
+├── notification-email-templates.json
+├── app.js
+├── assets/
+│   └── t-school-control-panel-template.xlsx
+├── vendor/
+│   ├── lenis-1.3.25.min.js
+│   └── LENIS-LICENSE.txt
 ├── README.md
 ├── SECURITY.md
 ├── AGENTS.md
@@ -116,19 +127,6 @@ Google Sheet 的「行程同步」選單提供：
 │   ├── MVP_IMPLEMENTATION_PLAN.md
 │   ├── 部署後設定介面方案構想.md
 │   └── visual-design-material3/
-├── configurator/
-│   ├── index.html
-│   ├── styles.css
-│   ├── schedule-data.js
-│   ├── sidebar-template.js
-│   ├── code-template.js
-│   ├── notification-email-templates.json
-│   ├── app.js
-│   ├── assets/
-│   │   └── t-school-control-panel-template.xlsx
-│   └── vendor/
-│       ├── lenis-1.3.25.min.js
-│       └── LENIS-LICENSE.txt
 └── tests/
     └── smoke-test.js
 ```
@@ -145,7 +143,7 @@ Google Sheet 的「行程同步」選單提供：
 python3 -m http.server 8765
 ```
 
-然後前往 <http://127.0.0.1:8765/configurator/>。
+然後前往 <http://127.0.0.1:8765/>。
 
 執行完整煙霧測試：
 

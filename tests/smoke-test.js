@@ -6,17 +6,17 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
-const scheduleData = require(path.join(root, 'configurator/schedule-data.js'));
+const scheduleData = require(path.join(root, 'schedule-data.js'));
 
 global.window = global;
-require(path.join(root, 'configurator/sidebar-template.js'));
-require(path.join(root, 'configurator/code-template.js'));
+require(path.join(root, 'sidebar-template.js'));
+require(path.join(root, 'code-template.js'));
 
 const sidebarHtml = global.TSCHOOL_SIDEBAR_HTML;
-const configuratorHtml = fs.readFileSync(path.join(root, 'configurator/index.html'), 'utf8');
-const configuratorAppSource = fs.readFileSync(path.join(root, 'configurator/app.js'), 'utf8');
+const configuratorHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const configuratorAppSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const emailTemplateManifestText = fs.readFileSync(
-  path.join(root, 'configurator/notification-email-templates.json'),
+  path.join(root, 'notification-email-templates.json'),
   'utf8'
 );
 const emailTemplateManifest = JSON.parse(emailTemplateManifestText);
@@ -47,6 +47,21 @@ assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), true);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner" role="status" hidden'), true);
+assert.match(
+  configuratorHtml,
+  /<link id="app-stylesheet" rel="stylesheet" href="styles\.css\?v=[^"]+">/,
+  '主要樣式必須在 head 中以可阻塞首次繪製的固定網址載入'
+);
+assert.equal(
+  configuratorHtml.includes("document.getElementById('app-stylesheet').href ="),
+  false,
+  '不得以 JavaScript 延後指定主要樣式網址，避免未套樣式內容閃現'
+);
+assert.equal(
+  configuratorHtml.includes('Date.now()'),
+  false,
+  '每次載入不得產生全新的資產版本，否則瀏覽器無法沿用快取'
+);
 assert.equal(configuratorAppSource.includes('const ENABLE_HIGH_LOAD_TEST_FEATURE = true;'), true);
 assert.equal(emailTemplateManifest.schemaVersion, 1);
 assert.deepEqual(
@@ -57,6 +72,7 @@ assert.deepEqual(
     'new_schedule_items',
     'schedule_changes',
     'setup_complete',
+    'setup_started',
     'sync_failure',
     'sync_stopped',
     'sync_success',
@@ -148,11 +164,63 @@ const highLoadGeneratedCode = global.buildAppsScriptCode({
 });
 assert.doesNotThrow(() => new Function(highLoadGeneratedCode));
 assert.equal(highLoadGeneratedCode.includes('const HIGH_LOAD_TESTING_ENABLED = true;'), true);
+assert.equal(highLoadGeneratedCode.includes('function runHighLoadFirstSyncTest('), true);
+assert.equal(
+  highLoadGeneratedCode.includes(
+    ".addItem('模擬控制臺首次同步', 'runHighLoadFirstSyncTest')"
+  ),
+  true,
+  '高負載選單應以單一首次同步情境取代分段測試'
+);
+assert.equal(
+  highLoadGeneratedCode.includes(".addItem('3a. 測試 10 筆'"),
+  false,
+  '高負載選單不應再要求使用者逐段執行 10 到 422 筆'
+);
+assert.equal(
+  highLoadGeneratedCode.includes('syncResponse = saveSettingsAndSyncFromUi({'),
+  true,
+  '高負載情境應沿用控制臺的儲存並首次同步入口'
+);
+assert.equal(
+  highLoadGeneratedCode.includes(
+    'return parseSchedulePayload_(payload, gradeName, scheduleBusinessNow_());'
+  ),
+  true,
+  '首次同步及背景續跑應持續使用模擬的開學日期'
+);
+assert.equal(
+  highLoadGeneratedCode.includes(
+    "const HIGH_LOAD_TEST_OUTLINE_STORE = 'TSCHOOL_HIGH_LOAD_TEST_OUTLINE';"
+  ),
+  true
+);
 assert.equal(highLoadGeneratedCode.includes('function setupHighLoadTestEnvironment('), true);
 assert.equal(highLoadGeneratedCode.includes('function runHighLoadReadOnlyTest('), true);
 assert.equal(highLoadGeneratedCode.includes('function runHighLoadCourseOutlineReadTest('), true);
 assert.equal(highLoadGeneratedCode.includes('function runHighLoadCalendarTest422('), true);
 assert.equal(highLoadGeneratedCode.includes('function cleanupHighLoadTestEnvironment('), true);
+assert.equal(
+  highLoadGeneratedCode.includes(
+    'writeChunkedJson_(HIGH_LOAD_TEST_OUTLINE_STORE, snapshot);'
+  ),
+  true,
+  '30 天課綱讀取結果應保存於高負載測試專用儲存區'
+);
+assert.equal(
+  highLoadGeneratedCode.includes(
+    'return attachHighLoadTestCourseOutlines_(events, source);'
+  ),
+  true,
+  'Calendar 壓力測試應套用已保存的課綱地點與內容'
+);
+assert.equal(
+  highLoadGeneratedCode.includes(
+    'clearChunkedStore_(HIGH_LOAD_TEST_OUTLINE_STORE);'
+  ),
+  true,
+  '清除高負載環境時應一併移除測試課綱資料'
+);
 
 const formatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Taipei',
@@ -469,6 +537,39 @@ assert.equal(parsedOutline.records[0].dateKey, '2026-07-27');
 assert.equal(parsedOutline.records[0].periodStart, 5);
 assert.equal(parsedOutline.records[0].periodEnd, 6);
 assert.equal(parsedOutline.records[1].topic, '跨節主題');
+
+const mergedTopicValues = [
+  ['日期', '節次', '實體課程教室', '單元主題', '課程內容'],
+  ['7/27', '1', '協作坊', '合併單元主題', '第一節內容'],
+  ['7/28', '1', '協作坊', '', '第二節內容']
+];
+const expandedMergedTopicValues = context.expandVerticalMergedCourseOutlineValues_(
+  mergedTopicValues,
+  [{
+    getRow: () => 2,
+    getColumn: () => 4,
+    getNumRows: () => 2,
+    getNumColumns: () => 1,
+    getDisplayValue: () => '合併單元主題'
+  }]
+);
+assert.equal(expandedMergedTopicValues[2][3], '合併單元主題');
+const parsedMergedTopicOutline = context.parseCourseOutlineSheetValues_(
+  expandedMergedTopicValues,
+  '測試課程',
+  [
+    { originalTitle: '測試課程', dateKey: '2026-07-27', periodStart: 1, periodEnd: 1 },
+    { originalTitle: '測試課程', dateKey: '2026-07-28', periodStart: 1, periodEnd: 1 }
+  ],
+  { sourceSetKey: '114-2-high2', spreadsheetId: 'sheet-id', spreadsheetName: '課綱' }
+);
+assert.equal(parsedMergedTopicOutline.records.length, 2);
+assert.equal(
+  parsedMergedTopicOutline.records[1].topic,
+  '合併單元主題',
+  '垂直合併的單元主題應向下套用到合併範圍內每一筆課程'
+);
+
 assert.throws(
   () => context.parseCourseOutlineSheetValues_(
     [['日期', '節次', '課程內容'], ['7/27', '1', '內容']],
@@ -524,6 +625,13 @@ assert.notEqual(
 assert.equal(
   context.buildEventTitle_(newOutlineItem),
   '測試課程 [吉林基地-協作坊]'
+);
+assert.equal(
+  context.buildEventTitle_(
+    Object.assign({}, newOutlineItem, { originalTitle: '國語文進階(二)' })
+  ),
+  '國語文進階(二) [吉林基地-協作坊]',
+  '首次同步套用課綱後，標題應合併課表地點與實體課程教室'
 );
 assert.equal(
   context.buildEventLocation_(newOutlineItem),
@@ -838,7 +946,7 @@ context.UrlFetchApp = {
   fetch(url, options) {
     assert.equal(
       url,
-      'https://artemas-hsieh.github.io/t-school-schedule-sync/configurator/notification-email-templates.json'
+      'https://artemas-hsieh.github.io/t-school-schedule-sync/notification-email-templates.json'
     );
     assert.equal(options.followRedirects, true);
     assert.equal(options.muteHttpExceptions, true);
@@ -912,6 +1020,10 @@ const sampleEmailData = {
   unchanged: 8,
   changeCount: 1,
   omittedNote: '',
+  processed: 40,
+  total: 422,
+  remaining: 382,
+  progressPercent: 9,
   dateRange: '2026-09-01–2027-01-31',
   itemCount: 1,
   items: [{ label: '測試活動' }],
@@ -936,6 +1048,36 @@ Object.keys(emailTemplateManifest.notifications).forEach(templateKind => {
     `${templateKind} 不應留下未解析變數`
   );
 });
+
+const emailsBeforeFirstBatchNotice = sentEmailMessages.length;
+assert.equal(
+  context.sendFirstBatchStartedNotificationSafe_(
+    { notificationEmail: 'test@example.com' },
+    {
+      processedOperations: 40,
+      desiredCount: 422,
+      created: 40
+    }
+  ),
+  true
+);
+assert.equal(sentEmailMessages.length, emailsBeforeFirstBatchNotice + 1);
+assert.equal(
+  sentEmailMessages.at(-1).subject,
+  '首批 40 筆同步完成｜T-SCHOOL Schedule Sync'
+);
+assert.match(sentEmailMessages.at(-1).body, /其餘約 382 筆會在背景自動繼續/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /前 40 筆已安全寫入日曆/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /目前進度 9%/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /剩餘約 382 筆/);
+assert.equal(
+  context.formatNotificationSubject_('[T-SCHOOL] 行程同步失敗'),
+  '行程同步失敗｜T-SCHOOL Schedule Sync'
+);
+assert.equal(
+  context.formatNotificationSubject_('行程同步設定完成｜T-SCHOOL Schedule Sync'),
+  '行程同步設定完成｜T-SCHOOL Schedule Sync'
+);
 
 cachedEmailTemplateManifest = '';
 emailTemplateFetchShouldFail = true;
@@ -1253,9 +1395,9 @@ while (batchPending) {
   batchJob = context.applySyncBatchResultToJob_(batchJob, batchResult);
   batchPending = batchResult.pending;
   batchCount += 1;
-  assert.equal(batchCount <= 12, true, '422 筆正常同步不應出現無限續跑');
+  assert.equal(batchCount <= 7, true, '422 筆正常同步不應出現無限續跑');
 }
-assert.equal(batchCount, 11, '422 筆應以每批最多 40 筆完成');
+assert.equal(batchCount, 6, '首次 40 筆後應改以每批最多 80 筆完成');
 assert.equal(batchJob.created, 422);
 assert.equal(Object.keys(batchState).length, 422);
 assert.equal(batchCalendar.activeEvents().length, 422);
@@ -1311,12 +1453,48 @@ while (forcePending) {
   forceJob = context.applySyncBatchResultToJob_(forceJob, forceResult);
   forcePending = forceResult.pending;
   forceBatchCount += 1;
-  assert.equal(forceBatchCount <= 12, true, '強制修復不得重複處理同一批而無限續跑');
+  assert.equal(forceBatchCount <= 7, true, '強制修復不得重複處理同一批而無限續跑');
 }
-assert.equal(forceBatchCount, 11);
+assert.equal(forceBatchCount, 6);
 assert.equal(forceJob.updated, 422);
 assert.equal(Object.keys(forceJob.forceProcessedKeys).length, 422);
 assert.equal(batchCalendar.activeEvents().length, 422);
+
+const firstSetupForceCalendar = createMockCalendar();
+let firstSetupForceState = {};
+let firstSetupForceJob = makeSyncJobForTest(batchDesired.length, true);
+firstSetupForceJob.reason = 'setup';
+firstSetupForceJob.firstSetup = true;
+let firstSetupForceBatches = 0;
+let firstSetupForcePending = true;
+while (firstSetupForcePending) {
+  const firstSetupForceResult = context.runSyncJobBatch_(
+    firstSetupForceJob,
+    firstSetupForceCalendar,
+    firstSetupForceState,
+    batchDesired,
+    batchSettings,
+    '2026-08-01'
+  );
+  firstSetupForceState = firstSetupForceResult.state;
+  firstSetupForceJob = context.applySyncBatchResultToJob_(
+    firstSetupForceJob,
+    firstSetupForceResult
+  );
+  firstSetupForcePending = firstSetupForceResult.pending;
+  firstSetupForceBatches += 1;
+  assert.equal(
+    firstSetupForceBatches <= 7,
+    true,
+    '首次同步的強制檢查不得讓新建事件在後續批次被重複處理'
+  );
+}
+assert.equal(firstSetupForceBatches, 6);
+assert.equal(firstSetupForceJob.created, 422);
+assert.equal(firstSetupForceJob.updated, 0);
+assert.equal(firstSetupForceJob.processedOperations, 422);
+assert.equal(Object.keys(firstSetupForceState).length, 422);
+assert.equal(firstSetupForceCalendar.activeEvents().length, 422);
 
 const recoveryCalendar = createMockCalendar();
 const recoveryItem = makeBatchFixtureEvent(0);
@@ -2006,6 +2184,14 @@ const results = fixtures.map(fixture => {
     range: `${runtimeSummary.firstDateKey}..${runtimeSummary.lastDateKey}`
   };
 });
+
+assert.equal(
+  sentEmailSubjects.every(subject =>
+    String(subject).endsWith('｜T-SCHOOL Schedule Sync')
+  ),
+  true,
+  '所有實際寄出的通知主旨都應使用統一品牌後綴'
+);
 
 console.log(JSON.stringify({
   generatedCharacters: generatedCode.length,

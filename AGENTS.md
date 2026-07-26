@@ -12,7 +12,7 @@
 
 ## 重要路徑
 
-- `configurator/`：公開設定介面、資料處理與 Apps Script 程式碼產生邏輯。
+- 根目錄 `index.html`、`styles.css`、`app.js`、`schedule-data.js`、`sidebar-template.js`、`code-template.js`：公開設定介面、資料處理與 Apps Script 程式碼產生邏輯。
 - `tests/`：自動測試與冒煙測試。
 - `archive/`：封存資料；除非使用者明確要求，不得將其作為目前實作依據。
 - `PROJECT_CONTEXT_FOR_AI.md`：相對穩定的產品流程、架構、同步模型與安全背景。
@@ -32,7 +32,7 @@
 ## 核心實作限制
 
 - 公開設定產生器必須維持靜態、免建置、無外部執行階段依賴；架構變更須由使用者明確同意。
-- 在沒有更高優先級的新需求或設計規格時，以 `configurator/` 的目前實作作為 UI 行為與視覺基準。
+- 在沒有更高優先級的新需求或設計規格時，以根目錄公開設定器的目前實作作為 UI 行為與視覺基準。
 - 保留既有資料解析、Calendar 安全規則、產生的 Apps Script 行為、設定遷移與公開 Apps Script 函式；除非任務明確要求並規劃相容性處理。
 - 使用正式 Apps Script `/exec` 課表端點；不得保存重新導向後的 `script.googleusercontent.com` 網址、權杖或 `user_content_key`。實際端點以程式碼中的正式設定為準。
 - 產生 Apps Script 時，使用者提供的值必須安全序列化；不得將使用者字串直接串接成可執行程式碼。

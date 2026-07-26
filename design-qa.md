@@ -13,7 +13,7 @@
 - Final hover captures: `/private/tmp/t-school-copy-hover-final-a.png`, `/private/tmp/t-school-copy-hover-final-b.png`
 - Final cursor-success capture: `/private/tmp/t-school-copy-success-cursor-final.png`
 - Focused cursor comparison: `/private/tmp/t-school-copy-cursor-comparison.png`
-- Local route: `http://127.0.0.1:8766/configurator/`
+- Local route: `http://127.0.0.1:8766/`
 
 ## Root causes and fixes
 

@@ -9,16 +9,15 @@
 
 本儲存庫包含一個靜態設定產生器，用來產生由使用者自行擁有與部署的 Google Apps Script `Code.gs`。產生的程式會從目前的 T-SCHOOL 課表 API 讀取資料，將選定事件同步至專用 Google Calendar，並在綁定的 Google Sheet 中加入圖形化設定側欄。
 
-公開應用維持免建置：
+公開應用維持免建置，GitHub Pages 根網址直接載入設定器：
 
-- 根目錄 `index.html` 重新導向至 `configurator/`。
-- `configurator/index.html` 定義安裝器 UI。
-- `configurator/styles.css` 實作設計系統。
-- `configurator/schedule-data.js` 取得並解析即時課表 API，供安裝器產生課程選項。
-- `configurator/sidebar-template.js` 包含嵌入產生程式碼的 HTML Service 設定側欄。
-- `configurator/code-template.js` 產生完整 Apps Script 後端。
-- `configurator/notification-email-templates.json` 是所有通知共用的公開 HTML Email 版型 manifest。
-- `configurator/app.js` 協調安裝器狀態、驗證、API 載入、課程選擇與程式碼產生。
+- 根目錄 `index.html` 定義安裝器 UI。
+- 根目錄 `styles.css` 實作設計系統。
+- 根目錄 `schedule-data.js` 取得並解析即時課表 API，供安裝器產生課程選項。
+- 根目錄 `sidebar-template.js` 包含嵌入產生程式碼的 HTML Service 設定側欄。
+- 根目錄 `code-template.js` 產生完整 Apps Script 後端。
+- 根目錄 `notification-email-templates.json` 是所有通知共用的公開 HTML Email 版型 manifest。
+- 根目錄 `app.js` 協調安裝器狀態、驗證、API 載入、課程選擇與程式碼產生。
 
 目前公開部署位置：
 
@@ -80,7 +79,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 ## Calendar 同步模型
 
 - 只主動協調今天與未來事件；過去的 Calendar 行程不改不刪，內部索引則只保留最近 120 天，以免長期占滿 Script Properties。
-- 正式同步採可續傳工作單：每批最多 40 次 Calendar 操作並設 150 秒軟上限，批次前保存 `inFlight`，批次後提交事件狀態；未完成時只保留一個 continuation trigger。
+- 正式同步採可續傳工作單：首次設定的第一批最多 40 次 Calendar 操作，確認可安全寫入後，後續每批最多 80 次；所有批次皆設 150 秒軟上限，批次前保存 `inFlight`，批次後提交事件狀態，未完成時只保留一個 continuation trigger。第一批成功後寄送「首批 40 筆同步完成｜T-SCHOOL Schedule Sync」通知，全部完成後才寄「行程同步設定完成｜T-SCHOOL Schedule Sync」通知。
 - Calendar 建立前以日期範圍與說明中的同步識別碼查找既有受管理事件。找到一筆就接回 ID，找到多筆則停止；此機制處理 Calendar 已寫入但狀態尚未提交的硬逾時窗口。
 - 設定儲存與同步共用 Script Lock；未完成的 Calendar 搬移結束前禁止再次更換目標，避免雙分頁或連續搬移破壞狀態。
 - 每次續傳均比對完整課表、設定、目標 Calendar、課綱版本與應有事件指紋。輸入漂移時由已提交狀態重新規劃，不沿用過時操作清單。
@@ -91,7 +90,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 - 課綱找不到精確分頁時可回報只差空白／全形字元的近似名稱，但不得自動套用；跨校課程不列入缺頁錯誤。
 - 行事曆同步本身不直接開啟課綱 Sheets，只讀取最後成功快照。課綱每日獨立刷新，第一次失敗於約 30 分鐘後重試，第二次仍失敗才寄信；硬逾時由預先建立的 watchdog 接手。
 - 課綱快照只保存已選且落在今天至第 30 天（含頭尾）的同步課程。純非同步列略過；同時具有實體或線上同步時數的混合列保留。整學期基本行程仍照常同步，不受 30 天課綱視窗影響。
-- 課綱中的 `實體課程教室` 會與課表地點去重後以 `-` 組合，寫入事件標題右側的方括號及 Calendar 地點；`單元主題`、`課程內容` 寫入說明。純課綱變更會更新這三個呈現欄位，但不列入行程調整通知。
+- 課綱中的 `實體課程教室` 會與課表地點去重後以 `-` 組合，寫入事件標題右側的方括號及 Calendar 地點；`單元主題`、`課程內容` 寫入說明。垂直合併的資料儲存格會把左上值套用到合併範圍內各列。純課綱變更會更新這三個呈現欄位，但不列入行程調整通知。
 - 說明格式只保留「標準」與「進階自訂」；舊的簡潔／詳細設定載入時視為標準。進階自訂以標準模板為起點，使用 `**粗體**` 與換行產生 Calendar HTML。
 - 來源完全未變更的事件會跳過 Calendar API 讀寫。
 - 一般同步在來源 signature 未變更時保留使用者直接對 Calendar 做的修改；強制修復才重新套用來源欄位。
@@ -107,6 +106,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 - 一般通知只在使用者設定的一至四個通知時間寄發；時間外偵測到的行程調整與需確認事項先排入佇列。同步錯誤、課綱錯誤與設定完成通知可立即寄發。
 - 每日成功摘要安排在最後一個通知時間；當日已偵測、排程或寄出行程調整時，不再寄成功摘要。
 - 所有通知同時提供 HTML 與純文字內容；純文字內容是手機推播摘要與不支援 HTML 的備援。產生的 `Code.gs` 只保存固定 HTTPS manifest URL 與安全渲染器，不內嵌信件 HTML；公開版型以一小時 Script Cache 更新，下載或驗證失敗時仍須寄出純文字。
+- 所有通知主旨統一為「通知事件｜T-SCHOOL Schedule Sync」；首次同步的前 40 筆成功保存後以「首批 40 筆同步完成」事件名稱通知，全部完成後再寄「行程同步設定完成」。
 - HTML manifest 中的一般 `{{value}}` 一律經過跳脫；只有程式從同一份 manifest 重複渲染出的區塊可透過 `{{{value}}}` 插入，使用者或課表來源文字不得直接成為 HTML。
 - 權限、資料結構、名稱碰撞、大量刪除等需處理的錯誤應立即通知；暫時性的 Google 服務錯誤或逾時先延後重試一次，下一次仍失敗才通知。
 - 無變更執行預設不通知，但設定的每日成功摘要時段除外。
@@ -117,7 +117,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 
 - 設定、狀態、通知狀態、受管理事件狀態與課綱最後成功快照儲存在 Script Properties；大型 JSON 會依 UTF-8 位元組切成每塊至多 7,500 bytes。事件簽章只保存短雜湊、異動明細設上限、超過 120 天的歷史索引會移除，預估總量超過 430 KiB 時停止寫入。課綱快照以版本化 staging 寫入，完整驗證後才切換 active pointer，失敗不得覆蓋上一版。
 - 一份產生的程式支援一個年級、一個通知信箱與一個專用 Calendar；拒絕使用主要 Calendar。
-- 高負載測試採雙重開關：網站原始碼的 `ENABLE_HIGH_LOAD_TEST_FEATURE` 必須開啟，且產生器 URL 必須帶有 `?highLoadTest=1`，才會把測試函式寫入 `Code.gs`。一般產生器輸出不含測試函式，試算表選單也不顯示測試入口。
+- 高負載測試採雙重開關：網站原始碼的 `ENABLE_HIGH_LOAD_TEST_FEATURE` 必須開啟，且產生器 URL 必須帶有 `?highLoadTest=1`，才會把測試函式寫入 `Code.gs`。一般產生器輸出不含測試函式，試算表選單也不顯示測試入口。測試版以單一「模擬控制臺首次同步」情境，讓全新控制臺副本沿用正式的設定保存、30 天課綱、專用日曆建立、首批 40／後續 80 筆分批、背景續跑與 watchdog 路徑，不再要求人工逐段執行 10～422 筆。
 - 控制臺不顯示硬編碼的同步時段選項；`autoSyncHours` 沿用安裝器產生值，避免側欄顯示狀態與實際觸發條件不一致。
 - 刪除工具只處理已儲存的事件 ID，並驗證管理標記。
 - `quickDeleteAllCalendarEvents()` 保持由 `ALLOW_QUICK_DELETE_ALL = false` 停用。
@@ -127,7 +127,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 
 ## 部署與快取
 
-`configurator/index.html` 會在每次載入時設定新的 `TSCHOOL_ASSET_VERSION`，並將該查詢值加到下列檔案：
+根目錄 `index.html` 以主要樣式表網址中的固定發布版本建立 `TSCHOOL_ASSET_VERSION`，並將同一查詢值加到下列檔案：
 
 - `styles.css`
 - `schedule-data.js`
@@ -135,7 +135,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 - `code-template.js`
 - `app.js`
 
-目前策略優先確保部署正確，而非瀏覽器快取效率。
+`styles.css` 必須在 `<head>` 直接提供 `href`，讓瀏覽器在首次繪製前完成主要樣式載入，避免顯示裸露 HTML。不得使用 `Date.now()` 為每次瀏覽產生新版本；發布前若上述資產有變更，應更新 `styles.css?v=...` 的固定版本值，讓瀏覽器能沿用同一版快取，又能在新版部署後正確失效。
 
 ## 長期限制
 

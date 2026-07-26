@@ -196,8 +196,8 @@ Google 可能會要求你授權 Apps Script 使用下列能力：
 建議檢查指令：
 
 ```bash
-node --check configurator/code-template.js
-node --check configurator/app.js
+node --check code-template.js
+node --check app.js
 node tests/smoke-test.js
 git diff --check
 ```

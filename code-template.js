@@ -61,6 +61,7 @@
     return `
 const HIGH_LOAD_TEST_CONFIG_STORE = 'TSCHOOL_HIGH_LOAD_TEST_CONFIG';
 const HIGH_LOAD_TEST_SOURCE_STORE = 'TSCHOOL_HIGH_LOAD_TEST_SOURCE';
+const HIGH_LOAD_TEST_OUTLINE_STORE = 'TSCHOOL_HIGH_LOAD_TEST_OUTLINE';
 const HIGH_LOAD_TEST_STATE_STORE = 'TSCHOOL_HIGH_LOAD_TEST_STATE';
 const HIGH_LOAD_TEST_REPORT_STORE = 'TSCHOOL_HIGH_LOAD_TEST_REPORT';
 const HIGH_LOAD_TEST_CALENDAR_PREFIX = '[TEST]';
@@ -79,18 +80,141 @@ function showHighLoadTestGuide() {
   assertHighLoadTestingEnabled_();
   SpreadsheetApp.getUi().alert(
     '高負載測試',
-    '這是開發者測試工具，只能操作名稱以 [TEST] 開頭的獨立日曆。\\n\\n' +
-    '請依序執行：\\n' +
-    '1. 建立／重設測試環境\\n' +
-    '2. 執行唯讀資料檢查\\n' +
-    '2b. 測試 30 天課綱讀取\\n' +
-    '3. 從 10 筆開始逐級測試\\n' +
-    '4. 每階段完成後執行第二次同步檢查\\n' +
-    '5. 查看測試狀態\\n' +
-    '6. 完成後清除測試環境\\n\\n' +
-    '測試不會寄信，也不會寫入正式專用日曆。',
+    '這是開發者測試工具，只能安裝在全新的控制臺副本。\\n\\n' +
+    '執行「模擬控制臺首次同步」後，程式會以 2026/02/23 的高二開學資料，' +
+    '一次完成來源檢查、30 天課綱讀取、建立 [TEST] 專用日曆，' +
+    '並沿用正式控制臺的 40 筆分批與背景續跑機制同步全部 422 筆行程。\\n\\n' +
+    '不需要另外執行分段測試。完成後可查看進度或開啟測試日曆。',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
+}
+
+function runHighLoadFirstSyncTest() {
+  assertHighLoadTestingEnabled_();
+  const ui = SpreadsheetApp.getUi();
+  const regularSettings = loadSettings_();
+  const regularState = loadSyncState_();
+  if (regularSettings.setupComplete ||
+      Object.keys(regularState).length > 0 ||
+      isActiveSyncJob_(loadSyncJob_())) {
+    throw new Error(
+      '安全檢查失敗：這份控制臺已有同步狀態。請建立全新的試算表副本，再安裝測試版 Code.gs。'
+    );
+  }
+  const response = ui.alert(
+    '模擬控制臺首次同步',
+    '程式將模擬 2026/02/23 高二剛開學，讀取 30 天課綱，' +
+    '自動建立名稱以 [TEST] 開頭的專用日曆，並開始同步全部 422 筆行程。\\n\\n' +
+    '這與控制臺按下「儲存並首次同步」使用相同的分批同步流程。是否繼續？',
+    ui.ButtonSet.YES_NO
+  );
+  if (response !== ui.Button.YES) return { ok: false, cancelled: true };
+
+  cleanupHighLoadTestEnvironmentCore_(true);
+  const startedAt = Date.now();
+  const calendarName = HIGH_LOAD_TEST_CALENDAR_PREFIX + ' 114-2 首次同步 ' +
+    Utilities.formatDate(new Date(), TIMEZONE, 'MMdd-HHmm');
+  const config = {
+    calendarId: '',
+    calendarName,
+    simulatedNow: HIGH_LOAD_TEST_SIMULATED_NOW,
+    createdAt: new Date().toISOString(),
+    sourceFingerprint: '',
+    expectedEvents: HIGH_LOAD_TEST_EXPECTED.totalFuture
+  };
+  writeChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, config);
+
+  const payload = fetchSchedulePayload_('高二');
+  const source = parseSchedulePayload_(payload, '高二', highLoadTestBusinessNow_());
+  const report = buildHighLoadReadOnlyReport_(source, Date.now() - startedAt);
+  if (!report.ok) {
+    throw new Error('高二開學測試資料與 422 筆基準不一致：' + report.mismatches.join('、'));
+  }
+  config.sourceFingerprint = source.fingerprint;
+  writeChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, config);
+
+  const settings = buildHighLoadTestSettings_(source);
+  const outlineEvents = filterCourseOutlineLookaheadEvents_(
+    getHighLoadTestDesiredEvents_(source),
+    highLoadTestBusinessNow_(),
+    COURSE_OUTLINE_LOOKAHEAD_DAYS
+  ).filter(event => event.type === 'course' && !event.isAllDay);
+  const sourceSets = getRelevantCourseOutlineSourceSets_('高二', outlineEvents);
+  if (!sourceSets.length) {
+    throw new Error('模擬日期沒有可使用的高二課綱來源組。');
+  }
+  const snapshot = collectCourseOutlineSnapshot_(settings, source, outlineEvents, sourceSets);
+  if (snapshot.diagnostics.missingSheetNames.length) {
+    throw new Error(
+      '30 天課綱找不到精確分頁：' +
+      snapshot.diagnostics.missingSheetNames.join('、') +
+      '。已停止首次同步，避免建立缺少課綱內容的測試事件。'
+    );
+  }
+  publishCourseOutlineSnapshot_(snapshot);
+  const enrichedOutlineEvents = attachCourseOutlineLookup_(
+    outlineEvents,
+    snapshot.lookup || {}
+  );
+  const classroomEvents = enrichedOutlineEvents.filter(event =>
+    event.courseOutline && event.courseOutline.classroom
+  );
+  const testNotificationEmail =
+    Session.getActiveUser().getEmail() ||
+    Session.getEffectiveUser().getEmail();
+  assertSingleEmail_(testNotificationEmail);
+
+  let syncResponse;
+  try {
+    syncResponse = saveSettingsAndSyncFromUi({
+      gradeName: '高二',
+      selectedCourses: source.catalog.courses.map(item => item.title),
+      includeActivities: true,
+      excludedActivities: [],
+      calendarId: '',
+      calendarName,
+      notificationEmail: testNotificationEmail,
+      autoSyncEnabled: true,
+      autoSyncHours: [6],
+      notifySyncHour: 6,
+      descriptionPreset: 'standard',
+      customDescription: '',
+      reminderMode: 'none',
+      reminderMinutes: 10
+    });
+  } finally {
+    const activeSettings = loadSettings_();
+    if (activeSettings.calendarId) {
+      config.calendarId = activeSettings.calendarId;
+      config.calendarName = activeSettings.calendarName;
+      writeChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, config);
+    }
+  }
+
+  saveHighLoadTestReport_('first_sync', {
+    ok: true,
+    expectedEvents: HIGH_LOAD_TEST_EXPECTED.totalFuture,
+    outlineCandidates: outlineEvents.length,
+    outlineEvents: enrichedOutlineEvents.filter(event => event.outlineHash).length,
+    classroomEvents: classroomEvents.length,
+    pending: Boolean(syncResponse && syncResponse.pending),
+    jobId: syncResponse && syncResponse.jobId || '',
+    elapsedMs: Date.now() - startedAt
+  });
+  ui.alert(
+    '首次同步已開始',
+    '預計同步：422 筆\\n' +
+    '30 天內已套用課綱：' +
+      enrichedOutlineEvents.filter(event => event.outlineHash).length +
+      ' / ' + outlineEvents.length + ' 筆\\n' +
+    '其中含實體課程教室：' + classroomEvents.length + ' 筆\\n\\n' +
+    (syncResponse && syncResponse.pending
+      ? '第一批已保存，剩餘行程會由背景觸發器自動續跑，不需再執行其他測試項目。'
+      : '全部行程已完成同步。') +
+    '\\n可使用「查看首次同步進度」確認結果。',
+    ui.ButtonSet.OK
+  );
+  return syncResponse;
 }
 
 function setupHighLoadTestEnvironment() {
@@ -181,10 +305,16 @@ function runHighLoadCourseOutlineReadTest() {
     desiredEvents,
     sourceSets
   );
+  writeChunkedJson_(HIGH_LOAD_TEST_OUTLINE_STORE, snapshot);
+  const enrichedEvents = attachCourseOutlineLookup_(desiredEvents, snapshot.lookup || {});
   const report = {
     ok: true,
     courseEvents: desiredEvents.length,
     courseNames: uniqueExactStrings_(desiredEvents.map(event => event.originalTitle)).length,
+    enrichedEvents: enrichedEvents.filter(event => event.outlineHash).length,
+    classroomEvents: enrichedEvents.filter(event =>
+      event.courseOutline && event.courseOutline.classroom
+    ).length,
     spreadsheetCount: snapshot.diagnostics.spreadsheetCount,
     scannedSheetCount: snapshot.diagnostics.scannedSheetCount,
     matchedRecordCount: snapshot.diagnostics.matchedRecordCount,
@@ -198,6 +328,8 @@ function runHighLoadCourseOutlineReadTest() {
     '30 天課綱讀取',
     '課程節次：' + report.courseEvents +
     '\\n課程名稱：' + report.courseNames +
+    '\\n已套用課綱：' + report.enrichedEvents +
+    '\\n含實體課程教室：' + report.classroomEvents +
     '\\n開啟課綱檔案：' + report.spreadsheetCount +
     '\\n實際讀取分頁：' + report.scannedSheetCount +
     '\\n成功配對資料：' + report.matchedRecordCount +
@@ -210,7 +342,8 @@ function runHighLoadCourseOutlineReadTest() {
         ? report.nearMatchSheetNames.map(item => item.courseName + ' → ' + item.candidates.join('／')).join('、')
         : '無') +
     '\\n耗時：' + Math.round(report.elapsedMs / 100) / 10 + ' 秒' +
-    '\\n\\n結果：完成。若「找不到分頁」有內容，請停止並回報；疑似名稱不會自動配對。',
+    '\\n\\n結果：完成。這份課綱資料將套用至後續 Calendar 寫入測試。' +
+    '若「找不到分頁」有內容，請停止並回報；疑似名稱不會自動配對。',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
   return report;
@@ -408,29 +541,56 @@ function verifyHighLoadSecondSync() {
 function showHighLoadTestStatus() {
   assertHighLoadTestingEnabled_();
   const config = readChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, null);
-  const state = readChunkedJson_(HIGH_LOAD_TEST_STATE_STORE, null);
+  const job = loadSyncJob_();
+  const progress = readChunkedJson_(SYNC_PROGRESS_STORE, null);
+  const settings = loadSettings_();
+  const status = loadStatus_();
+  const eventCount = Object.keys(loadSyncState_()).length;
   const reports = readChunkedJson_(HIGH_LOAD_TEST_REPORT_STORE, []);
   if (!config) {
-    SpreadsheetApp.getUi().alert('高負載測試', '尚未建立測試環境。', SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getUi().alert(
+      '高負載測試',
+      '尚未執行「模擬控制臺首次同步」。',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
     return { ready: false };
   }
   const latest = reports.length ? reports[reports.length - 1] : null;
+  const active = isActiveSyncJob_(job);
+  const state = active
+    ? job.status
+    : (settings.setupComplete ? 'complete' : progress && progress.state || 'ready');
   const result = {
     ready: true,
     calendarName: config.calendarName,
     simulatedNow: config.simulatedNow,
-    state: state && state.status || 'ready',
-    stageLimit: state && state.stageLimit || 0,
+    state,
+    setupComplete: Boolean(settings.setupComplete),
+    eventCount,
+    processed: active ? Number(job.processedOperations) || 0 : eventCount,
+    total: active
+      ? Math.max(Number(job.initialOperationCount) || 0, Number(job.desiredCount) || 0)
+      : HIGH_LOAD_TEST_EXPECTED.totalFuture,
+    remaining: active
+      ? Math.max(0, Number(job.initialOperationCount) - Number(job.processedOperations))
+      : Math.max(0, HIGH_LOAD_TEST_EXPECTED.totalFuture - eventCount),
     latestReport: latest
   };
   SpreadsheetApp.getUi().alert(
-    '高負載測試狀態',
+    '首次同步進度',
     '測試日曆：' + config.calendarName +
     '\\n模擬日期：2026/02/23' +
     '\\n目前狀態：' + result.state +
-    '\\n目前階段：' + (result.stageLimit ? result.stageLimit + ' 筆' : '尚未開始 Calendar 寫入') +
-    '\\n累計報告：' + reports.length + ' 份' +
-    (latest ? '\\n最近結果：' + (latest.report && latest.report.ok ? '通過' : '未通過') : ''),
+    '\\n已保存事件：' + result.eventCount + ' / ' + HIGH_LOAD_TEST_EXPECTED.totalFuture +
+    '\\n已處理操作：' + result.processed + ' / ' + result.total +
+    '\\n剩餘操作：約 ' + result.remaining +
+    '\\n控制臺首次設定：' + (result.setupComplete ? '完成' : '尚在背景同步') +
+    (status && status.message ? '\\n同步訊息：' + status.message : '') +
+    (latest && latest.report
+      ? '\\n30 天課綱：' + latest.report.outlineEvents +
+        ' / ' + latest.report.outlineCandidates +
+        ' 筆；含實體課程教室：' + latest.report.classroomEvents + ' 筆'
+      : ''),
     SpreadsheetApp.getUi().ButtonSet.OK
   );
   return result;
@@ -454,6 +614,9 @@ function openHighLoadTestCalendar() {
 
 function cleanupHighLoadTestEnvironment() {
   assertHighLoadTestingEnabled_();
+  if (isActiveSyncJob_(loadSyncJob_())) {
+    throw new Error('首次同步仍在背景執行，請等待完成後再清除測試環境。');
+  }
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
     '清除高負載測試環境',
@@ -479,8 +642,10 @@ function cleanupHighLoadTestEnvironmentCore_(deleteCalendar) {
   }
   clearChunkedStore_(HIGH_LOAD_TEST_CONFIG_STORE);
   clearChunkedStore_(HIGH_LOAD_TEST_SOURCE_STORE);
+  clearChunkedStore_(HIGH_LOAD_TEST_OUTLINE_STORE);
   clearChunkedStore_(HIGH_LOAD_TEST_STATE_STORE);
   clearChunkedStore_(HIGH_LOAD_TEST_REPORT_STORE);
+  clearHighLoadFirstSyncStores_();
   return {
     ok: true,
     calendarDeleted,
@@ -488,6 +653,30 @@ function cleanupHighLoadTestEnvironmentCore_(deleteCalendar) {
       ? '測試日曆與測試資料已清除。'
       : '測試資料已清除；沒有需要刪除的測試日曆。'
   };
+}
+
+function clearHighLoadFirstSyncStores_() {
+  deleteAutoSyncTriggersUnlocked_();
+  deleteTriggersByHandlers_([
+    SYNC_CONTINUATION_HANDLER,
+    SYNC_WATCHDOG_HANDLER,
+    TERM_TRANSITION_NOTICE_HANDLER
+  ]);
+  [
+    SETTINGS_STORE,
+    SYNC_STATE_STORE,
+    SYNC_JOB_STORE,
+    STATUS_STORE,
+    SYNC_PROGRESS_STORE,
+    NOTICE_STORE,
+    NOTIFICATION_QUEUE_STORE,
+    COURSE_OUTLINE_STATE_STORE
+  ].forEach(clearChunkedStore_);
+  const properties = PropertiesService.getScriptProperties();
+  const outlineVersion = properties.getProperty(COURSE_OUTLINE_ACTIVE_VERSION_PROPERTY) || '';
+  if (outlineVersion) clearChunkedStore_(courseOutlineSnapshotStoreKey_(outlineVersion));
+  properties.deleteProperty(COURSE_OUTLINE_ACTIVE_VERSION_PROPERTY);
+  cleanupInactiveCourseOutlineSnapshotStores_('');
 }
 
 function buildHighLoadReadOnlyReport_(source, elapsedMs) {
@@ -644,12 +833,24 @@ function hydrateHighLoadTestEvent_(event) {
 
 function getHighLoadTestDesiredEvents_(source) {
   const todayKey = formatDateKey_(highLoadTestBusinessNow_());
-  return source.events
+  const events = source.events
     .filter(event => event.dateKey >= todayKey)
     .sort((left, right) => {
       const timeDifference = left.start.getTime() - right.start.getTime();
       return timeDifference || String(left.originalTitle).localeCompare(String(right.originalTitle), 'zh-Hant');
     });
+  return attachHighLoadTestCourseOutlines_(events, source);
+}
+
+function attachHighLoadTestCourseOutlines_(events, source) {
+  const snapshot = readChunkedJson_(HIGH_LOAD_TEST_OUTLINE_STORE, null);
+  if (!snapshot ||
+      snapshot.schemaVersion !== COURSE_OUTLINE_CACHE_SCHEMA_VERSION ||
+      snapshot.gradeName !== '高二' ||
+      snapshot.termKey !== (source && source.termKey || '')) {
+    return events;
+  }
+  return attachCourseOutlineLookup_(events, snapshot.lookup || {});
 }
 
 function buildHighLoadTestSettings_(source) {
@@ -722,7 +923,7 @@ function buildHighLoadTestSettings_(source) {
 const SETTINGS_SCHEMA_VERSION = 4;
 const TIMEZONE = 'Asia/Taipei';
 const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
-const EMAIL_TEMPLATE_MANIFEST_URL = 'https://artemas-hsieh.github.io/t-school-schedule-sync/configurator/notification-email-templates.json';
+const EMAIL_TEMPLATE_MANIFEST_URL = 'https://artemas-hsieh.github.io/t-school-schedule-sync/notification-email-templates.json';
 const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_V1';
 const EMAIL_TEMPLATE_CACHE_SECONDS = 60 * 60;
 const EMAIL_TEMPLATE_MAX_BYTES = 100 * 1024;
@@ -737,7 +938,8 @@ const COURSE_OUTLINE_INDEX_CACHE_STORE = 'TSCHOOL_COURSE_OUTLINE_INDEX_CACHE';
 const SYNC_JOB_SCHEMA_VERSION = 1;
 const SYNC_CONTINUATION_HANDLER = 'continueScheduleSync';
 const SYNC_WATCHDOG_HANDLER = 'watchScheduleSync';
-const SYNC_BATCH_MAX_CALENDAR_OPERATIONS = 40;
+const SYNC_INITIAL_SETUP_BATCH_OPERATIONS = 40;
+const SYNC_BATCH_MAX_CALENDAR_OPERATIONS = 80;
 const SYNC_BATCH_SOFT_LIMIT_MS = 150 * 1000;
 const SYNC_CONTINUATION_DELAY_MS = 60 * 1000;
 const SYNC_RETRY_DELAY_MS = 2 * 60 * 1000;
@@ -834,19 +1036,9 @@ function onOpen() {
     menu.addSubMenu(
       ui.createMenu('高負載測試')
         .addItem('操作說明', 'showHighLoadTestGuide')
-        .addItem('1. 建立／重設測試環境', 'setupHighLoadTestEnvironment')
-        .addItem('2. 執行唯讀資料檢查', 'runHighLoadReadOnlyTest')
-        .addItem('2b. 測試 30 天課綱讀取', 'runHighLoadCourseOutlineReadTest')
+        .addItem('模擬控制臺首次同步', 'runHighLoadFirstSyncTest')
         .addSeparator()
-        .addItem('3a. 測試 10 筆', 'runHighLoadCalendarTest10')
-        .addItem('3b. 測試 25 筆', 'runHighLoadCalendarTest25')
-        .addItem('3c. 測試 50 筆', 'runHighLoadCalendarTest50')
-        .addItem('3d. 測試 100 筆', 'runHighLoadCalendarTest100')
-        .addItem('3e. 測試 200 筆', 'runHighLoadCalendarTest200')
-        .addItem('3f. 測試全部 422 筆', 'runHighLoadCalendarTest422')
-        .addItem('4. 驗證第二次同步', 'verifyHighLoadSecondSync')
-        .addSeparator()
-        .addItem('查看測試狀態', 'showHighLoadTestStatus')
+        .addItem('查看首次同步進度', 'showHighLoadTestStatus')
         .addItem('開啟測試日曆', 'openHighLoadTestCalendar')
         .addItem('清除測試環境', 'cleanupHighLoadTestEnvironment')
     );
@@ -939,8 +1131,9 @@ function previewSettingsImpactFromUi(input) {
   const previous = loadSettings_();
   const source = loadSourceContext_(sanitizeGrade_(input && input.gradeName));
   const next = sanitizeSettingsInput_(input, previous, source);
-  const todayKey = formatDateKey_(new Date());
-  const oldState = pruneExpiredSyncState_(loadSyncState_(), new Date());
+  const businessNow = scheduleBusinessNow_();
+  const todayKey = formatDateKey_(businessNow);
+  const oldState = pruneExpiredSyncState_(loadSyncState_(), businessNow);
   const desiredEvents = dedupeAndValidateDesiredEvents_(
     enrichEventsWithCourseOutlines_(source.events
       .filter(event => event.dateKey >= todayKey)
@@ -1472,13 +1665,14 @@ function syncSchedule_(options) {
     settings = registerNewTitles_(settings, source);
     if (trackProgress) writeSyncProgress_(30, '正在確認專用日曆…', 'running');
     const calendar = ensureDedicatedCalendar_(settings);
-    const todayKey = formatDateKey_(new Date());
+    const businessNow = scheduleBusinessNow_();
+    const todayKey = formatDateKey_(businessNow);
     const desiredEvents = dedupeAndValidateDesiredEvents_(
       enrichEventsWithCourseOutlines_(source.events
         .filter(event => event.dateKey >= todayKey)
         .filter(event => shouldIncludeEvent_(event, settings)), settings, source)
     );
-    const oldState = pruneExpiredSyncState_(loadSyncState_(), new Date());
+    const oldState = pruneExpiredSyncState_(loadSyncState_(), businessNow);
     const input = buildSyncJobInput_(settings, source, desiredEvents, calendar);
     job = loadSyncJob_() || job;
 
@@ -1536,6 +1730,16 @@ function syncSchedule_(options) {
       job.updatedAt = new Date().toISOString();
       job.nextAttemptAt = new Date(Date.now() + SYNC_CONTINUATION_DELAY_MS).toISOString();
       saveSyncJob_(job);
+      if (job.firstSetup &&
+          job.processedOperations >= SYNC_INITIAL_SETUP_BATCH_OPERATIONS &&
+          !job.firstBatchNotificationClaimed) {
+        job.firstBatchNotificationClaimed = true;
+        saveSyncJob_(job);
+        if (!sendFirstBatchStartedNotificationSafe_(settings, job)) {
+          job.firstBatchNotificationClaimed = false;
+          saveSyncJob_(job);
+        }
+      }
       ensureOneTimeTrigger_(SYNC_CONTINUATION_HANDLER, SYNC_CONTINUATION_DELAY_MS);
       deleteTriggersByHandlers_([SYNC_WATCHDOG_HANDLER]);
       writeSyncJobProgress_(job, batchResult.message, 'queued');
@@ -1637,7 +1841,7 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
         Array.isArray(previousJob.migrationEntries)) {
       migrationEntries = previousJob.migrationEntries.slice();
     } else {
-      const todayKey = formatDateKey_(new Date());
+      const todayKey = formatDateKey_(scheduleBusinessNow_());
       migrationEntries = Object.keys(oldState)
         .filter(stateKey => oldState[stateKey].dateKey >= todayKey)
         .map(stateKey => ({
@@ -1690,7 +1894,8 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
     migrationFromId,
     migrationEntries,
     migrationCursor: 0,
-    completionNotificationClaimed: false
+    completionNotificationClaimed: false,
+    firstBatchNotificationClaimed: false
   };
   saveSyncJob_(job);
   return job;
@@ -1698,6 +1903,9 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
 
 function runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, todayKey) {
   const startedAt = Date.now();
+  const batchOperationLimit = job.firstSetup && Number(job.processedOperations) === 0
+    ? SYNC_INITIAL_SETUP_BATCH_OPERATIONS
+    : SYNC_BATCH_MAX_CALENDAR_OPERATIONS;
   let state = Object.assign({}, oldState);
   let operations = Array.isArray(job.inFlight) && job.inFlight.length
     ? job.inFlight.map(hydrateSyncOperation_)
@@ -1709,12 +1917,12 @@ function runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, toda
     assertSafeDeletionPlan_(plan, state, job.reason, job.deletionApproved);
     const prepared = prepareSyncOperations_(plan, state, settings, job);
     state = prepared.state;
-    operations = prepared.operations.slice(0, SYNC_BATCH_MAX_CALENDAR_OPERATIONS);
+    operations = prepared.operations.slice(0, batchOperationLimit);
 
     if (!operations.length && job.migrationFromId &&
         job.migrationCursor < job.migrationEntries.length) {
       operations = job.migrationEntries
-        .slice(job.migrationCursor, job.migrationCursor + SYNC_BATCH_MAX_CALENDAR_OPERATIONS)
+        .slice(job.migrationCursor, job.migrationCursor + batchOperationLimit)
         .map(entry => ({
           type: 'migration_delete',
           oldKey: entry.stateKey,
@@ -1864,6 +2072,7 @@ function applySyncOperation_(operation, state, calendar, settings, recovering, s
       settings
     );
     stats.created += 1;
+    if (job.forceCalendarCheck) job.forceProcessedKeys[operation.newKey] = true;
     changes.push({ type: '新增', newItem: operation.newItem });
     return;
   }
@@ -2464,7 +2673,9 @@ function assertSafeDeletionPlan_(plan, oldState, reason, deletionApproved) {
   }
 
   const oldCount = Number(plan.oldFutureCount) ||
-    Object.keys(oldState).filter(key => oldState[key].dateKey >= formatDateKey_(new Date())).length;
+    Object.keys(oldState).filter(key =>
+      oldState[key].dateKey >= formatDateKey_(scheduleBusinessNow_())
+    ).length;
   const deletedCount = plan.deletions.length;
 
   if (oldCount >= 5 && deletedCount >= 5 && deletedCount / oldCount > 0.4) {
@@ -3321,6 +3532,28 @@ function isPureAsynchronousCourseOutlineRow_(row, columns) {
   return asynchronous > 0 && physical <= 0 && online <= 0;
 }
 
+function expandVerticalMergedCourseOutlineValues_(values, mergedRanges) {
+  const expanded = (values || []).map(row => (row || []).slice());
+  (mergedRanges || []).forEach(mergedRange => {
+    const rowCount = Number(mergedRange.getNumRows()) || 0;
+    const columnCount = Number(mergedRange.getNumColumns()) || 0;
+    if (rowCount <= 1 || columnCount !== 1) return;
+    const startRow = Number(mergedRange.getRow()) - 1;
+    const startColumn = Number(mergedRange.getColumn()) - 1;
+    if (startRow < 0 || startColumn < 0 || !expanded[startRow]) return;
+    const mergedValue = typeof mergedRange.getDisplayValue === 'function'
+      ? mergedRange.getDisplayValue()
+      : expanded[startRow][startColumn];
+    for (let rowOffset = 0; rowOffset < rowCount; rowOffset += 1) {
+      const rowIndex = startRow + rowOffset;
+      if (expanded[rowIndex] && startColumn < expanded[rowIndex].length) {
+        expanded[rowIndex][startColumn] = mergedValue;
+      }
+    }
+  });
+  return expanded;
+}
+
 function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, sourceInfo) {
   const header = findCourseOutlineColumns_(values);
   if (!header) throw new Error('課綱分頁「' + sheetName + '」找不到必要欄位。');
@@ -3412,7 +3645,11 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
         const lastRow = sheet.getLastRow();
         const lastColumn = sheet.getLastColumn();
         if (!lastRow || !lastColumn) throw new Error('課綱分頁「' + sheetName + '」沒有可讀取的資料。');
-        const values = sheet.getRange(1, 1, lastRow, lastColumn).getDisplayValues();
+        const range = sheet.getRange(1, 1, lastRow, lastColumn);
+        const values = expandVerticalMergedCourseOutlineValues_(
+          range.getDisplayValues(),
+          typeof range.getMergedRanges === 'function' ? range.getMergedRanges() : []
+        );
         const sheetEvents = setEvents.filter(event => event.originalTitle === sheetName);
         const parsed = parseCourseOutlineSheetValues_(values, sheetName, sheetEvents, {
           sourceSetKey: sourceSet.key,
@@ -3633,7 +3870,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
       finishCourseOutlineRefreshRun_(run, null);
       return { ok: true, skipped: true, message: '偵測到課表學期轉換，等待使用者重新選課。' };
     }
-    const outlineNow = new Date();
+    const outlineNow = scheduleBusinessNow_();
     const desiredEvents = filterCourseOutlineLookaheadEvents_(
       source.events,
       outlineNow,
@@ -3805,7 +4042,7 @@ function sendCourseOutlineFailureNotification_(incidentId) {
     sendEmail_(
       loadSettings_(),
       'course_outline_failure',
-      '[T-SCHOOL] 課綱更新連續失敗',
+      '課綱更新連續失敗',
       '課綱已嘗試兩次仍無法更新。\\n\\n錯誤：' + (state.lastError || '未知錯誤') +
       '\\n最後成功課綱：' + lastSuccess +
       '\\n\\n基本行程與行事曆同步仍會使用最後成功快照；若沒有快照，則只同步基本行程。',
@@ -3834,7 +4071,16 @@ function flushPendingCourseOutlineFailureNotification_() {
 
 function loadSourceContext_(gradeName) {
   const payload = fetchSchedulePayload_(gradeName);
-  return parseSchedulePayload_(payload, gradeName, new Date());
+  return parseSchedulePayload_(payload, gradeName, scheduleBusinessNow_());
+}
+
+function scheduleBusinessNow_() {
+  if (HIGH_LOAD_TESTING_ENABLED &&
+      typeof HIGH_LOAD_TEST_CONFIG_STORE !== 'undefined') {
+    const config = readChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, null);
+    if (config && config.simulatedNow) return new Date(config.simulatedNow);
+  }
+  return new Date();
 }
 
 function fetchSchedulePayload_(gradeName) {
@@ -4534,7 +4780,7 @@ function sendSyncNotificationsSafe_(settings, result, options) {
       sendEmail_(
         settings,
         'sync_success',
-        '[T-SCHOOL] 行程同步成功',
+        '行程同步完成',
         formatSyncResultMessage_(result),
         buildSyncEmailData_(result)
       );
@@ -4549,7 +4795,7 @@ function sendFirstSetupNotificationSafe_(result) {
     sendEmail_(
       loadSettings_(),
       'setup_complete',
-      '[T-SCHOOL] 行程同步設定完成',
+      '行程同步設定完成',
       '第一次同步已完成。\\n\\n' + formatSyncResultMessage_(result) +
         '\\n\\n請開啟專用 Google 日曆，確認課程、日期、節次與地點正確。',
       buildSyncEmailData_(result)
@@ -4559,13 +4805,45 @@ function sendFirstSetupNotificationSafe_(result) {
   }
 }
 
+function sendFirstBatchStartedNotificationSafe_(settings, job) {
+  try {
+    const processed = Number(job.processedOperations) || 0;
+    const created = Number(job.created) || 0;
+    const total = Number(job.desiredCount) || 0;
+    const remaining = Math.max(0, total - created);
+    const progressPercent = total
+      ? Math.max(0, Math.min(100, Math.round(created / total * 100)))
+      : 0;
+    sendEmail_(
+      settings,
+      'setup_started',
+      '首批 ' + created + ' 筆同步完成',
+      '首批 ' + processed + ' 次操作已成功保存。\\n\\n' +
+        '目前已建立 ' + created + ' 筆行程，' +
+        '其餘約 ' + remaining + ' 筆會在背景自動繼續。\\n\\n' +
+        '你現在可以關閉控制臺，全部完成後會再收到設定完成通知。',
+      {
+        processed,
+        created,
+        total,
+        remaining,
+        progressPercent
+      }
+    );
+    return true;
+  } catch (error) {
+    Logger.log('首次同步開始通知寄送失敗：' + error.message);
+    return false;
+  }
+}
+
 function notifySyncFailureSafe_(error) {
   try {
     const message = userFacingError_(error);
     sendEmail_(
       loadSettings_(),
       'sync_failure',
-      '[T-SCHOOL] 行程同步失敗',
+      '行程同步失敗',
       message + '\\n\\n請開啟行程同步控制臺查看狀態。',
       { message }
     );
@@ -4599,7 +4877,7 @@ function sendActionRequiredSafe_(
     queueNotification_({
       key,
       templateKind: templateKind || 'action_required',
-      subject: '[T-SCHOOL] ' + subject,
+      subject,
       body,
       templateData: Object.assign({ message: body, subject }, templateData || {})
     });
@@ -4612,7 +4890,7 @@ function sendActionRequiredSafe_(
     sendEmail_(
       settings,
       templateKind || 'action_required',
-      '[T-SCHOOL] ' + subject,
+      subject,
       body,
       Object.assign({ message: body, subject }, templateData || {})
     );
@@ -4712,7 +4990,7 @@ function deliverScheduleChangeNotification_(settings, currentChangeData) {
     sendEmail_(
       settings,
       'schedule_changes',
-      '[T-SCHOOL] 行程調整 ' + changeData.changeCount + ' 項',
+      '行程調整 ' + changeData.changeCount + ' 項',
       formatChangeDigestFromEmailData_(changeData),
       changeData
     );
@@ -4783,22 +5061,32 @@ function formatChangeDigestFromEmailData_(changeData) {
 
 function sendEmail_(settings, templateKind, subject, body, templateData) {
   const recipient = getNotificationEmail_(settings);
+  const formattedSubject = formatNotificationSubject_(subject);
   const cleanTemplateData = sanitizeNotificationTemplateData_(
     Object.assign(buildEmailBaseData_(), templateData || {})
   );
   const message = {
     to: recipient,
-    subject,
+    subject: formattedSubject,
     body: stripNotificationSentencePeriods_(body || ''),
     name: 'T-SCHOOL Schedule Sync'
   };
   const htmlBody = buildEmailHtmlSafe_(
     templateKind,
-    subject,
+    formattedSubject,
     cleanTemplateData
   );
   if (htmlBody) message.htmlBody = htmlBody;
   MailApp.sendEmail(message);
+}
+
+function formatNotificationSubject_(subject) {
+  const brandSuffix = '｜T-SCHOOL Schedule Sync';
+  const cleanSubject = String(subject == null ? '' : subject)
+    .replace(/^\\[T-SCHOOL\\]\\s*/, '')
+    .replace(/\\s*｜\\s*T-SCHOOL Schedule Sync\\s*$/, '')
+    .trim();
+  return (cleanSubject || '行程同步通知') + brandSuffix;
 }
 
 function stripNotificationSentencePeriods_(value) {
@@ -4844,8 +5132,7 @@ function buildEmailHtmlSafe_(templateKind, subject, templateData) {
   try {
     const manifest = loadEmailTemplateManifest_();
     if (!manifest) return '';
-    const notification = manifest.notifications[templateKind] ||
-      manifest.notifications.action_required;
+    const notification = manifest.notifications[templateKind];
     if (!notification) return '';
     const values = Object.assign({
       subject,

@@ -20,10 +20,10 @@ node --check <affected-file>
 若一次修改多個主要 JavaScript 檔案，可執行：
 
 ```bash
-node --check configurator/schedule-data.js
-node --check configurator/sidebar-template.js
-node --check configurator/code-template.js
-node --check configurator/app.js
+node --check schedule-data.js
+node --check sidebar-template.js
+node --check code-template.js
+node --check app.js
 ```
 
 ## 冒煙測試
@@ -72,7 +72,7 @@ node tests/smoke-test.js
 
 修改同步、刪除、Calendar 切換、狀態遷移或安全機制時，至少確認：
 
-- 422 筆可依每批最多 40 次操作完成，第二輪為零寫入。
+- 422 筆首次同步以首批 40 次、後續每批最多 80 次操作完成，第二輪為零寫入；首次建立不得因強制檢查而把新事件重複更新一次。
 - 含中文與 emoji 的大型狀態會依 UTF-8 位元組分塊，單一 Property 不超過 7,500 bytes，重新組合後內容不變。
 - Calendar 已建立但狀態未保存時，續跑能以同步識別碼接回事件，不會重複建立。
 - Calendar 已建立但提醒尚未成功時，續跑會接回同一事件並重新套用提醒。
@@ -128,7 +128,7 @@ node tests/smoke-test.js
 
 高負載測試預設不會出現在一般使用者產生的 `Code.gs`。啟用條件必須同時成立：
 
-1. `configurator/app.js` 的 `ENABLE_HIGH_LOAD_TEST_FEATURE` 為 `true`。
+1. 根目錄 `app.js` 的 `ENABLE_HIGH_LOAD_TEST_FEATURE` 為 `true`。
 2. 以 `?highLoadTest=1` 開啟設定器並重新產生程式碼。
 
 測試版頁面頂端會顯示棕紅色「開發者測試版」橫幅。若沒有看到橫幅，產生的程式碼就不含測試函式。
@@ -137,15 +137,14 @@ node tests/smoke-test.js
 
 1. 先建立控制臺試算表副本，避免覆蓋正式控制臺。
 2. 從測試版設定器產生高二 `Code.gs`，貼到該副本的 Apps Script 並重新整理試算表。
-3. 點「行程同步」→「高負載測試」→「操作說明」。
-4. 執行「1. 建立／重設測試環境」。程式只會建立名稱以 `[TEST]` 開頭且由本人擁有的獨立 Calendar；若該控制臺已有正式同步狀態，安全檢查會拒絕執行。
-5. 執行「2. 執行唯讀資料檢查」。基準為 422 筆未來行程、380 筆課程、42 筆活動、79 筆 30 天內課綱行程與 20 個課程名稱。
-6. 執行「2b. 測試 30 天課綱讀取」，確認能開啟四份課綱；「找不到分頁」應為無，已知跨校課程應出現在「已略過跨校課程」。
-7. 依序測試 10、25、50、100、200、422 筆；每階段完成後執行「4. 驗證第二次同步」。
-8. 任一階段顯示未通過、Apps Script 逾時或 Google 服務錯誤時停止下一階段，保存畫面與「查看測試狀態」結果。
-9. 完成後執行「清除測試環境」。程式會永久刪除該 `[TEST]` Calendar 與測試 Properties，不操作正式專用日曆。
+3. 點「行程同步」→「高負載測試」→「模擬控制臺首次同步」。
+4. 程式會模擬使用者在控制臺按下「儲存並首次同步」：以 `2026/02/23` 為當下日期讀取高二課表與 30 天課綱、自動建立名稱以 `[TEST]` 開頭的專用 Calendar，並沿用正式的首批 40 次、後續每批最多 80 次操作、存檔點、背景續跑與 watchdog 機制同步全部 422 筆行程。
+5. 不需再執行 10、25、50、100、200 或第二次同步等分段項目。使用「查看首次同步進度」確認背景作業完成，再開啟測試日曆。
+6. 30 天內成功配對的課程應在標題與地點顯示課表地點及 `實體課程教室`，例如 `國語文進階(二) [吉林基地-協作坊]`。
+7. 若顯示資料基準不符、課綱分頁缺漏、Apps Script 逾時兩次或 Google 服務錯誤，保存畫面與「查看首次同步進度」結果。
+8. 完成後執行「清除測試環境」。程式會永久刪除該 `[TEST]` Calendar、測試控制臺的同步狀態、觸發器與課綱快照。
 
-測試程式使用獨立的 `TSCHOOL_HIGH_LOAD_TEST_*` Properties、不寄 Email、不改正式 `SYNC_STATE`，並在每次 Calendar 操作前驗證日曆名稱前綴、主要日曆與所有權。
+測試必須安裝於全新的控制臺副本。它會直接使用正式控制臺的設定、`SYNC_STATE`、課綱快照、分批續跑、觸發器與通知路徑，以驗證真正的首次同步；Calendar 名稱固定以 `[TEST]` 開頭，通知寄到執行測試的 Google 帳號。清除功能只接受這個隔離測試情境。
 
 發布正式網站前，若不再需要產生測試版，將 `ENABLE_HIGH_LOAD_TEST_FEATURE` 改成 `false`。即使開關暫時維持 `true`，未帶 `?highLoadTest=1` 的一般網址也不會產生測試函式。
 
