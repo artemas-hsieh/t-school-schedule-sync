@@ -2181,7 +2181,7 @@ function renderSettingsSummary() {
       ['你選的年級是：', grade ? [grade] : ['尚未選擇'], grade ? '' : 'is-error']
     ], 1, '修改年級'),
     renderSummaryRow([
-      ['你選的課程與活動有：', selectedItems.length ? selectedItems : '尚未選擇'],
+      ['你選的課程與活動有：', selectedItems],
       ['你「沒」選的課程與活動有：', unselectedItems]
     ], 2, '修改課程與活動'),
     renderSummaryRow([
