@@ -145,17 +145,52 @@ function init() {
 }
 
 function initViewportMetrics() {
+  let frameId = 0;
+
   const update = () => {
-    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    frameId = 0;
+    const metrics = readVisualViewportMetrics();
     document.documentElement.style.setProperty(
       '--visual-viewport-height',
-      `${Math.round(viewportHeight)}px`
+      `${Math.round(metrics.height)}px`
     );
+    document.documentElement.style.setProperty(
+      '--visual-viewport-offset-top',
+      `${Math.round(metrics.offsetTop)}px`
+    );
+    document.documentElement.style.setProperty(
+      '--keyboard-inset',
+      `${Math.round(metrics.keyboardInset)}px`
+    );
+    document.dispatchEvent(new CustomEvent('tschool:visual-viewport-change', {
+      detail: metrics
+    }));
+  };
+
+  const requestUpdate = () => {
+    if (!frameId) {
+      frameId = requestAnimationFrame(update);
+    }
   };
 
   update();
-  window.addEventListener('resize', update, { passive: true });
-  window.visualViewport?.addEventListener('resize', update, { passive: true });
+  window.addEventListener('resize', requestUpdate, { passive: true });
+  window.visualViewport?.addEventListener('resize', requestUpdate, { passive: true });
+  window.visualViewport?.addEventListener('scroll', requestUpdate, { passive: true });
+}
+
+function readVisualViewportMetrics() {
+  const viewport = window.visualViewport;
+  const height = viewport?.height || window.innerHeight;
+  const offsetTop = viewport?.offsetTop || 0;
+  const keyboardInset = Math.max(0, window.innerHeight - height - offsetTop);
+
+  return {
+    height,
+    keyboardInset,
+    offsetTop,
+    width: viewport?.width || window.innerWidth
+  };
 }
 
 function configureSheetTemplateLink() {
@@ -1347,6 +1382,10 @@ function initStepJourney() {
   let journeyGeometry = null;
   let activeSectionTransition = null;
   let preserveActiveStepAfterLayout = false;
+  let editingControl = null;
+  let editingBoundaryY = Number.NaN;
+  let editingReleaseTimer = 0;
+  let ensureControlFrame = 0;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -1706,9 +1745,14 @@ function initStepJourney() {
   function updateFromScroll() {
     frameRequested = false;
     const geometry = getJourneyGeometry();
-    const maximumScrollY = geometry.maximumScrollY;
+    const maximumScrollY = getMaximumScrollY(geometry);
 
     if (clampToCurrentBoundary({}, maximumScrollY)) return;
+
+    if (editingControl) {
+      setActiveStep(activeStep);
+      return;
+    }
 
     if (automatedTargetStep) {
       setActiveStep(automatedTargetStep);
@@ -1843,8 +1887,22 @@ function initStepJourney() {
     return journeyGeometry;
   }
 
-  function getMaximumScrollY() {
-    return getJourneyGeometry().maximumScrollY;
+  function getMaximumScrollY(geometry = getJourneyGeometry()) {
+    const normalMaximum = geometry.maximumScrollY;
+
+    if (!editingControl || !Number.isFinite(editingBoundaryY)) {
+      return normalMaximum;
+    }
+
+    const documentMaximum = Math.max(
+      0,
+      document.documentElement.scrollHeight - window.innerHeight
+    );
+
+    return Math.min(
+      documentMaximum,
+      Math.max(normalMaximum, editingBoundaryY)
+    );
   }
 
   function invalidateJourneyGeometry() {
@@ -1877,6 +1935,188 @@ function initStepJourney() {
     }
 
     return 0;
+  }
+
+  function getEditableJourneyControl(target) {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    const control = target.closest('input, textarea, select');
+
+    if (
+      !control ||
+      !control.closest('.journey-step') ||
+      control.disabled ||
+      control.readOnly
+    ) {
+      return null;
+    }
+
+    if (
+      control instanceof HTMLInputElement &&
+      ['button', 'checkbox', 'color', 'file', 'hidden', 'radio', 'range', 'reset', 'submit']
+        .includes(control.type)
+    ) {
+      return null;
+    }
+
+    return control;
+  }
+
+  function getFocusedVisibilityTarget(control) {
+    if (control === elements.notificationEmail) {
+      return document.getElementById('field-notification-email') || control;
+    }
+
+    return control.closest('.notification-time-row, .search-control') || control;
+  }
+
+  function keyboardIsOpen(metrics = readVisualViewportMetrics()) {
+    const threshold = Math.max(120, window.innerHeight * 0.15);
+    return Boolean(editingControl) && metrics.keyboardInset >= threshold;
+  }
+
+  function updateEditingViewportState(metrics = readVisualViewportMetrics()) {
+    document.documentElement.toggleAttribute('data-input-active', Boolean(editingControl));
+    document.documentElement.toggleAttribute('data-keyboard-open', keyboardIsOpen(metrics));
+  }
+
+  function scrollImmediatelyTo(targetY) {
+    const lenis = window.tschoolLenis;
+
+    if (lenis && smoothScrollEnabled()) {
+      lenis.scrollTo(targetY, {
+        immediate: true,
+        force: true
+      });
+      return;
+    }
+
+    window.scrollTo({ top: targetY, behavior: 'auto' });
+  }
+
+  function ensureFocusedControlVisible() {
+    ensureControlFrame = 0;
+
+    if (!editingControl?.isConnected) {
+      return;
+    }
+
+    const controlStep = editingControl.closest('.journey-step');
+    const controlStepNumber = Number(controlStep?.dataset.step);
+
+    if (!controlStep || controlStepNumber > maxUnlockedStep) {
+      return;
+    }
+
+    const metrics = readVisualViewportMetrics();
+    updateEditingViewportState(metrics);
+    invalidateJourneyGeometry();
+    window.tschoolLenis?.resize?.();
+
+    const headerHeight = document.querySelector('.site-header')?.getBoundingClientRect().height || 0;
+    const visibilityMargin = 16;
+    const visibleTop = metrics.offsetTop + headerHeight + visibilityMargin;
+    const visibleBottom = metrics.offsetTop + metrics.height - visibilityMargin;
+
+    if (visibleBottom <= visibleTop) {
+      return;
+    }
+
+    let target = getFocusedVisibilityTarget(editingControl);
+    let targetRect = target.getBoundingClientRect();
+
+    if (targetRect.height > visibleBottom - visibleTop) {
+      target = editingControl;
+      targetRect = target.getBoundingClientRect();
+    }
+
+    let scrollDelta = 0;
+
+    if (targetRect.bottom > visibleBottom) {
+      scrollDelta = targetRect.bottom - visibleBottom;
+    } else if (targetRect.top < visibleTop) {
+      scrollDelta = targetRect.top - visibleTop;
+    }
+
+    if (Math.abs(scrollDelta) < 1) {
+      return;
+    }
+
+    const geometry = getJourneyGeometry();
+    const documentMaximum = Math.max(
+      0,
+      document.documentElement.scrollHeight - window.innerHeight
+    );
+    const targetY = clamp(window.scrollY + scrollDelta, 0, documentMaximum);
+
+    editingBoundaryY = Math.max(
+      geometry.maximumScrollY,
+      Number.isFinite(editingBoundaryY) ? editingBoundaryY : 0,
+      targetY
+    );
+    preserveActiveStepAfterLayout = true;
+    scrollImmediatelyTo(targetY);
+    requestUpdate({ preserveActiveStep: true });
+  }
+
+  function scheduleFocusedControlVisibility() {
+    if (ensureControlFrame) {
+      cancelAnimationFrame(ensureControlFrame);
+    }
+
+    ensureControlFrame = requestAnimationFrame(() => {
+      ensureControlFrame = requestAnimationFrame(ensureFocusedControlVisible);
+    });
+  }
+
+  function beginEditingControl(control) {
+    if (!control) {
+      return;
+    }
+
+    if (editingReleaseTimer) {
+      clearTimeout(editingReleaseTimer);
+      editingReleaseTimer = 0;
+    }
+
+    editingControl = control;
+    editingBoundaryY = getJourneyGeometry().maximumScrollY;
+    focusInputDirection = 0;
+    preserveActiveStepAfterLayout = true;
+    resetScrollMomentum();
+    updateEditingViewportState();
+    scheduleFocusedControlVisibility();
+  }
+
+  function finishEditingControl() {
+    editingControl = null;
+    editingBoundaryY = Number.NaN;
+    document.documentElement.removeAttribute('data-input-active');
+    document.documentElement.removeAttribute('data-keyboard-open');
+    invalidateJourneyGeometry();
+    window.tschoolLenis?.resize?.();
+    clampToCurrentBoundary({ immediate: true });
+    requestUpdate({ preserveActiveStep: true });
+  }
+
+  function scheduleEditingRelease() {
+    if (editingReleaseTimer) {
+      clearTimeout(editingReleaseTimer);
+    }
+
+    editingReleaseTimer = window.setTimeout(() => {
+      editingReleaseTimer = 0;
+      const nextControl = getEditableJourneyControl(document.activeElement);
+
+      if (nextControl) {
+        beginEditingControl(nextControl);
+        return;
+      }
+
+      finishEditingControl();
+    }, 120);
   }
 
   function resetScrollMomentum() {
@@ -2044,6 +2284,40 @@ function initStepJourney() {
     compositionActive = false;
   });
 
+  document.addEventListener('focusin', event => {
+    const control = getEditableJourneyControl(event.target);
+
+    if (control) {
+      beginEditingControl(control);
+    }
+  });
+
+  document.addEventListener('focusout', event => {
+    if (getEditableJourneyControl(event.target)) {
+      scheduleEditingRelease();
+    }
+  });
+
+  document.addEventListener('tschool:visual-viewport-change', event => {
+    if (!editingControl) {
+      return;
+    }
+
+    const keyboardWasOpen = document.documentElement.hasAttribute('data-keyboard-open');
+    updateEditingViewportState(event.detail);
+    invalidateJourneyGeometry();
+
+    if (
+      keyboardWasOpen &&
+      !document.documentElement.hasAttribute('data-keyboard-open')
+    ) {
+      editingBoundaryY = getJourneyGeometry().maximumScrollY;
+      clampToCurrentBoundary({ immediate: true });
+    }
+
+    scheduleFocusedControlVisibility();
+  });
+
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && elements.stageMenuTrigger?.getAttribute('aria-expanded') === 'true') {
       event.preventDefault();
@@ -2163,13 +2437,38 @@ function initStepJourney() {
   window.addEventListener('resize', () => {
     window.tschoolLenis?.resize?.();
     invalidateJourneyGeometry();
-    clampToCurrentBoundary({ immediate: true });
+
+    if (editingControl) {
+      scheduleFocusedControlVisibility();
+    } else {
+      clampToCurrentBoundary({ immediate: true });
+    }
+
     requestUpdate({ preserveActiveStep: true });
+  });
+  window.addEventListener('orientationchange', () => {
+    window.setTimeout(() => {
+      window.tschoolLenis?.resize?.();
+      invalidateJourneyGeometry();
+
+      if (editingControl) {
+        scheduleFocusedControlVisibility();
+      } else {
+        clampToCurrentBoundary({ immediate: true });
+      }
+
+      requestUpdate({ preserveActiveStep: true });
+    }, 120);
   });
 
   if ('ResizeObserver' in window) {
     const resizeObserver = new ResizeObserver(() => {
       invalidateJourneyGeometry();
+
+      if (editingControl) {
+        scheduleFocusedControlVisibility();
+      }
+
       requestUpdate({ preserveActiveStep: true });
     });
     resizeObserver.observe(document.body);

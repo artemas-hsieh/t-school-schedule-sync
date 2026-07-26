@@ -5799,3 +5799,106 @@ select,
     transition: none;
   }
 }
+
+/* Keyboard-aware journey controls and mobile touch resilience. */
+.step-card,
+.output-card {
+  max-width: 100%;
+}
+
+.wizard {
+  padding-left: max(var(--space-6), env(safe-area-inset-left));
+  padding-right: max(var(--space-6), env(safe-area-inset-right));
+}
+
+.site-footer-content {
+  padding-right: max(var(--space-20), calc(env(safe-area-inset-right) + var(--space-6)));
+  padding-bottom: max(var(--space-16), calc(env(safe-area-inset-bottom) + var(--space-8)));
+  padding-left: max(var(--space-20), calc(env(safe-area-inset-left) + var(--space-6)));
+}
+
+html[data-input-active] {
+  scroll-padding-top: calc(72px + var(--space-4));
+  scroll-padding-bottom: calc(var(--keyboard-inset, 0px) + var(--space-4));
+}
+
+html[data-keyboard-open] .journey-step.is-current .step-card {
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-8);
+}
+
+html[data-keyboard-open] .journey-step.is-current .step-heading {
+  margin-bottom: var(--space-4);
+}
+
+.toast {
+  right: max(var(--space-6), calc(env(safe-area-inset-right) + var(--space-4)));
+  bottom: max(
+    var(--space-6),
+    calc(env(safe-area-inset-bottom) + var(--space-4)),
+    calc(var(--keyboard-inset, 0px) + var(--space-4))
+  );
+}
+
+.filter-tabs {
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+.filter-tab {
+  scroll-snap-align: start;
+}
+
+@media (pointer: coarse), (max-width: 760px) {
+  .icon-button,
+  .summary-edit,
+  .site-footer-top {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .site-footer-top {
+    width: 44px;
+    height: 44px;
+  }
+
+  .code-window-bar button {
+    min-height: 44px;
+  }
+
+  .control-panel-card .sheet-template-link,
+  .control-panel-card .inline-code-button {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding-inline: var(--space-1);
+  }
+}
+
+@media (max-width: 760px) {
+  .wizard {
+    padding-left: max(var(--space-3), env(safe-area-inset-left));
+    padding-right: max(var(--space-3), env(safe-area-inset-right));
+  }
+
+  .site-footer-content {
+    padding-right: max(var(--space-6), calc(env(safe-area-inset-right) + var(--space-3)));
+    padding-bottom: max(var(--space-12), calc(env(safe-area-inset-bottom) + var(--space-6)));
+    padding-left: max(var(--space-6), calc(env(safe-area-inset-left) + var(--space-3)));
+  }
+
+  .notification-grid input,
+  .search-control input {
+    font-size: 16px;
+  }
+
+  html[data-input-active] {
+    scroll-padding-top: calc(56px + var(--space-4));
+  }
+
+  html[data-keyboard-open] .journey-step.is-current .step-card {
+    padding-top: var(--space-5);
+    padding-bottom: var(--space-5);
+  }
+}
