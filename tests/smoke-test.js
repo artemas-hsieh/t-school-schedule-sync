@@ -637,8 +637,18 @@ assert.equal(generatedCode.includes('const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;')
 assert.equal(generatedCode.includes("const TERM_TRANSITION_NOTICE_HANDLER = 'retryTermTransitionNotice';"), true);
 assert.equal(
   generatedCode.includes('.nearMinute(0)'),
-  false,
-  '每日觸發器不應固定擠在整點附近'
+  true,
+  '每日行程同步觸發器應在所選整點前後約 15 分鐘啟動'
+);
+assert.equal(
+  generatedCode.includes("function syncMyScheduleAtNotificationTime()"),
+  true,
+  '非最後通知時段應使用排程專用入口'
+);
+assert.equal(
+  generatedCode.includes("notificationWindow: true"),
+  true,
+  '排程入口應直接保留通知時段狀態，避免整點前觸發時被誤判'
 );
 assert.equal(generatedCode.includes("ui.createMenu('高負載測試')"), true);
 assert.equal(generatedCode.includes('function setupHighLoadTestEnvironment('), false);

@@ -1,5 +1,13 @@
-gitignore/
+# Operating-system metadata
 .DS_Store
 
-# Local reverse-engineering evidence
-1Campus/
+# Local source material and reverse-engineering evidence
+/archive/1Campus/
+/resources/
+
+# Generated code, previews, inspection output, and temporary workspaces
+/outputs/
+/sync-success-email-preview.html
+
+# This project is build-free and does not use npm dependencies
+/package-lock.json

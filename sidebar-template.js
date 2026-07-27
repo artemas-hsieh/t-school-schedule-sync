@@ -554,7 +554,7 @@
         <div class="field">
           <span>通知時間</span>
           <div class="notification-time-list" id="notify-hours-list" aria-label="通知時間"></div>
-          <p class="hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動</p>
+          <p class="hint">Google 約在所選時間前後 15 分鐘啟動同步，完成後寄出通知</p>
         </div>
       </section>
 

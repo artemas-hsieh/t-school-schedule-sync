@@ -1597,8 +1597,19 @@ function syncMyScheduleToCalendar() {
   return runSyncEntryPoint_({ reason: 'source' });
 }
 
+function syncMyScheduleAtNotificationTime() {
+  return runSyncEntryPoint_({
+    reason: 'source',
+    notificationWindow: true
+  });
+}
+
 function syncMyScheduleToCalendarWithNotification() {
-  return runSyncEntryPoint_({ reason: 'source', notifyOnSuccess: true });
+  return runSyncEntryPoint_({
+    reason: 'source',
+    notifyOnSuccess: true,
+    notificationWindow: true
+  });
 }
 
 function forceFullSyncMyScheduleToCalendar() {
@@ -4884,8 +4895,16 @@ function refreshAutoSyncTriggers_(settings) {
     return;
   }
   settings.autoSyncHours.forEach(hour => {
-    const handler = hour === settings.notifySyncHour ? 'syncMyScheduleToCalendarWithNotification' : 'syncMyScheduleToCalendar';
-    ScriptApp.newTrigger(handler).timeBased().atHour(hour).everyDays(1).inTimezone(TIMEZONE).create();
+    const handler = hour === settings.notifySyncHour
+      ? 'syncMyScheduleToCalendarWithNotification'
+      : 'syncMyScheduleAtNotificationTime';
+    ScriptApp.newTrigger(handler)
+      .timeBased()
+      .atHour(hour)
+      .nearMinute(0)
+      .everyDays(1)
+      .inTimezone(TIMEZONE)
+      .create();
   });
   if (getConfiguredCourseOutlineSourceSets_(settings.gradeName).length) {
     const outlineHour = getCourseOutlineDailyRefreshHour_(settings);
@@ -4909,6 +4928,7 @@ function getCourseOutlineDailyRefreshHour_(settings) {
 function deleteDailySyncTriggers_() {
   deleteTriggersByHandlers_([
     'syncMyScheduleToCalendar',
+    'syncMyScheduleAtNotificationTime',
     'syncMyScheduleToCalendarWithNotification',
     COURSE_OUTLINE_DAILY_HANDLER
   ]);
