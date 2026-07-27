@@ -22,25 +22,133 @@ const emailTemplateManifestText = fs.readFileSync(
 );
 const emailTemplateManifest = JSON.parse(emailTemplateManifestText);
 const sidebarIds = Array.from(sidebarHtml.matchAll(/\sid="([^"]+)"/g), match => match[1]);
+const sidebarIdSet = new Set(sidebarIds);
+const sidebarByIdReferences = Array.from(
+  new Set(
+    Array.from(
+      sidebarHtml.matchAll(/byId\((?:'([^']+)'|"([^"]+)")\)/g),
+      match => match[1] || match[2]
+    )
+  )
+);
 
-assert.equal(new Set(sidebarIds).size, sidebarIds.length, 'Google Sheet 控制臺不應出現重複 id');
+assert.equal(sidebarIdSet.size, sidebarIds.length, 'Google Sheet 控制臺不應出現重複 id');
+assert.deepEqual(
+  sidebarByIdReferences.filter(id => !sidebarIdSet.has(id)),
+  [],
+  '控制臺腳本引用的固定 id 都必須存在於側欄標記中'
+);
 assert.equal(sidebarHtml.includes('--primary-container'), false);
 assert.equal(sidebarHtml.includes('T-SCHOOL · Control'), false);
 assert.equal(sidebarHtml.includes('id="notification-preview"'), false);
 assert.equal(sidebarHtml.includes('id="notification-preset"'), false);
 assert.equal(sidebarHtml.includes('id="custom-notification"'), false);
-assert.equal(sidebarHtml.includes('id="description-preview"'), true);
-const descriptionPresetMarkup = sidebarHtml.match(/<select id="description-preset">[\s\S]*?<\/select>/);
-assert.equal(Boolean(descriptionPresetMarkup), true);
-assert.equal(
-  descriptionPresetMarkup[0],
-  '<select id="description-preset"><option value="standard">標準</option><option value="custom">進階自訂</option></select>'
-);
-assert.equal(sidebarHtml.includes('**# 單元主題**'), true);
+assert.equal(sidebarHtml.includes('id="description-preview"'), false);
+assert.equal(sidebarHtml.includes('id="description-preset"'), false);
+assert.equal(sidebarHtml.includes('id="custom-description"'), false);
+assert.equal(sidebarHtml.includes('<span>說明格式</span>'), false);
 assert.equal(sidebarHtml.includes('id="hours"'), false, '控制臺不應顯示與實際設定不一致的固定同步時段');
 assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
 assert.equal(sidebarHtml.includes('function pollSyncProgress()'), true);
+assert.equal(sidebarHtml.includes('id="sync-progress-warning"'), true);
+assert.equal(sidebarHtml.includes('請勿現在關閉側欄！'), true);
+assert.equal(sidebarHtml.includes('overscroll-behavior-y: auto'), true);
+assert.equal(sidebarHtml.includes('overscroll-behavior: contain'), false);
+assert.equal(sidebarHtml.includes('id="course-list-shell"'), true);
+assert.equal(sidebarHtml.includes('--course-scroll-shadow-size: var(--space-7)'), true);
+assert.equal(sidebarHtml.includes('data-can-scroll-up="true"]::before'), true);
+assert.equal(sidebarHtml.includes('data-can-scroll-down="true"]::after'), true);
+assert.equal(sidebarHtml.includes('function updateCourseScrollShadows()'), true);
+assert.equal(
+  sidebarHtml.includes(
+    "byId('course-list').addEventListener('scroll', updateCourseScrollShadows, { passive: true })"
+  ),
+  true
+);
+assert.equal(sidebarHtml.includes('id="source-updated"'), false);
+assert.equal(sidebarHtml.includes('id="app-version"'), false);
+assert.equal(sidebarHtml.includes('class="sync-estimate"'), false);
+const sidebarSectionRule = sidebarHtml.match(/\.section \{([\s\S]*?)\}/);
+assert.equal(Boolean(sidebarSectionRule), true);
+assert.equal(sidebarSectionRule[1].includes('border'), false);
+assert.equal(sidebarHtml.includes('<h2>來源</h2>'), false);
+assert.equal(sidebarHtml.includes('--section-gap: var(--space-7)'), true);
+assert.equal(sidebarHtml.includes('--section-content-gap: var(--space-4)'), true);
+assert.equal(
+  sidebarHtml.includes('margin-bottom: var(--section-content-gap)'),
+  true
+);
+assert.equal(
+  sidebarHtml.includes('.section-head + .calendar-picker > .field:first-child { margin-top: 0; }'),
+  true
+);
+assert.equal(sidebarHtml.includes('--chrome-line: #B7C6BF'), true);
+assert.equal(sidebarHtml.includes('border-bottom: 1px solid var(--chrome-line)'), true);
+assert.equal(sidebarHtml.includes('border-top: 1px solid var(--chrome-line)'), true);
+assert.equal(sidebarHtml.includes('<h2>通知</h2>'), true);
+assert.equal(sidebarHtml.includes('<h2>設定通知偏好</h2>'), false);
+assert.equal(sidebarHtml.includes('可設定 1–4 個時間'), false);
+assert.equal(sidebarHtml.includes('<h2>事件呈現</h2>'), false);
+assert.equal(sidebarHtml.includes('可隨時調整'), false);
+assert.equal(sidebarHtml.includes('<h2>通知與自動同步</h2>'), false);
+assert.equal(sidebarHtml.includes('id="sync-menu-toggle"'), true);
+assert.equal(sidebarHtml.includes('id="run-sync" role="menuitem"'), true);
+assert.equal(sidebarHtml.includes('id="repair-sync" role="menuitem"'), true);
+assert.equal(
+  sidebarHtml.includes("setSyncMenuOpen(byId('sync-menu').hidden, true)"),
+  true,
+  '同步選單開啟後應將焦點移入第一個選單項目'
+);
+const syncStatusHeadingIndex = sidebarHtml.indexOf('<h2>同步狀態</h2>');
+const calendarHeadingIndex = sidebarHtml.indexOf('<h2>日曆</h2>');
+const autoSyncIndex = sidebarHtml.indexOf('id="auto-sync"');
+const gradeHeadingIndex = sidebarHtml.indexOf('<h2>年級</h2>');
+const sourceHealthIndex = sidebarHtml.indexOf('id="source-health"');
+assert.equal(syncStatusHeadingIndex < autoSyncIndex, true);
+assert.equal(autoSyncIndex < calendarHeadingIndex, true);
+assert.equal(calendarHeadingIndex < gradeHeadingIndex, true);
+assert.equal(gradeHeadingIndex < sourceHealthIndex, true);
+assert.equal(
+  sidebarHtml.includes('class="sync-stat-grid" aria-label="上次同步事件統計"'),
+  true
+);
+assert.equal((sidebarHtml.match(/class="sync-stat"/g) || []).length, 4);
+['sync-created', 'sync-updated', 'sync-deleted', 'sync-unchanged'].forEach(id => {
+  assert.equal(sidebarHtml.includes(`id="${id}"`), true);
+});
+assert.equal(
+  sidebarHtml.includes(
+    "(Number(status && status.updated) || 0) + (Number(status && status.outlineUpdated) || 0)"
+  ),
+  true
+);
+assert.equal(sidebarHtml.includes('id="status-message" role="alert" hidden'), true);
+assert.equal(sidebarHtml.includes('class="grade-options" role="radiogroup" aria-label="選年級"'), true);
+assert.equal(sidebarHtml.includes('<span>同步目標日曆</span>'), true);
+assert.equal(sidebarHtml.includes('<span>同步目標</span>'), false);
+assert.equal(sidebarHtml.includes('<span>活動提醒</span>'), true);
+assert.equal(
+  sidebarHtml.indexOf('<span>活動提醒</span>') > calendarHeadingIndex &&
+    sidebarHtml.indexOf('<span>活動提醒</span>') < gradeHeadingIndex,
+  true
+);
+assert.match(
+  sidebarHtml,
+  /\.switch-track \{[^}]*border-radius: var\(--radius-control\);/
+);
+assert.match(
+  sidebarHtml,
+  /\.switch-track::after \{[^}]*border-radius: var\(--radius-control\);/
+);
+assert.equal(
+  sidebarHtml.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'),
+  true
+);
+assert.equal((sidebarHtml.match(/class="choice grade-choice"/g) || []).length, 3);
+assert.equal(sidebarHtml.includes('關閉後仍可用底部按鈕手動同步'), true);
+assert.equal(sidebarHtml.includes('關閉後仍可從下方選單手動同步'), false);
+assert.equal(sidebarHtml.includes('content: "✓"'), false);
 assert.equal(sidebarHtml.includes('id="term-transition" role="alert"'), true);
 assert.equal(sidebarHtml.includes('id="term-transition-action"'), true);
 assert.equal(sidebarHtml.includes('function updateActionAvailability()'), true);
@@ -48,12 +156,32 @@ assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
 assert.equal(sidebarHtml.includes('<p class="eyebrow">T-SCHOOL Schedule Sync</p>'), true);
 assert.equal(sidebarHtml.includes('<p class="eyebrow">T-SCHOOL 行程同步</p>'), false);
-assert.equal(sidebarHtml.includes('<h2>選課程和活動</h2>'), true);
+assert.equal(sidebarHtml.includes('grid-template-areas:'), true);
+assert.equal(
+  sidebarHtml.includes('data-state="attention" role="status" aria-live="polite">待首次同步</p>'),
+  true
+);
+['待首次同步', '需檢查狀態', '待重新選課', '同步正常'].forEach(statusLabel => {
+  assert.equal(sidebarHtml.includes(statusLabel), true);
+});
+assert.equal(sidebarHtml.includes('同步功能正常'), false);
+assert.equal(sidebarHtml.includes('需要檢查同步狀態'), false);
+assert.equal(sidebarHtml.includes('尚未完成第一次同步'), false);
+assert.equal(sidebarHtml.includes('<h2>課程與活動</h2>'), true);
+['<h2>設定日曆</h2>', '<h2>選年級</h2>', '<h2>選課程和活動</h2>'].forEach(
+  obsoleteHeading => {
+    assert.equal(sidebarHtml.includes(obsoleteHeading), false);
+  }
+);
 assert.equal(sidebarHtml.includes('輸入課名、活動名、班別等'), true);
 assert.equal(sidebarHtml.includes('學期間課程'), true);
 assert.equal(sidebarHtml.includes('學期間活動'), true);
 assert.equal(sidebarHtml.includes('寒暑假期間課程 / 活動'), true);
 assert.equal(sidebarHtml.includes('<span>收通知的 Email</span>'), true);
+assert.equal(
+  sidebarHtml.includes('<small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small>'),
+  true
+);
 assert.equal(sidebarHtml.includes('<span>通知 Email</span>'), false);
 assert.equal(sidebarHtml.includes('id="notify-hours-list"'), true);
 assert.equal(sidebarHtml.includes('data-add-notify-hour'), true);
@@ -77,6 +205,16 @@ assert.match(
   configuratorHtml,
   /<link id="app-stylesheet" rel="stylesheet" href="styles\.css\?v=[^"]+">/,
   '主要樣式必須在 head 中以可阻塞首次繪製的固定網址載入'
+);
+assert.match(
+  configuratorStylesSource,
+  /html \{[\s\S]*?scrollbar-width: none;/,
+  '根頁面應隱藏 Firefox 捲動條，但不得停用頁面捲動'
+);
+assert.match(
+  configuratorStylesSource,
+  /html::\-webkit-scrollbar,\s*body::\-webkit-scrollbar \{\s*display: none;/,
+  '根頁面應隱藏 Chromium 與 Safari 捲動條'
 );
 assert.doesNotMatch(
   configuratorHtml,
@@ -210,6 +348,23 @@ assert.match(
   /\.journey-step\.is-preview[\s\S]*?> \.progressive-blur[\s\S]*?> \.progressive-blur-layer \{[\s\S]*?will-change: backdrop-filter;/,
   '可見預覽的 backdrop-filter 圖層應維持合成，避免表單重繪時單幀閃爍'
 );
+assert.match(
+  configuratorStylesSource,
+  /#step-5 \{[\s\S]*?--preview-fog-start-opacity: 0\.002;[\s\S]*?--preview-fog-end-opacity: 0\.07;[\s\S]*?--preview-fog-layer-opacity: 0\.006;[\s\S]*?--section-reveal-start-opacity: 1;[\s\S]*?\}/,
+  '第五張深色卡片應能獨立降低預覽霧層濃度並提高進場起始不透明度'
+);
+assert.equal(
+  configuratorStylesSource.includes(
+    'rgba(var(--connector-fog-rgb), var(--preview-fog-layer-opacity))'
+  ),
+  true,
+  '預覽模糊層底色濃度應由 token 控制，不得改寫 blur 半徑'
+);
+assert.match(
+  configuratorStylesSource,
+  /--fog-blur-1: 2px;[\s\S]*?--fog-blur-2: 6px;[\s\S]*?--fog-blur-3: 14px;[\s\S]*?--fog-blur-4: 28px;[\s\S]*?--fog-blur-5: 48px;/,
+  '第五張卡片的透明度調整不得改變共用模糊半徑'
+);
 assert.equal(
   configuratorAppSource.includes('const ENABLE_SMOOTH_SCROLL = true;'),
   true,
@@ -269,6 +424,30 @@ assert.equal(
   configuratorAppSource.includes('duration: MOTION_CONFIG.boundarySettleDuration'),
   false,
   '卡片與文件邊界不得恢復時間制收斂'
+);
+assert.equal(
+  configuratorAppSource.includes('initialBoundaryMinLerp: 0.12'),
+  true,
+  'Hero 至第一個鎖定邊界的長距離收斂應使用較柔和的最低 lerp'
+);
+assert.equal(
+  configuratorAppSource.includes('initialBoundaryBlendDistanceRatio: 0.55'),
+  true,
+  '第一個鎖定邊界應依畫面與目標的距離平滑混合收斂速度'
+);
+assert.equal(
+  configuratorAppSource.includes('function getBoundarySettleLerp(maximumScrollY)'),
+  true,
+  '邊界收斂應集中由距離感知函式決定'
+);
+assert.equal(
+  (
+    configuratorAppSource.match(
+      /lerp: getBoundarySettleLerp\(maximumScrollY\)/g
+    ) || []
+  ).length,
+  2,
+  '虛擬捲動與幾何校正都應使用同一套邊界收斂規則'
 );
 assert.equal(
   configuratorAppSource.includes(
@@ -369,6 +548,33 @@ const generatedCode = global.buildAppsScriptCode({
 });
 
 assert.doesNotThrow(() => new Function(generatedCode));
+[
+  'getSettingsUiData',
+  'getSourceCatalogForUi',
+  'getSyncProgressForUi',
+  'previewSettingsImpactFromUi',
+  'prepareFirstSyncCourseOutlinesFromUi',
+  'saveSettingsFromUi',
+  'saveSettingsAndSyncFromUi',
+  'runSyncFromUi',
+  'forceRepairFromUi',
+  'createDedicatedCalendarForUi',
+  'confirmPendingTitleFromUi',
+  'rejectPendingTitleFromUi'
+].forEach(handler => {
+  assert.equal(
+    generatedCode.includes(`function ${handler}(`),
+    true,
+    `控制臺呼叫的 Apps Script handler ${handler} 必須存在`
+  );
+});
+['同步狀態', '日曆', '年級', '課程與活動', '通知'].forEach(heading => {
+  assert.equal(
+    generatedCode.includes(`<h2>${heading}</h2>`),
+    true,
+    `產生的 Code.gs 應嵌入控制臺區段「${heading}」`
+  );
+});
 assert.equal(generatedCode.includes('COURSE_DICTIONARY'), false);
 assert.equal(generatedCode.includes('function previewSettingsImpactFromUi('), true);
 assert.equal(generatedCode.includes('function showSettingsSidebar('), true);
@@ -2198,6 +2404,38 @@ assert.equal(
   legacyDescriptionPresetSanitized.descriptionPreset,
   'standard',
   '舊的簡潔或詳細說明格式必須遷移為標準'
+);
+const settingsWithoutDescriptionControls = Object.assign({}, migrationSanitized, {
+  calendarId: ''
+});
+delete settingsWithoutDescriptionControls.descriptionPreset;
+delete settingsWithoutDescriptionControls.customDescription;
+const preservedCustomDescription = context.sanitizeSettingsInput_(
+  settingsWithoutDescriptionControls,
+  Object.assign({}, migrationSanitized, {
+    calendarId: '',
+    calendarMigrationFromId: '',
+    descriptionPreset: 'custom',
+    customDescription: '**既有自訂說明**'
+  }),
+  {
+    termKey: '二年級|2026-02-23',
+    fingerprint: 'source',
+    catalog: {
+      all: [{ title: '測試課程', type: 'course' }],
+      activities: []
+    }
+  }
+);
+assert.equal(
+  preservedCustomDescription.descriptionPreset,
+  'custom',
+  '側欄未送出說明格式欄位時應保留既有進階自訂設定'
+);
+assert.equal(
+  preservedCustomDescription.customDescription,
+  '**既有自訂說明**',
+  '側欄儲存其他設定時不得改寫既有自訂說明模板'
 );
 
 const newTermSource = {

@@ -64,13 +64,15 @@ const MOTION_CONFIG = Object.freeze({
   scrollTouchInertiaExponent: 1.7,
   boundarySettleLerp: 0.18,
   boundarySnapDistance: 1.5,
+  initialBoundaryMinLerp: 0.12,
+  initialBoundaryBlendDistanceRatio: 0.55,
   inputViewportSettleDelay: 120,
   focusLineRatio: 0.5,
   focusSwitchHysteresisForward: 48,
   focusSwitchHysteresisBackward: 96,
   generatedCodeTransitionDelay: 48,
-  homeEntryScrollDuration: 0.9,
-  footerReturnScrollDuration: 1.8,
+  homeEntryScrollDuration: 1.6,
+  footerReturnScrollDuration: 3.25,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
   heroDesktopPaperTravelRatio: 0.06,
@@ -2143,6 +2145,33 @@ function initStepJourney() {
     lenis.scrollTo(lenis.animatedScroll, { immediate: true, force: true });
   }
 
+  function getBoundarySettleLerp(maximumScrollY) {
+    const lenis = window.tschoolLenis;
+
+    if (
+      maxUnlockedStep !== 1 ||
+      !lenis ||
+      !Number.isFinite(lenis.animatedScroll)
+    ) {
+      return MOTION_CONFIG.boundarySettleLerp;
+    }
+
+    // A trackpad fling from Hero can put Lenis' target near the first locked
+    // boundary while the rendered page is still much farther behind. Blend to
+    // a gentler lerp for that long final approach, then retain the established
+    // boundary response for slow approaches and every later step.
+    const visualDistance = Math.max(0, maximumScrollY - lenis.animatedScroll);
+    const blendDistance = Math.max(
+      1,
+      window.innerHeight * MOTION_CONFIG.initialBoundaryBlendDistanceRatio
+    );
+    const longApproachWeight = clamp(visualDistance / blendDistance, 0, 1);
+
+    return MOTION_CONFIG.boundarySettleLerp +
+      (MOTION_CONFIG.initialBoundaryMinLerp - MOTION_CONFIG.boundarySettleLerp) *
+        longApproachWeight;
+  }
+
   function clampToCurrentBoundary(options = {}, maximumScrollY = getMaximumScrollY()) {
     const lenis = window.tschoolLenis;
 
@@ -2154,7 +2183,7 @@ function initStepJourney() {
 
       lenis.scrollTo(maximumScrollY, {
         immediate: options.immediate === true,
-        lerp: MOTION_CONFIG.boundarySettleLerp,
+        lerp: getBoundarySettleLerp(maximumScrollY),
         programmatic: false,
         force: true
       });
@@ -2205,7 +2234,7 @@ function initStepJourney() {
     function settleAtBoundary() {
       if (event?.cancelable) event.preventDefault();
       lenis.scrollTo(maximumScrollY, {
-        lerp: MOTION_CONFIG.boundarySettleLerp,
+        lerp: getBoundarySettleLerp(maximumScrollY),
         programmatic: false,
         force: true
       });

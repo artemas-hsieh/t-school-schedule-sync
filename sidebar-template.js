@@ -27,6 +27,12 @@
       --space-4: 16px;
       --space-5: 20px;
       --space-6: 24px;
+      --space-7: 32px;
+      --section-gap: var(--space-7);
+      --section-content-gap: var(--space-4);
+      --chrome-line: #B7C6BF;
+      --course-scroll-shadow-size: var(--space-7);
+      --course-scroll-shadow-color: rgba(20, 33, 29, .26);
       --radius-control: 3px;
       --radius-panel: 4px;
       --ease-out: cubic-bezier(.16, 1, .3, 1);
@@ -43,8 +49,8 @@
       font-size: 13px;
       line-height: 20px;
     }
-    button, input, select, textarea { font: inherit; }
-    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    button, input, select { font: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible {
       outline: 2px solid var(--sync);
       outline-offset: 2px;
     }
@@ -66,30 +72,46 @@
       position: sticky;
       top: 0;
       z-index: 20;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) max-content;
+      grid-template-areas:
+        "eyebrow eyebrow"
+        "title status";
+      column-gap: var(--space-3);
+      row-gap: var(--space-2);
       padding: var(--space-4);
-      border-bottom: 1px solid var(--ink);
+      border-bottom: 1px solid var(--chrome-line);
       background: rgba(244, 247, 242, .96);
       backdrop-filter: blur(12px);
     }
     .eyebrow {
-      margin: 0 0 var(--space-1);
+      grid-area: eyebrow;
+      margin: 0;
       color: var(--ink);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 10px;
       font-weight: 850;
       line-height: 16px;
     }
-    h1 { margin: 0; font-size: 21px; font-weight: 850; line-height: 28px; }
+    h1 { grid-area: title; margin: 0; font-size: 21px; font-weight: 850; line-height: 28px; }
     .top-status {
-      margin: var(--space-2) 0 0;
-      padding-top: var(--space-2);
-      border-top: 1px solid var(--line);
-      color: var(--ink-soft);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      grid-area: status;
+      align-self: center;
+      margin: 0;
+      padding: 6px var(--space-2);
+      border: 1px solid var(--shift);
+      background: var(--error-surface);
+      color: var(--shift);
       font-size: 11px;
+      font-weight: 850;
       line-height: 16px;
+      white-space: nowrap;
     }
-    .top-status[data-state="warning"] { color: var(--warning); font-weight: 850; }
+    .top-status[data-state="success"] {
+      border-color: var(--sync-dark);
+      background: var(--surface-green);
+      color: var(--sync-dark);
+    }
 
     .term-transition {
       display: grid;
@@ -126,11 +148,11 @@
 
     .content { display: grid; padding: 0 var(--space-3) var(--space-6); }
     .section {
-      padding: var(--space-5) var(--space-1);
-      border-bottom: 1px solid var(--line);
+      padding: var(--section-gap) var(--space-1) 0;
       background: transparent;
     }
-    .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-4); }
+    .section:last-child { padding-bottom: var(--space-6); }
+    .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--section-content-gap); }
     .section-head h2 { margin: 0; font-size: 15px; font-weight: 850; line-height: 20px; }
     .section-head span { color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 16px; text-align: right; }
 
@@ -150,27 +172,16 @@
     .source-health strong { font-size: 13px; }
     .source-health span { margin-top: var(--space-1); color: var(--ink-soft); font-size: 11px; line-height: 16px; }
 
-    .segmented { display: grid; grid-template-columns: repeat(3, 1fr); }
-    .segmented label { position: relative; }
-    .segmented input, .choice input, .hour input, .switch input { position: absolute; opacity: 0; pointer-events: none; }
-    .segmented span {
-      display: grid;
-      min-height: 44px;
-      place-items: center;
-      border: 1px solid var(--line-dark);
-      border-left: 0;
-      font-size: 12px;
-      font-weight: 800;
-      cursor: pointer;
-      transition: background 150ms var(--ease-out), color 150ms var(--ease-out);
-    }
-    .segmented label:first-child span { border-left: 1px solid var(--line-dark); border-radius: var(--radius-control) 0 0 var(--radius-control); }
-    .segmented label:last-child span { border-radius: 0 var(--radius-control) var(--radius-control) 0; }
-    .segmented input:checked + span { background: var(--ink); color: var(--paper-bright); }
+    .grade-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+    .grade-choice > span { justify-content: center; }
+    .grade-source-health { margin-top: var(--space-4); }
+    .choice input, .hour input, .switch input { position: absolute; opacity: 0; pointer-events: none; }
 
     .field { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+    .section-head + .field,
+    .section-head + .calendar-picker > .field:first-child { margin-top: 0; }
     .field > span { color: var(--ink-soft); font-size: 11px; font-weight: 800; line-height: 16px; }
-    input[type="text"], input[type="email"], input[type="search"], select, textarea {
+    input[type="text"], input[type="email"], input[type="search"], select {
       width: 100%;
       min-height: 44px;
       padding: 10px var(--space-3);
@@ -179,14 +190,12 @@
       background: var(--paper-bright);
       color: var(--ink);
     }
-    textarea { min-height: 112px; resize: vertical; }
-    input:focus, select:focus, textarea:focus { border-color: var(--sync); box-shadow: inset 3px 0 0 var(--sync); outline: 0; }
-    .hint { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 16px; }
-    .format-preview { display: block; min-height: 56px; padding: var(--space-3); border-left: 3px solid var(--sync); background: var(--surface-green); color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 16px; white-space: pre-line; }
+    input:focus, select:focus { border-color: var(--sync); box-shadow: inset 3px 0 0 var(--sync); outline: 0; }
+    .hint { margin: 0; color: var(--ink-soft); font-size: 10px; font-weight: 400; line-height: 16px; }
 
     .switch { position: relative; display: grid; grid-template-columns: 44px 1fr; gap: var(--space-3); align-items: center; margin-top: var(--space-4); cursor: pointer; }
-    .switch-track { position: relative; width: 44px; height: 24px; border: 1px solid var(--line-dark); border-radius: 99px; background: var(--paper-bright); }
-    .switch-track::after { content: ""; position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; border-radius: 50%; background: var(--line-dark); transition: transform 180ms var(--ease-out), background 180ms var(--ease-out); }
+    .switch-track { position: relative; width: 44px; height: 24px; border: 1px solid var(--line-dark); border-radius: var(--radius-control); background: var(--paper-bright); }
+    .switch-track::after { content: ""; position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; border-radius: var(--radius-control); background: var(--line-dark); transition: transform 180ms var(--ease-out), background 180ms var(--ease-out); }
     .switch input:checked + .switch-track { border-color: var(--sync-dark); background: var(--sync); }
     .switch input:checked + .switch-track::after { background: var(--paper-bright); transform: translateX(20px); }
     .switch-copy strong, .switch-copy span { display: block; }
@@ -217,7 +226,37 @@
     }
     .small-button { padding: 0 var(--space-3); }
     .icon-button { width: 44px; padding: 0; font-size: 18px; }
-    .course-list { display: grid; gap: var(--space-4); max-height: 360px; margin-top: var(--space-3); padding-right: var(--space-1); overflow-y: auto; overscroll-behavior: contain; }
+    .course-list-shell {
+      position: relative;
+      margin-top: var(--space-3);
+      border-radius: var(--radius-control);
+    }
+    .course-list-shell::before,
+    .course-list-shell::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      left: 0;
+      z-index: 2;
+      height: var(--course-scroll-shadow-size);
+      border-radius: var(--radius-control);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms var(--ease-out);
+    }
+    .course-list-shell::before {
+      top: 0;
+      background: linear-gradient(to bottom, var(--course-scroll-shadow-color), transparent);
+      border-radius: var(--radius-control) var(--radius-control) 0 0;
+    }
+    .course-list-shell::after {
+      bottom: 0;
+      background: linear-gradient(to top, var(--course-scroll-shadow-color), transparent);
+      border-radius: 0 0 var(--radius-control) var(--radius-control);
+    }
+    .course-list-shell[data-can-scroll-up="true"]::before,
+    .course-list-shell[data-can-scroll-down="true"]::after { opacity: 1; }
+    .course-list { display: grid; gap: var(--space-4); max-height: 360px; padding-right: var(--space-1); overflow-y: auto; overscroll-behavior-y: auto; }
     .course-group { display: grid; gap: var(--space-2); }
     .course-group h3 {
       margin: 0;
@@ -231,7 +270,7 @@
     .choice > span {
       display: flex;
       min-height: 48px;
-      padding: var(--space-2) 36px var(--space-2) var(--space-3);
+      padding: var(--space-2) var(--space-3);
       align-items: center;
       border: 1px solid var(--line);
       border-radius: var(--radius-control);
@@ -241,7 +280,7 @@
     }
     .choice > span:hover { border-color: var(--ink); transform: translateY(-1px); }
     .choice input:checked + span { border-color: var(--ink); background: var(--surface-green); box-shadow: 3px 3px 0 var(--ink); transform: translate(-1px, -1px); }
-    .choice input:checked + span::after { content: "✓"; position: absolute; top: 50%; right: var(--space-3); color: var(--sync-dark); font-size: 13px; font-weight: 900; transform: translateY(-50%); }
+    .choice input:focus-visible + span { outline: 2px solid var(--sync); outline-offset: 2px; }
     .choice-copy { display: grid; }
     .choice-copy strong { font-size: 12px; line-height: 16px; }
     .choice input:disabled + span { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
@@ -275,6 +314,33 @@
     .metric span, .metric strong { display: block; }
     .metric span { color: var(--ink-soft); font-size: 10px; line-height: 16px; }
     .metric strong { margin-top: var(--space-1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+    .sync-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: var(--space-3);
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+      background: var(--paper-bright);
+    }
+    .sync-stat {
+      display: grid;
+      min-width: 0;
+      padding: var(--space-3) var(--space-1);
+      place-content: center;
+      text-align: center;
+    }
+    .sync-stat + .sync-stat { border-left: 1px solid var(--line); }
+    .sync-stat span, .sync-stat strong { display: block; }
+    .sync-stat span { color: var(--ink-soft); font-size: 10px; line-height: 16px; }
+    .sync-stat strong {
+      margin-top: var(--space-1);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 20px;
+      font-weight: 850;
+      line-height: 24px;
+      overflow-wrap: anywhere;
+    }
     .message { margin: var(--space-3) 0 0; padding: var(--space-3); border-left: 3px solid var(--sync); background: var(--surface-green); color: var(--ink-soft); font-size: 11px; line-height: 16px; }
     .message.error { border-color: var(--error); background: var(--error-surface); color: var(--error); }
 
@@ -290,28 +356,6 @@
       color: var(--ink-soft);
     }
 
-    .secondary-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3); }
-    .secondary-actions button { min-height: 40px; padding: 0 var(--space-2); border: 1px solid var(--ink); border-radius: var(--radius-control); background: var(--paper-bright); color: var(--ink); cursor: pointer; font-size: 11px; font-weight: 800; }
-    .secondary-actions button {
-      transition: background 150ms var(--ease-out), box-shadow 150ms var(--ease-out), transform 150ms var(--ease-out);
-    }
-    .secondary-actions button:hover {
-      border-color: var(--sync-dark);
-      background: var(--surface-green);
-      box-shadow: 3px 3px 0 rgba(0, 127, 91, .28);
-      transform: translate(-1px, -1px);
-    }
-    .secondary-actions button:active {
-      box-shadow: none;
-      transform: translate(1px, 1px);
-    }
-    .sync-estimate {
-      margin: var(--space-3) 0 0;
-      color: var(--ink-soft);
-      font-size: 10px;
-      line-height: 16px;
-    }
-
     .footer {
       position: fixed;
       right: 0;
@@ -322,15 +366,62 @@
       grid-template-columns: auto 1fr;
       gap: var(--space-2);
       padding: var(--space-3);
-      border-top: 1px solid var(--ink);
+      border-top: 1px solid var(--chrome-line);
       background: rgba(244, 247, 242, .97);
       backdrop-filter: blur(12px);
     }
-    .footer button { min-height: 48px; border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 12px; font-weight: 850; transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
-    .footer button:hover { box-shadow: 3px 3px 0 rgba(20, 33, 29, .22); transform: translate(-1px, -1px); }
-    .footer button:active { box-shadow: none; transform: translate(1px, 1px); }
+    .footer > button, .sync-primary, .sync-menu-toggle { min-height: 48px; border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 12px; font-weight: 850; transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+    .footer > button:hover, .sync-primary:hover, .sync-menu-toggle:hover { box-shadow: 3px 3px 0 rgba(20, 33, 29, .22); transform: translate(-1px, -1px); }
+    .footer > button:active, .sync-primary:active, .sync-menu-toggle:active { box-shadow: none; transform: translate(1px, 1px); }
     .save { padding: 0 var(--space-4); background: var(--paper-bright); color: var(--ink); }
-    .sync { padding: 0 var(--space-4); background: var(--sync); color: var(--paper-bright); }
+    .sync-actions { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 48px; }
+    .sync-primary, .sync-menu-toggle { border-radius: 0; background: var(--sync); color: var(--paper-bright); }
+    .sync-primary { padding: 0 var(--space-3); border-radius: var(--radius-control) 0 0 var(--radius-control); }
+    .sync-menu-toggle {
+      display: grid;
+      width: 48px;
+      padding: 0;
+      place-items: center;
+      border-left: 0;
+      border-radius: 0 var(--radius-control) var(--radius-control) 0;
+    }
+    .sync-menu-toggle::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-right: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+      transform: translateY(-2px) rotate(45deg);
+      transition: transform 150ms var(--ease-out);
+    }
+    .sync-menu-toggle[aria-expanded="true"]::before { transform: translateY(2px) rotate(225deg); }
+    .sync-menu {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + var(--space-2));
+      z-index: 30;
+      display: grid;
+      width: min(220px, calc(100vw - 24px));
+      padding: var(--space-1);
+      border: 1px solid var(--ink);
+      border-radius: var(--radius-panel);
+      background: var(--paper-bright);
+      box-shadow: 4px 4px 0 rgba(20, 33, 29, .18);
+    }
+    .sync-menu button {
+      min-height: 44px;
+      padding: 0 var(--space-3);
+      border: 0;
+      border-radius: var(--radius-control);
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 800;
+      text-align: left;
+    }
+    .sync-menu button:hover, .sync-menu button:focus-visible { background: var(--surface-green); }
+    .sync-menu button + button { border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-control) var(--radius-control); }
     button:disabled { opacity: .48; cursor: wait; }
     button[data-validation-disabled="true"]:disabled { cursor: not-allowed; }
 
@@ -343,6 +434,7 @@
     .sync-progress-track { height: var(--space-2); overflow: hidden; border: 1px solid var(--line-dark); background: var(--paper-bright); }
     .sync-progress-track span { display: block; width: 0; height: 100%; background: var(--sync); transition: width 280ms var(--ease-out); }
     .sync-progress-detail { color: var(--ink-soft); font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif; font-size: 10px; line-height: 16px; text-align: left; }
+    .sync-progress-warning { margin: 0; color: var(--warning); font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif; font-size: 11px; font-weight: 850; line-height: 16px; text-align: left; }
     .toast { position: fixed; right: var(--space-3); bottom: 76px; left: var(--space-3); z-index: 60; padding: var(--space-3); border: 1px solid var(--paper-bright); border-radius: var(--radius-control); background: var(--ink); color: var(--paper-bright); font-size: 11px; line-height: 16px; opacity: 0; pointer-events: none; transform: translateY(var(--space-2)); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
     .toast.show { opacity: 1; transform: translateY(0); }
     .app.is-ready .section { animation: section-in 360ms var(--ease-out) both; }
@@ -351,15 +443,13 @@
     .app.is-ready .section:nth-child(4) { animation-delay: 105ms; }
     .app.is-ready .section:nth-child(5) { animation-delay: 140ms; }
     .app.is-ready .section:nth-child(6) { animation-delay: 175ms; }
-    .app.is-ready .section:nth-child(7) { animation-delay: 210ms; }
     @keyframes scan { from { transform: translateX(-105%); } to { transform: translateX(230%); } }
     @keyframes section-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
     @media (max-width: 340px) {
       .topbar { padding: var(--space-3); }
       .content { padding-inline: var(--space-2); }
-      .section { padding-block: var(--space-4); }
-      .calendar-create, .status-grid, .secondary-actions { grid-template-columns: 1fr; }
+      .calendar-create, .status-grid { grid-template-columns: 1fr; }
       .pending-actions { grid-template-columns: 1fr; }
       .footer { grid-template-columns: 1fr 1.35fr; padding: var(--space-2); }
       .footer button { padding-inline: var(--space-2); }
@@ -379,6 +469,7 @@
         <div class="sync-progress-head"><span>同步進度</span><strong id="sync-progress-value">0%</strong></div>
         <div class="sync-progress-track" aria-hidden="true"><span id="sync-progress-bar"></span></div>
         <span class="sync-progress-detail" id="sync-progress-detail">正在準備同步…</span>
+        <p class="sync-progress-warning" id="sync-progress-warning" role="status" hidden>請勿現在關閉側欄！</p>
       </div>
     </div>
   </div>
@@ -386,7 +477,7 @@
     <header class="topbar">
       <p class="eyebrow">T-SCHOOL Schedule Sync</p>
       <h1>行程同步控制臺</h1>
-      <p class="top-status" id="top-status">尚未完成設定</p>
+      <p class="top-status" id="top-status" data-state="attention" role="status" aria-live="polite">待首次同步</p>
     </header>
 
     <section class="term-transition" id="term-transition" role="alert" aria-live="assertive" tabindex="-1" hidden>
@@ -401,27 +492,44 @@
 
     <main class="content">
       <section class="section">
-        <div class="section-head"><h2>來源與年級</h2><span id="source-updated"></span></div>
-        <div class="source-health" id="source-health"><div><strong id="source-title">讀取中</strong><span id="source-detail"></span></div></div>
-        <div class="field">
-          <span>年級</span>
-          <div class="segmented" role="radiogroup" aria-label="年級">
-            <label><input type="radio" name="grade" value="高一"><span>高一</span></label>
-            <label><input type="radio" name="grade" value="高二"><span>高二</span></label>
-            <label><input type="radio" name="grade" value="高三"><span>高三</span></label>
-          </div>
+        <div class="section-head"><h2>同步狀態</h2></div>
+        <div class="status-grid"><div class="metric"><span>上次同步</span><strong id="last-sync">尚未同步</strong></div><div class="metric"><span>受管理事件</span><strong id="event-count">0</strong></div></div>
+        <div class="sync-stat-grid" aria-label="上次同步事件統計">
+          <div class="sync-stat"><span>新增</span><strong id="sync-created">0</strong></div>
+          <div class="sync-stat"><span>更新</span><strong id="sync-updated">0</strong></div>
+          <div class="sync-stat"><span>移除</span><strong id="sync-deleted">0</strong></div>
+          <div class="sync-stat"><span>未變更</span><strong id="sync-unchanged">0</strong></div>
         </div>
+        <p class="message error" id="status-message" role="alert" hidden></p>
+        <label class="switch">
+          <input type="checkbox" id="auto-sync">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-copy"><strong>啟用自動同步</strong><span>關閉後仍可用底部按鈕手動同步</span></span>
+        </label>
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>同步狀態</h2><span id="app-version"></span></div>
-        <div class="status-grid"><div class="metric"><span>上次同步</span><strong id="last-sync">尚未同步</strong></div><div class="metric"><span>受管理事件</span><strong id="event-count">0</strong></div></div>
-        <p class="message" id="status-message">完成設定後即可開始同步</p>
-        <div class="secondary-actions">
-          <button type="button" id="run-sync">立即同步</button>
-          <button type="button" id="repair-sync">強制修復</button>
+        <div class="section-head"><h2>日曆</h2><span>不允許主要日曆</span></div>
+        <div class="calendar-picker">
+          <label class="field"><span>同步目標日曆</span><select id="calendar"></select></label>
+          <div class="calendar-create" id="calendar-create">
+            <label class="field"><span>新日曆名稱</span><input type="text" id="calendar-name" maxlength="100" autocomplete="off"></label>
+            <button type="button" class="small-button" id="create-calendar">建立日曆</button>
+          </div>
         </div>
-        <p class="sync-estimate">第一次同步會先準備未來 30 天課綱；連同首批行程通常約 1–3 分鐘，完成安全保存後即可關閉側欄。行程很多時，全部完成可能需 10–20 分鐘。</p>
+        <p class="hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆。</p>
+        <label class="field"><span>活動提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
+        <label class="field" id="reminder-wrap" hidden><span>提前時間</span><select id="reminder-minutes"><option value="10">10 分鐘</option><option value="30">30 分鐘</option><option value="60">1 小時</option><option value="1440">1 天</option></select></label>
+      </section>
+
+      <section class="section">
+        <div class="section-head"><h2>年級</h2></div>
+        <div class="grade-options" role="radiogroup" aria-label="選年級">
+          <label class="choice grade-choice"><input type="radio" name="grade" value="高一"><span><span class="choice-copy"><strong>高一</strong></span></span></label>
+          <label class="choice grade-choice"><input type="radio" name="grade" value="高二"><span><span class="choice-copy"><strong>高二</strong></span></span></label>
+          <label class="choice grade-choice"><input type="radio" name="grade" value="高三"><span><span class="choice-copy"><strong>高三</strong></span></span></label>
+        </div>
+        <div class="source-health grade-source-health" id="source-health"><div><strong id="source-title">讀取中</strong><span id="source-detail"></span></div></div>
       </section>
 
       <section class="section" id="pending-section" hidden>
@@ -430,53 +538,39 @@
       </section>
 
       <section class="section" id="course-section">
-        <div class="section-head"><h2>選課程和活動</h2><span id="course-count">已選 0 門課 ・ 0 項活動</span></div>
+        <div class="section-head"><h2>課程與活動</h2><span id="course-count">已選 0 門課 ・ 0 項活動</span></div>
         <div class="course-toolbar">
           <input type="search" id="course-search" placeholder="輸入課名、活動名、班別等" aria-label="搜尋課程和活動">
           <button type="button" class="icon-button" id="course-search-action" aria-label="搜尋課程和活動">⌕</button>
         </div>
-        <div class="course-list" id="course-list"></div>
-      </section>
-
-      <section class="section">
-        <div class="section-head"><h2>專用日曆</h2><span>不允許主要日曆</span></div>
-        <div class="calendar-picker">
-          <label class="field"><span>同步目標</span><select id="calendar"></select></label>
-          <div class="calendar-create" id="calendar-create">
-            <label class="field"><span>新日曆名稱</span><input type="text" id="calendar-name" maxlength="100" autocomplete="off"></label>
-            <button type="button" class="small-button" id="create-calendar">建立日曆</button>
-          </div>
+        <div class="course-list-shell" id="course-list-shell" data-can-scroll-up="false" data-can-scroll-down="false">
+          <div class="course-list" id="course-list"></div>
         </div>
-        <p class="hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆。</p>
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>通知與自動同步</h2><span>可設定 1–4 個時間</span></div>
-        <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email"><span class="hint">為了讓程式能存取課綱，請輸入校內 Email</span></label>
+        <div class="section-head"><h2>通知</h2></div>
+        <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email"><small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small></label>
         <div class="field">
           <span>通知時間</span>
           <div class="notification-time-list" id="notify-hours-list" aria-label="通知時間"></div>
           <p class="hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動</p>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="auto-sync">
-          <span class="switch-track" aria-hidden="true"></span>
-          <span class="switch-copy"><strong>啟用自動同步</strong><span>關閉後仍可手動立即同步</span></span>
-        </label>
-      </section>
-
-      <section class="section">
-        <div class="section-head"><h2>事件呈現</h2><span>可隨時調整</span></div>
-        <label class="field"><span>說明格式</span><select id="description-preset"><option value="standard">標準</option><option value="custom">進階自訂</option></select></label>
-        <span class="format-preview" id="description-preview" aria-live="polite"></span>
-        <label class="field" id="custom-wrap" hidden><span>自訂模板</span><textarea id="custom-description"></textarea><p class="hint">以標準格式為基礎；可使用 **粗體** 與 {course}、{date}、{weekday}、{week}、{period}、{startTime}、{endTime}、{location}、{classroom}、{displayLocation}、{topic}、{content}、{sourceUpdatedAt}</p></label>
-        <label class="field"><span>活動提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
-        <label class="field" id="reminder-wrap" hidden><span>提前時間</span><select id="reminder-minutes"><option value="10">10 分鐘</option><option value="30">30 分鐘</option><option value="60">1 小時</option><option value="1440">1 天</option></select></label>
       </section>
 
     </main>
 
-    <footer class="footer"><button type="button" class="save" id="save">儲存</button><button type="button" class="sync" id="save-sync">儲存並首次同步</button></footer>
+    <footer class="footer">
+      <button type="button" class="save" id="save">儲存</button>
+      <div class="sync-actions">
+        <button type="button" class="sync-primary" id="save-sync">儲存並首次同步</button>
+        <button type="button" class="sync-menu-toggle" id="sync-menu-toggle" aria-label="開啟同步選單" aria-haspopup="menu" aria-expanded="false" aria-controls="sync-menu"></button>
+        <div class="sync-menu" id="sync-menu" role="menu" hidden>
+          <button type="button" id="run-sync" role="menuitem">立即同步</button>
+          <button type="button" id="repair-sync" role="menuitem">強制修復</button>
+        </div>
+      </div>
+    </footer>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -491,26 +585,32 @@
       var activeSyncJobId = '';
       var termTransitionAnnounced = false;
       var MAX_NOTIFY_HOURS = 4;
-      var standardDescriptionTemplate = [
-        '第 {week} 週 / 週{weekday} / 第 {period} 節',
-        '',
-        '**# 單元主題**',
-        '{topic}',
-        '',
-        '**# 課程內容**',
-        '{content}'
-      ].join('\n');
 
       function byId(id) { return document.getElementById(id); }
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
       function normalize(value) { return String(value || '').replace(/\s+/g, '').toLowerCase(); }
       function defaultCalendarName(gradeName) { return (gradeName || '高一') + '行程｜T-SCHOOL Schedule Sync'; }
-      function setBusy(value, label, showProgress) {
+      function setSyncMenuOpen(open, focusFirstItem) {
+        var menu = byId('sync-menu');
+        var toggle = byId('sync-menu-toggle');
+        if (!menu || !toggle) return;
+        var shouldOpen = Boolean(open) && !busy && !toggle.disabled;
+        menu.hidden = !shouldOpen;
+        toggle.setAttribute('aria-expanded', String(shouldOpen));
+        toggle.setAttribute('aria-label', shouldOpen ? '關閉同步選單' : '開啟同步選單');
+        if (shouldOpen && focusFirstItem) {
+          var firstItem = menu.querySelector('[role="menuitem"]:not(:disabled)');
+          if (firstItem) firstItem.focus();
+        }
+      }
+      function setBusy(value, label, showProgress, requiresSidebarOpen) {
         busy = value;
+        if (value) setSyncMenuOpen(false);
         byId('loading').hidden = !value;
         byId('loading-label').textContent = label || '處理中…';
         byId('loader-track').hidden = Boolean(showProgress);
         byId('sync-progress').hidden = !showProgress;
+        byId('sync-progress-warning').hidden = !(value && showProgress && requiresSidebarOpen);
         Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) { button.disabled = value; });
         if (!value) {
           updateActionAvailability();
@@ -558,19 +658,9 @@
       function startSyncProgress(label) {
         activeSyncJobId = '';
         renderSyncProgress({ percent: 1, message: label || '正在準備同步…' });
-        setBusy(true, '正在同步行程；第一批保存後即可關閉側欄', true);
+        setBusy(true, '正在同步行程', true, true);
         stopSyncProgressPolling();
         syncProgressTimer = setTimeout(pollSyncProgress, 1000);
-      }
-
-      function updateFormatPreviews() {
-        var descriptionExamples = {
-          standard: '第 23 週 / 週五 / 第 1 節\n\n# 單元主題\n第一冊\n\n# 課程內容\n【核心選文講解】：桃花源記、項脊軒志\n\n\n[T-SCHOOL Schedule Sync]\n＊部分資訊來自課綱，請以教師最新說明為主'
-        };
-        var descriptionPreset = byId('description-preset').value;
-        byId('description-preview').textContent = descriptionPreset === 'custom'
-          ? (byId('custom-description').value.trim() || standardDescriptionTemplate)
-          : descriptionExamples[descriptionPreset];
       }
 
       function render(data) {
@@ -584,11 +674,6 @@
         byId('auto-sync').checked = data.termTransition && data.termTransition.required
           ? data.termTransition.resumeAutoSync
           : settings.autoSyncEnabled;
-        var customDescriptionSelected = settings.descriptionPreset === 'custom';
-        byId('description-preset').value = customDescriptionSelected ? 'custom' : 'standard';
-        byId('custom-description').value = customDescriptionSelected
-          ? (settings.customDescription || standardDescriptionTemplate)
-          : standardDescriptionTemplate;
         byId('reminder-mode').value = settings.reminderMode;
         byId('reminder-minutes').value = String(settings.reminderMinutes || 10);
         renderNotifyHours(settings.autoSyncHours || [settings.notifySyncHour]);
@@ -599,14 +684,15 @@
         renderStatus(data.status);
         renderTermTransition(data.termTransition, data.courseOutlineStatus, data.source);
         updateConditionalFields();
-        byId('app-version').textContent = data.appVersion;
         var needsTermSelection = Boolean(data.termTransition && data.termTransition.required);
-        byId('top-status').dataset.state = needsTermSelection ? 'warning' : '';
+        byId('top-status').dataset.state = !needsTermSelection && data.status && data.status.ok
+          ? 'success'
+          : 'attention';
         byId('top-status').textContent = needsTermSelection
-          ? '新學期需要重新選課'
+          ? '待重新選課'
           : (data.status && data.status.ok
-            ? '同步功能正常'
-            : (settings.setupComplete ? '需要檢查同步狀態' : '尚未完成第一次同步'));
+            ? '同步正常'
+            : (settings.setupComplete ? '需檢查狀態' : '待首次同步'));
         byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
           ? '完成選課並同步'
@@ -654,6 +740,9 @@
           button.disabled = requiresSelection;
           button.dataset.validationDisabled = String(requiresSelection);
         });
+        byId('sync-menu-toggle').disabled = requiresSelection;
+        byId('sync-menu-toggle').dataset.validationDisabled = String(requiresSelection);
+        if (requiresSelection) setSyncMenuOpen(false);
       }
 
       function renderSource(source) {
@@ -661,7 +750,6 @@
         health.dataset.state = source.warning ? 'warning' : 'success';
         byId('source-title').textContent = source.gradeName + '課表可用';
         byId('source-detail').textContent = source.firstDate + '–' + source.lastDate + ' · ' + source.courseCount + ' 門課 · ' + source.activityCount + ' 項活動';
-        byId('source-updated').textContent = source.updateLabel || '';
       }
 
       function renderNotifyHours(hours) {
@@ -787,6 +875,18 @@
         byId('course-count').textContent = '已選 ' + selectedCourses.size + ' 門課 ・ ' + selectedActivityCount + ' 項活動';
         updateCourseSearchAction();
         updateActionAvailability();
+        requestAnimationFrame(updateCourseScrollShadows);
+      }
+
+      function updateCourseScrollShadows() {
+        var list = byId('course-list');
+        var shell = byId('course-list-shell');
+        if (!list || !shell) return;
+        var maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+        shell.dataset.canScrollUp = String(maxScrollTop > 1 && list.scrollTop > 1);
+        shell.dataset.canScrollDown = String(
+          maxScrollTop > 1 && list.scrollTop < maxScrollTop - 1
+        );
       }
 
       function compareCatalogItems(left, right) {
@@ -826,15 +926,25 @@
       function renderStatus(status) {
         byId('last-sync').textContent = status && status.lastSyncLabel ? status.lastSyncLabel : '尚未同步';
         byId('event-count').textContent = status && status.eventCount != null ? String(status.eventCount) : '0';
+        var syncCounts = {
+          'sync-created': Number(status && status.created) || 0,
+          'sync-updated': (Number(status && status.updated) || 0) + (Number(status && status.outlineUpdated) || 0),
+          'sync-deleted': Number(status && status.deleted) || 0,
+          'sync-unchanged': Number(status && status.unchanged) || 0
+        };
+        Object.keys(syncCounts).forEach(function (id) {
+          byId(id).textContent = String(Math.max(0, syncCounts[id]));
+        });
         var message = byId('status-message');
-        message.textContent = status && status.message ? status.message : '完成設定後即可開始同步';
-        message.classList.toggle('error', Boolean(status && status.ok === false));
+        var hasError = Boolean(status && status.ok === false);
+        message.hidden = !hasError;
+        message.textContent = hasError
+          ? (status.message || '同步發生錯誤，請稍後再試。')
+          : '';
       }
 
       function updateConditionalFields() {
-        byId('custom-wrap').hidden = byId('description-preset').value !== 'custom';
         byId('reminder-wrap').hidden = byId('reminder-mode').value === 'none';
-        updateFormatPreviews();
       }
 
       function collectSettings() {
@@ -850,8 +960,6 @@
           autoSyncEnabled: byId('auto-sync').checked,
           autoSyncHours: notificationHours,
           notifySyncHour: Math.max.apply(null, notificationHours),
-          descriptionPreset: byId('description-preset').value,
-          customDescription: byId('custom-description').value,
           reminderMode: byId('reminder-mode').value,
           reminderMinutes: Number(byId('reminder-minutes').value)
         };
@@ -869,8 +977,12 @@
             var preview = await server('previewSettingsImpactFromUi', settings);
             var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
             if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
+            startSyncProgress(
+              model && model.settings && !model.settings.setupComplete
+                ? '正在準備未來 30 天的課綱資料…'
+                : '正在儲存設定並準備同步…'
+            );
             if (model && model.settings && !model.settings.setupComplete) {
-              byId('loading-label').textContent = '正在準備未來 30 天的課綱資料…';
               var outlinePreparation = await server(
                 'prepareFirstSyncCourseOutlinesFromUi',
                 settings
@@ -880,7 +992,7 @@
               }
             }
             settings.syncApprovalToken = preview.approvalToken || '';
-            startSyncProgress('正在儲存設定並準備同步…');
+            renderSyncProgress({ percent: 1, message: '正在儲存設定並準備同步…' });
           }
           var result = await server(runSync ? 'saveSettingsAndSyncFromUi' : 'saveSettingsFromUi', settings);
           render(result.uiData);
@@ -888,7 +1000,7 @@
           if (result.pending) {
             keepPolling = true;
             activeSyncJobId = result.jobId || '';
-            byId('loading-label').textContent = '同步已在背景分批執行；現在可以關閉側欄';
+            setBusy(true, '同步已在背景分批執行；現在可以關閉側欄', true, false);
             pollSyncProgress();
           }
         } catch (error) {
@@ -913,7 +1025,7 @@
           if (result.pending) {
             keepPolling = true;
             activeSyncJobId = result.jobId || '';
-            byId('loading-label').textContent = '同步已在背景分批執行；現在可以關閉側欄';
+            setBusy(true, '同步已在背景分批執行；現在可以關閉側欄', true, false);
             pollSyncProgress();
           }
         } catch (error) {
@@ -965,9 +1077,11 @@
             setBusy(false);
           });
         }
-        if (event.target.id === 'description-preset' || event.target.id === 'reminder-mode') updateConditionalFields();
+        if (event.target.id === 'reminder-mode') updateConditionalFields();
       });
       byId('course-search').addEventListener('input', renderCourses);
+      byId('course-list').addEventListener('scroll', updateCourseScrollShadows, { passive: true });
+      window.addEventListener('resize', updateCourseScrollShadows, { passive: true });
       byId('course-search').addEventListener('keydown', function (event) {
         if (event.key === 'Escape' && event.target.value) {
           event.preventDefault();
@@ -975,7 +1089,6 @@
           renderCourses();
         }
       });
-      byId('custom-description').addEventListener('input', updateFormatPreviews);
       byId('calendar-name').addEventListener('input', function () { byId('calendar-name').dataset.autoName = 'false'; });
       byId('course-search-action').addEventListener('click', function () {
         if (byId('course-search').value) {
@@ -1008,6 +1121,32 @@
       });
       byId('save').addEventListener('click', function () { save(false); });
       byId('save-sync').addEventListener('click', function () { save(true); });
+      byId('sync-menu-toggle').addEventListener('click', function () {
+        setSyncMenuOpen(byId('sync-menu').hidden, true);
+      });
+      byId('sync-menu-toggle').addEventListener('keydown', function (event) {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          setSyncMenuOpen(true, true);
+        }
+      });
+      byId('sync-menu').addEventListener('keydown', function (event) {
+        var items = Array.prototype.slice.call(byId('sync-menu').querySelectorAll('[role="menuitem"]:not(:disabled)'));
+        var currentIndex = items.indexOf(document.activeElement);
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setSyncMenuOpen(false);
+          byId('sync-menu-toggle').focus();
+          return;
+        }
+        if (!items.length || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        event.preventDefault();
+        var direction = event.key === 'ArrowDown' ? 1 : -1;
+        items[(currentIndex + direction + items.length) % items.length].focus();
+      });
+      document.addEventListener('click', function (event) {
+        if (!event.target.closest('.sync-actions')) setSyncMenuOpen(false);
+      });
       byId('run-sync').addEventListener('click', function () { runAction('runSyncFromUi', '正在同步行程…', true); });
       byId('repair-sync').addEventListener('click', function () { runAction('forceRepairFromUi', '正在檢查並修復事件…', true); });
       byId('create-calendar').addEventListener('click', async function () {
@@ -1041,7 +1180,7 @@
         if (progress && ['running', 'queued', 'retry_pending'].indexOf(progress.state) !== -1) {
           activeSyncJobId = progress.jobId || '';
           renderSyncProgress(progress);
-          setBusy(true, '背景同步仍在執行；現在可以關閉側欄', true);
+          setBusy(true, '背景同步仍在執行；現在可以關閉側欄', true, false);
           pollSyncProgress();
           return;
         }

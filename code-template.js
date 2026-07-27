@@ -1433,7 +1433,9 @@ function sanitizeSettingsInput_(input, previous, source) {
   const reminderMode = ['none', 'popup', 'email'].indexOf(value.reminderMode) !== -1
     ? value.reminderMode
     : 'none';
-  const descriptionPreset = value.descriptionPreset === 'custom' ? 'custom' : 'standard';
+  const descriptionPreset = Object.prototype.hasOwnProperty.call(value, 'descriptionPreset')
+    ? (value.descriptionPreset === 'custom' ? 'custom' : 'standard')
+    : (previous.descriptionPreset === 'custom' ? 'custom' : 'standard');
   const customDescription = descriptionPreset === 'custom'
     ? String(
       value.customDescription ||
