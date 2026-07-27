@@ -2,7 +2,6 @@
 .DS_Store
 
 # Local source material and reverse-engineering evidence
-/archive/1Campus/
 /resources/
 
 # Generated code, previews, inspection output, and temporary workspaces

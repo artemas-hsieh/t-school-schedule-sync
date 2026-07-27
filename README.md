@@ -123,7 +123,6 @@ Google Sheet 的「行程同步」選單提供：
 ├── PROJECT_CONTEXT_FOR_AI.md
 ├── SYNC_MECHANISM.md
 ├── TESTING.md
-├── design-qa.md
 ├── archive/
 │   ├── UI_EXPLORATION_BRIEF.md
 │   ├── MVP_IMPLEMENTATION_PLAN.md
@@ -133,9 +132,16 @@ Google Sheet 的「行程同步」選單提供：
     └── smoke-test.js
 ```
 
-`1Campus/` 只是本地資料比對與逆向分析素材，不是執行階段資料來源，也不納入版本控制。
+`resources/1Campus/` 只是本地資料比對與逆向分析素材，不是執行階段資料來源，也不納入版本控制。
 
 `archive/` 保存過往規劃與視覺探索文件，目前不是執行階段的一部分。
+
+本機另使用兩個不納入版本控制的工作區：
+
+- `outputs/`：產生的 `Code.gs`、Email／介面預覽、檢查報告與暫存工作檔。
+- `resources/`：課綱原始檔、影片、逆向分析素材與其他本機參考資料。
+
+單次設計 QA 截圖與報告也放在 `outputs/`，不作為公開網站或專案文件的一部分。
 
 ## 本地開發
 
