@@ -435,6 +435,57 @@ assert.equal(
   true,
   '第一個鎖定邊界應依畫面與目標的距離平滑混合收斂速度'
 );
+assert.match(
+  configuratorHtml,
+  /class="hero-paper-track">[\s\S]*?class="hero-depth-scene">[\s\S]*?class="hero-progressive-fog"/,
+  'Hero 紙張與行程卡應位於 3D 場景，模糊層則維持為場景外的上層兄弟節點'
+);
+assert.equal(
+  configuratorAppSource.includes('function initHeroDepthInteraction()'),
+  true,
+  'Hero 應提供獨立的精細游標 3D 跟手互動'
+);
+assert.match(
+  configuratorAppSource,
+  /const desktopTileEndTopRatios = \[0\.22, 0\.47, 0\.72\];[\s\S]*?y: originalEndTop - tile\.offsetTop/,
+  'Hero 行程卡上調起點時應補償桌機 Y 軸行程，維持原本終點高度'
+);
+assert.match(
+  configuratorAppSource,
+  /function getRowCenteredTileTop\([\s\S]*?const startTop = getRowCenteredTileTop\(scheduleMetrics[\s\S]*?const endTop = getRowCenteredTileTop\(calendarMetrics[\s\S]*?y: endTop - startTop/,
+  '手機 Hero 行程卡的起點與終點應依兩張紙張的實際列中央計算'
+);
+assert.equal(
+  configuratorAppSource.includes('heroMobileTileArc: -12'),
+  true,
+  '手機 Hero 行程卡應保留小幅曲線，不得恢復完全水平軌跡'
+);
+assert.equal(
+  (
+    configuratorAppSource.match(
+      /rootMargin: MOTION_CONFIG\.heroRenderRootMargin/g
+    ) || []
+  ).length,
+  2,
+  'Hero 捲動與 3D 跟手都應在同一離屏距離停止運算'
+);
+assert.equal(
+  (
+    configuratorAppSource.match(/cancelAnimationFrame\(frameId\)/g) || []
+  ).length >= 2,
+  true,
+  'Hero 離屏時應取消尚未執行的動畫幀'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.hero-depth-scene \{[\s\S]*?perspective\(var\(--hero-depth-perspective\)\)[\s\S]*?transform-style: preserve-3d;/,
+  'Hero 3D 場景應保留可調整的透視與子圖層深度'
+);
+assert.match(
+  configuratorStylesSource,
+  /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.hero-depth-scene \{[\s\S]*?--hero-pointer-rotate-x: 0deg !important;/,
+  'reduced-motion 應停用 Hero 游標轉動'
+);
 assert.equal(
   configuratorAppSource.includes('function getBoundarySettleLerp(maximumScrollY)'),
   true,

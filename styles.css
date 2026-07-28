@@ -2510,6 +2510,19 @@ textarea::placeholder {
   --hero-fog-mobile-blur-3: 1px;
   --hero-fog-mobile-blur-4: 1px;
   --hero-fog-mobile-blur-5: 2px;
+  /*
+   * Hero depth tuning:
+   * negative rotate-y keeps the right side closer before pointer input;
+   * increasing the Z gaps strengthens parallax between paper, path and tiles.
+   */
+  --hero-depth-perspective: 800px;
+  --hero-depth-base-rotate-x: -1deg;
+  --hero-depth-base-rotate-y: -5deg;
+  --hero-schedule-depth: 0px;
+  --hero-calendar-depth: 10px;
+  --hero-path-depth: 18px;
+  --hero-tile-depth: 48px;
+  --hero-visual-offset-x: -24px;
   --shadow-action-hover: 4px 4px 0 rgba(20, 33, 29, 0.2);
   --radius-card: 6px;
   --radius-control: 4px;
@@ -4929,6 +4942,7 @@ select,
 
 .hero-visual {
   position: relative;
+  left: var(--hero-visual-offset-x);
   z-index: 1;
   align-self: center;
   width: 100%;
@@ -4956,6 +4970,23 @@ select,
   transform-origin: center;
 }
 
+.hero-depth-scene {
+  --hero-pointer-rotate-x: 0deg;
+  --hero-pointer-rotate-y: 0deg;
+  --hero-shadow-x: 0px;
+  --hero-shadow-y: 0px;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  transform:
+    perspective(var(--hero-depth-perspective))
+    rotateX(calc(var(--hero-depth-base-rotate-x) + var(--hero-pointer-rotate-x)))
+    rotateY(calc(var(--hero-depth-base-rotate-y) + var(--hero-pointer-rotate-y)));
+  transform-origin: center;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
 .hero-paper-track .visual-board {
   width: 43%;
   height: min(58svh, 560px);
@@ -4963,19 +4994,22 @@ select,
   border: 2px solid var(--ink);
   border-radius: 0;
   background: var(--paper-bright);
-  box-shadow: 14px 14px 0 rgba(20, 33, 29, 0.08);
+  box-shadow:
+    calc(14px + var(--hero-shadow-x)) calc(14px + var(--hero-shadow-y)) 0 rgba(20, 33, 29, 0.08),
+    0 30px 42px -34px rgba(20, 33, 29, 0.34);
+  backface-visibility: hidden;
 }
 
 .hero-paper-track .schedule-board {
   top: 1%;
   left: 0;
-  transform: rotate(-1.7deg);
+  transform: translateZ(var(--hero-schedule-depth)) rotate(-1.7deg);
 }
 
 .hero-paper-track .calendar-board {
   top: 8%;
   right: 0;
-  transform: rotate(1.2deg);
+  transform: translateZ(var(--hero-calendar-depth)) rotate(1.2deg);
 }
 
 .hero-paper-track .board-label {
@@ -5004,6 +5038,7 @@ select,
   right: 38.5%;
   left: 38.5%;
   height: 2px;
+  transform: translateZ(var(--hero-path-depth));
 }
 
 .hero-paper-track .path-tick {
@@ -5020,21 +5055,25 @@ select,
   border-width: 2px;
   border-radius: 5px;
   font-size: clamp(12px, 0.92vw, 16px);
-  box-shadow: 9px 9px 0 rgba(20, 33, 29, 0.16);
+  box-shadow:
+    calc(9px + var(--hero-shadow-x)) calc(9px + var(--hero-shadow-y)) 0 rgba(20, 33, 29, 0.16),
+    0 22px 30px -22px rgba(20, 33, 29, 0.42);
+  transform: translate3d(0, 0, var(--hero-tile-depth));
+  backface-visibility: hidden;
 }
 
 .hero-paper-track .tile-one {
-  top: 22%;
+  top: 16%;
   left: 5%;
 }
 
 .hero-paper-track .tile-two {
-  top: 47%;
+  top: 40.5%;
   left: 8%;
 }
 
 .hero-paper-track .tile-three {
-  top: 72%;
+  top: 65%;
   left: 4%;
 }
 
@@ -5233,6 +5272,7 @@ select,
   }
 
   .hero-visual {
+    left: 0;
     grid-row: 2;
     align-self: stretch;
     width: 100%;
@@ -5250,6 +5290,16 @@ select,
     width: 190vw;
     height: 100%;
     transform-origin: left center;
+  }
+
+  .hero-depth-scene {
+    --hero-depth-perspective: 1000px;
+    --hero-depth-base-rotate-x: -0.6deg;
+    --hero-depth-base-rotate-y: -3deg;
+    --hero-calendar-depth: 6px;
+    --hero-path-depth: 12px;
+    --hero-tile-depth: 30px;
+    transform-origin: 47vw center;
   }
 
   .hero-paper-track .visual-board {
@@ -5377,9 +5427,19 @@ select,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero-paper-track,
-  .hero-paper-track .transfer-tile {
+  .hero-paper-track {
     transform: translate3d(0, 0, 0) !important;
+  }
+
+  .hero-depth-scene {
+    --hero-pointer-rotate-x: 0deg !important;
+    --hero-pointer-rotate-y: 0deg !important;
+    --hero-shadow-x: 0px !important;
+    --hero-shadow-y: 0px !important;
+  }
+
+  .hero-paper-track .transfer-tile {
+    transform: translate3d(0, 0, var(--hero-tile-depth)) !important;
   }
 }
 

@@ -16,7 +16,7 @@
   </style>
   <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
   <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
-  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260727-03">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260728-01">
   <script>
     (function () {
       var stylesheet = document.getElementById('app-stylesheet');
@@ -81,35 +81,37 @@
 
         <div class="hero-visual" aria-hidden="true">
           <div class="hero-paper-track">
-            <section class="schedule-board visual-board">
-              <div class="board-label"><span>課表</span><span>08:00–16:00</span></div>
-              <div class="schedule-grid">
-                <span></span><span></span><span></span>
-                <span></span><span></span><span></span>
-                <span></span><span></span><span></span>
-              </div>
-            </section>
+            <div class="hero-depth-scene">
+              <section class="schedule-board visual-board">
+                <div class="board-label"><span>課表</span><span>08:00–16:00</span></div>
+                <div class="schedule-grid">
+                  <span></span><span></span><span></span>
+                  <span></span><span></span><span></span>
+                  <span></span><span></span><span></span>
+                </div>
+              </section>
 
-            <div class="transfer-path">
-              <span class="path-tick"></span>
-              <span class="path-tick"></span>
-              <span class="path-tick"></span>
-              <span class="path-tick"></span>
+              <div class="transfer-path">
+                <span class="path-tick"></span>
+                <span class="path-tick"></span>
+                <span class="path-tick"></span>
+                <span class="path-tick"></span>
+              </div>
+
+              <section class="calendar-board visual-board">
+                <div class="board-label"><span>日曆</span><span>本週</span></div>
+                <div class="calendar-grid">
+                  <span class="calendar-time">09</span><span></span>
+                  <span class="calendar-time">11</span><span></span>
+                  <span class="calendar-time">14</span><span></span>
+                </div>
+                <span class="sync-complete">同步完成</span>
+              </section>
+
+              <span class="transfer-tile tile-one" data-tile-index="0">實體課 [吉林基地-協作坊]</span>
+              <span class="transfer-tile tile-two" data-tile-index="1">線上課 [線上教室]</span>
+              <span class="transfer-tile tile-three" data-tile-index="2">活動 [弘道基地-未來教室]</span>
             </div>
-
-            <section class="calendar-board visual-board">
-              <div class="board-label"><span>日曆</span><span>本週</span></div>
-              <div class="calendar-grid">
-                <span class="calendar-time">09</span><span></span>
-                <span class="calendar-time">11</span><span></span>
-                <span class="calendar-time">14</span><span></span>
-              </div>
-              <span class="sync-complete">同步完成</span>
-            </section>
-
-            <span class="transfer-tile tile-one" data-tile-index="0">實體課 [吉林基地-協作坊]</span>
-            <span class="transfer-tile tile-two" data-tile-index="1">線上課 [線上教室]</span>
-            <span class="transfer-tile tile-three" data-tile-index="2">活動 [弘道基地-未來教室]</span>
 
             <span class="hero-progressive-fog" aria-hidden="true">
               <i class="hero-fog-layer hero-fog-layer-1"></i>

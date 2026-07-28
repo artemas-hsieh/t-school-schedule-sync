@@ -77,6 +77,13 @@ const MOTION_CONFIG = Object.freeze({
   heroTileStagger: 0.08,
   heroDesktopPaperTravelRatio: 0.06,
   heroMobilePaperTravelRatio: 0.13,
+  heroDesktopTileArc: -30,
+  heroMobileTileArc: -12,
+  heroRenderRootMargin: '640px 0px',
+  heroTiltMaxX: 4,
+  heroTiltMaxY: 8,
+  heroTiltEase: 0.1,
+  heroTiltShadowTravel: 3,
   cursorPositionEase: 0.38,
   cursorAngleEase: 0.3
 });
@@ -1030,6 +1037,7 @@ function initVisualExperience() {
   initSmoothScroll();
   initFooterReturn();
   initHeroScroll();
+  initHeroDepthInteraction();
   initProgressiveBlurLayers();
   initStepJourney();
   initCodeDisclosure();
@@ -1139,11 +1147,8 @@ function initHeroScroll() {
   const visual = stage?.querySelector('.hero-visual');
   const scheduleBoard = stage?.querySelector('.schedule-board');
   const calendarBoard = stage?.querySelector('.calendar-board');
-  const mobileTileAnchors = [
-    { x: 0.12, y: 0.3 },
-    { x: 0.18, y: 0.56 },
-    { x: 0.1, y: 0.82 }
-  ];
+  const mobileTileHorizontalAnchors = [0.12, 0.18, 0.1];
+  const desktopTileEndTopRatios = [0.22, 0.47, 0.72];
 
   if (!stage || !visual || !paperTrack || tiles.length === 0) {
     return;
@@ -1151,11 +1156,19 @@ function initHeroScroll() {
 
   const narrowQuery = window.matchMedia('(max-width: 760px)');
   const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let frameRequested = false;
+  let frameId = 0;
   let renderingActive = true;
   let layoutDirty = true;
   let layout = null;
   let previousProgress = Number.NaN;
+
+  function getRowCenteredTileTop(boardMetrics, tileHeight, rowIndex) {
+    const gridHeight = Math.max(0, boardMetrics.height - boardMetrics.labelHeight);
+    const rowHeight = gridHeight / 3;
+    const rowInset = Math.max(0, (rowHeight - tileHeight) / 2);
+
+    return boardMetrics.top + boardMetrics.labelHeight + rowHeight * rowIndex + rowInset;
+  }
 
   function measureLayout() {
     const width = visual.clientWidth || window.innerWidth;
@@ -1170,13 +1183,17 @@ function initHeroScroll() {
           left: scheduleBoard.offsetLeft,
           top: scheduleBoard.offsetTop,
           width: scheduleBoard.offsetWidth,
-          height: scheduleBoard.offsetHeight
+          height: scheduleBoard.offsetHeight,
+          labelHeight: scheduleBoard.querySelector('.board-label')?.offsetHeight || 0
         }
       : null;
     const calendarMetrics = calendarBoard
       ? {
           left: calendarBoard.offsetLeft,
-          width: calendarBoard.offsetWidth
+          top: calendarBoard.offsetTop,
+          width: calendarBoard.offsetWidth,
+          height: calendarBoard.offsetHeight,
+          labelHeight: calendarBoard.querySelector('.board-label')?.offsetHeight || 0
         }
       : null;
     const tileSizes = tiles.map(tile => ({
@@ -1188,38 +1205,40 @@ function initHeroScroll() {
       : 0;
     const desktopDistanceX = measuredDistance > 0 ? measuredDistance : width * 0.55;
     const tileDistances = tiles.map((tile, index) => {
-      const mobileAnchor = mobileTileAnchors[index];
+      const mobileAnchorX = mobileTileHorizontalAnchors[index];
       const tileSize = tileSizes[index];
 
-      if (isNarrow && scheduleMetrics && calendarMetrics && mobileAnchor) {
+      if (isNarrow && scheduleMetrics && calendarMetrics && Number.isFinite(mobileAnchorX)) {
         const startInsetX = Math.min(
-          scheduleMetrics.width * mobileAnchor.x,
+          scheduleMetrics.width * mobileAnchorX,
           Math.max(4, scheduleMetrics.width - tileSize.width - 4)
-        );
-        const startInsetY = Math.min(
-          scheduleMetrics.height * mobileAnchor.y,
-          Math.max(4, scheduleMetrics.height - tileSize.height - 4)
         );
         const startLeft = scheduleMetrics.left + startInsetX;
         const endInset = Math.min(
-          calendarMetrics.width * mobileAnchor.x,
+          calendarMetrics.width * mobileAnchorX,
           Math.max(4, calendarMetrics.width - tileSize.width - 4)
         );
+        const startTop = getRowCenteredTileTop(scheduleMetrics, tileSize.height, index);
+        const endTop = getRowCenteredTileTop(calendarMetrics, tileSize.height, index);
 
         tile.style.left = `${startLeft}px`;
-        tile.style.top = `${scheduleMetrics.top + startInsetY}px`;
+        tile.style.top = `${startTop}px`;
 
         return {
           x: calendarMetrics.left + endInset - startLeft,
-          y: 0
+          y: endTop - startTop
         };
       }
 
       tile.style.removeProperty('left');
       tile.style.removeProperty('top');
+      const originalEndTop =
+        paperTrack.clientHeight * desktopTileEndTopRatios[index] +
+        (index + 1) * 5;
+
       return {
         x: desktopDistanceX,
-        y: (index + 1) * 5
+        y: originalEndTop - tile.offsetTop
       };
     });
 
@@ -1238,7 +1257,7 @@ function initHeroScroll() {
   }
 
   function update() {
-    frameRequested = false;
+    frameId = 0;
 
     if (!renderingActive) {
       return;
@@ -1270,9 +1289,12 @@ function initHeroScroll() {
         ? 0
         : clamp((progress - index * MOTION_CONFIG.heroTileStagger) / MOTION_CONFIG.heroTileTravel, 0, 1);
       const eased = localProgress * localProgress * localProgress * (localProgress * (localProgress * 6 - 15) + 10);
-      const arc = Math.sin(Math.PI * eased) * (layout.isNarrow ? 0 : -30);
+      const arcHeight = layout.isNarrow
+        ? MOTION_CONFIG.heroMobileTileArc
+        : MOTION_CONFIG.heroDesktopTileArc;
+      const arc = Math.sin(Math.PI * eased) * arcHeight;
       const tileDistance = layout.tileDistances[index];
-      tile.style.transform = `translate3d(${tileDistance.x * eased}px, ${arc + tileDistance.y * eased}px, 0)`;
+      tile.style.transform = `translate3d(${tileDistance.x * eased}px, ${arc + tileDistance.y * eased}px, var(--hero-tile-depth))`;
     });
 
     stage.classList.toggle(
@@ -1282,9 +1304,8 @@ function initHeroScroll() {
   }
 
   function requestUpdate() {
-    if (renderingActive && !frameRequested) {
-      frameRequested = true;
-      requestAnimationFrame(update);
+    if (renderingActive && frameId === 0) {
+      frameId = requestAnimationFrame(update);
     }
   }
 
@@ -1313,15 +1334,145 @@ function initHeroScroll() {
       if (renderingActive) {
         layoutDirty = true;
         requestUpdate();
+      } else if (frameId !== 0) {
+        cancelAnimationFrame(frameId);
+        frameId = 0;
       }
     }, {
-      // Start rendering one viewport before the Hero can become visible.
-      rootMargin: '100% 0px'
+      // Resume shortly before the Hero returns; stop all animation work beyond it.
+      rootMargin: MOTION_CONFIG.heroRenderRootMargin
     });
     intersectionObserver.observe(stage);
   }
 
   update();
+}
+
+function initHeroDepthInteraction() {
+  const stage = document.getElementById('hero-stage');
+  const sticky = stage?.querySelector('.hero-sticky');
+  const scene = stage?.querySelector('.hero-depth-scene');
+
+  if (!stage || !sticky || !scene) {
+    return;
+  }
+
+  const finePointerQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+  const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let targetX = 0;
+  let targetY = 0;
+  let currentX = 0;
+  let currentY = 0;
+  let frameId = 0;
+  let renderingActive = true;
+
+  function interactionEnabled() {
+    return renderingActive && finePointerQuery.matches && !reducedMotionQuery.matches;
+  }
+
+  function writeTilt() {
+    scene.style.setProperty(
+      '--hero-pointer-rotate-x',
+      `${-currentY * MOTION_CONFIG.heroTiltMaxX}deg`
+    );
+    scene.style.setProperty(
+      '--hero-pointer-rotate-y',
+      `${-currentX * MOTION_CONFIG.heroTiltMaxY}deg`
+    );
+    scene.style.setProperty(
+      '--hero-shadow-x',
+      `${-currentX * MOTION_CONFIG.heroTiltShadowTravel}px`
+    );
+    scene.style.setProperty(
+      '--hero-shadow-y',
+      `${-currentY * MOTION_CONFIG.heroTiltShadowTravel}px`
+    );
+  }
+
+  function render() {
+    frameId = 0;
+
+    if (!renderingActive) {
+      return;
+    }
+
+    currentX += (targetX - currentX) * MOTION_CONFIG.heroTiltEase;
+    currentY += (targetY - currentY) * MOTION_CONFIG.heroTiltEase;
+    writeTilt();
+
+    const stillMoving =
+      Math.abs(targetX - currentX) > 0.001 ||
+      Math.abs(targetY - currentY) > 0.001;
+
+    if (stillMoving) {
+      requestFrame();
+    }
+  }
+
+  function requestFrame() {
+    if (renderingActive && frameId === 0) {
+      frameId = requestAnimationFrame(render);
+    }
+  }
+
+  function resetTilt(immediate = false) {
+    targetX = 0;
+    targetY = 0;
+
+    if (immediate === true) {
+      currentX = 0;
+      currentY = 0;
+
+      if (frameId !== 0) {
+        cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+
+      writeTilt();
+      return;
+    }
+
+    requestFrame();
+  }
+
+  function handlePointerMove(event) {
+    if (!interactionEnabled()) {
+      return;
+    }
+
+    const rect = sticky.getBoundingClientRect();
+    targetX = clamp(((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1, -1, 1);
+    targetY = clamp(((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1, -1, 1);
+    requestFrame();
+  }
+
+  function handlePreferenceChange() {
+    const pointerInteractionEnabled =
+      finePointerQuery.matches && !reducedMotionQuery.matches;
+    stage.classList.toggle('has-hero-depth-interaction', pointerInteractionEnabled);
+    resetTilt(!pointerInteractionEnabled);
+  }
+
+  sticky.addEventListener('pointermove', handlePointerMove, { passive: true });
+  sticky.addEventListener('pointerleave', resetTilt, { passive: true });
+  window.addEventListener('blur', resetTilt);
+  finePointerQuery.addEventListener?.('change', handlePreferenceChange);
+  reducedMotionQuery.addEventListener?.('change', handlePreferenceChange);
+
+  if ('IntersectionObserver' in window) {
+    const intersectionObserver = new IntersectionObserver(entries => {
+      renderingActive = entries[0]?.isIntersecting ?? true;
+
+      if (!renderingActive) {
+        resetTilt(true);
+      }
+    }, {
+      rootMargin: MOTION_CONFIG.heroRenderRootMargin
+    });
+    intersectionObserver.observe(stage);
+  }
+
+  handlePreferenceChange();
 }
 
 function initStepJourney() {
