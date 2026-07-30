@@ -451,9 +451,9 @@ assert.equal(
   'Hero 行程卡移動期間應以受控頻率更新動態亂碼'
 );
 assert.equal(
-  configuratorAppSource.includes('heroTileArrivalScrambleDuration: 1000'),
+  configuratorAppSource.includes('heroTileArrivalScrambleDuration: 400'),
   true,
-  'Hero 行程卡完整抵達紙張後應再維持一秒動態亂碼'
+  'Hero 行程卡完整抵達紙張後應再維持 400ms 動態亂碼'
 );
 assert.equal(
   configuratorAppSource.includes('function tileIsFullyInsideBoard('),
@@ -467,7 +467,7 @@ assert.match(
 );
 assert.match(
   configuratorStylesSource,
-  /--hero-scroll-length-desktop:\s*245svh;[\s\S]*?--hero-scroll-length-mobile:\s*205dvh;/,
+  /--hero-scroll-length-desktop:\s*400svh;[\s\S]*?--hero-scroll-length-mobile:\s*205dvh;/,
   'Hero 桌機與手機捲動行程應由集中參數控制'
 );
 assert.equal(
