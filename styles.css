@@ -23,6 +23,8 @@
   --shadow-large: 0 24px 70px rgba(20, 33, 29, 0.14);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --hero-scroll-length-desktop: 400svh;
+  --hero-scroll-length-mobile: 205dvh;
 }
 
 * {
@@ -4850,7 +4852,7 @@ select,
 
 /* Canonical Hero layout: all Hero geometry and responsive overrides live here. */
 .hero-stage {
-  height: 220svh;
+  height: var(--hero-scroll-length-desktop);
   min-height: 1080px;
 }
 
@@ -5176,7 +5178,7 @@ select,
 
 @media (max-width: 760px) {
   .hero-stage {
-    height: 185dvh;
+    height: var(--hero-scroll-length-mobile);
     min-height: 1040px;
   }
 
@@ -5914,8 +5916,19 @@ select,
 }
 
 html[data-input-active] {
+  /*
+   * Search results are replaced while the user types. Do not let the browser
+   * choose a disappearing result card as its scroll anchor while Safari is
+   * also panning the visual viewport to keep the caret visible.
+   */
+  overflow-anchor: none;
   scroll-padding-top: calc(72px + var(--space-4));
   scroll-padding-bottom: calc(var(--keyboard-inset, 0px) + var(--space-4));
+}
+
+html[data-input-active] body,
+html[data-input-active] .journey-step.is-current {
+  overflow-anchor: none;
 }
 
 html[data-keyboard-open] .journey-step.is-current .step-card {

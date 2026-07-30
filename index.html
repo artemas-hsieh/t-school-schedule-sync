@@ -16,7 +16,7 @@
   </style>
   <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
   <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
-  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260728-01">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260730-04">
   <script>
     (function () {
       var stylesheet = document.getElementById('app-stylesheet');
@@ -72,7 +72,7 @@
               <span class="benefit-mobile">定時同步課程和活動</span>
             </li>
             <li>告訴你每堂課要幹嘛</li>
-            <li>即時通知行程調整</li>
+            <li>定時通知行程調整</li>
           </ul>
           <button type="button" class="start-button" id="start-config" data-cursor-label="開始設定">
             <span>開始設定 ↓</span>
@@ -108,9 +108,9 @@
                 <span class="sync-complete">同步完成</span>
               </section>
 
-              <span class="transfer-tile tile-one" data-tile-index="0">實體課 [吉林基地-協作坊]</span>
-              <span class="transfer-tile tile-two" data-tile-index="1">線上課 [線上教室]</span>
-              <span class="transfer-tile tile-three" data-tile-index="2">活動 [弘道基地-未來教室]</span>
+              <span class="transfer-tile tile-one" data-tile-index="0" data-initial-label="實體課 [吉林基地]" data-final-label="實體課 [吉林基地-協作坊]">實體課 [吉林基地]</span>
+              <span class="transfer-tile tile-two" data-tile-index="1" data-initial-label="線上課 [線上教室]" data-final-label="線上課 [線上教室]">線上課 [線上教室]</span>
+              <span class="transfer-tile tile-three" data-tile-index="2" data-initial-label="活動 [弘道基地]" data-final-label="活動 [弘道基地-未來教室]">活動 [弘道基地]</span>
             </div>
 
             <span class="hero-progressive-fog" aria-hidden="true">
@@ -209,7 +209,7 @@
               <div class="field notification-time-field">
                 <span id="notification-time-label">通知時間</span>
                 <div class="notification-time-list" id="notify-hours-list"></div>
-                <span class="field-hint">Google 約在所選時間前後 15 分鐘啟動同步，完成後寄出通知</span>
+                <span class="field-hint">課表每天約於 03:00、11:00、18:00、21:00 檢查；通知約在所選時間前後 15 分鐘啟動寄送，若同步尚未完成則稍後寄出</span>
               </div>
             </div>
 
@@ -295,7 +295,14 @@
   <script>
     (function () {
       var version = window.TSCHOOL_ASSET_VERSION || 'stable';
-      var assets = ['vendor/lenis-1.3.25.min.js', 'schedule-data.js', 'sidebar-template.js', 'code-template.js', 'app.js'];
+      var coreDependencies = [
+        'vendor/lenis-1.3.25.min.js',
+        'schedule-data.js'
+      ];
+      var generationDependencies = [
+        'sidebar-template.js',
+        'code-template.js'
+      ];
 
       function loadScript(src) {
         return new Promise(function (resolve, reject) {
@@ -307,16 +314,26 @@
         });
       }
 
-      assets.reduce(function (chain, src) {
-        return chain.then(function () { return loadScript(src); });
-      }, Promise.resolve()).catch(function (error) {
+      function showLoadError(error) {
         var toast = document.getElementById('toast');
         if (toast) {
           toast.textContent = '載入程式失敗，請重新整理頁面。';
           toast.classList.add('visible');
         }
         console.error(error);
-      });
+      }
+
+      window.TSCHOOL_GENERATION_ASSETS_READY = Promise
+        .all(generationDependencies.map(loadScript))
+        .then(function () { return true; })
+        .catch(function (error) {
+          showLoadError(error);
+          return false;
+        });
+
+      Promise.all(coreDependencies.map(loadScript))
+        .then(function () { return loadScript('app.js'); })
+        .catch(showLoadError);
     })();
   </script>
 </body>

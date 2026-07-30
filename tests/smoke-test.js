@@ -186,7 +186,7 @@ assert.equal(sidebarHtml.includes('<span>通知 Email</span>'), false);
 assert.equal(sidebarHtml.includes('id="notify-hours-list"'), true);
 assert.equal(sidebarHtml.includes('data-add-notify-hour'), true);
 assert.equal(sidebarHtml.includes('data-remove-notify-hour'), true);
-assert.equal(sidebarHtml.includes('autoSyncHours: notificationHours'), true);
+assert.equal(sidebarHtml.includes('notificationHours: notificationHours'), true);
 assert.equal(sidebarHtml.includes('notifySyncHour: Math.max.apply(null, notificationHours)'), true);
 assert.equal(
   sidebarHtml.includes("'prepareFirstSyncCourseOutlinesFromUi'"),
@@ -440,6 +440,36 @@ assert.match(
   /class="hero-paper-track">[\s\S]*?class="hero-depth-scene">[\s\S]*?class="hero-progressive-fog"/,
   'Hero 紙張與行程卡應位於 3D 場景，模糊層則維持為場景外的上層兄弟節點'
 );
+assert.match(
+  configuratorHtml,
+  /data-initial-label="實體課 \[吉林基地\]" data-final-label="實體課 \[吉林基地-協作坊\]"[\s\S]*?data-initial-label="線上課 \[線上教室\]" data-final-label="線上課 \[線上教室\]"[\s\S]*?data-initial-label="活動 \[弘道基地\]" data-final-label="活動 \[弘道基地-未來教室\]"/,
+  'Hero 三張行程卡應分別保留課表起點與日曆終點文案'
+);
+assert.equal(
+  configuratorAppSource.includes('heroScrambleInterval: 72'),
+  true,
+  'Hero 行程卡移動期間應以受控頻率更新動態亂碼'
+);
+assert.equal(
+  configuratorAppSource.includes('heroTileArrivalScrambleDuration: 1000'),
+  true,
+  'Hero 行程卡完整抵達紙張後應再維持一秒動態亂碼'
+);
+assert.equal(
+  configuratorAppSource.includes('function tileIsFullyInsideBoard('),
+  true,
+  'Hero 行程卡應以完整進入起點或終點紙張作為抵達判定'
+);
+assert.match(
+  configuratorAppSource,
+  /settleTileAfterArrival\(tile, index, 'final'\)[\s\S]*?settleTileAfterArrival\(tile, index, 'initial'\)/,
+  'Hero 去程與回程應共用一致的抵達延遲'
+);
+assert.match(
+  configuratorStylesSource,
+  /--hero-scroll-length-desktop:\s*245svh;[\s\S]*?--hero-scroll-length-mobile:\s*205dvh;/,
+  'Hero 桌機與手機捲動行程應由集中參數控制'
+);
 assert.equal(
   configuratorAppSource.includes('function initHeroDepthInteraction()'),
   true,
@@ -506,6 +536,31 @@ assert.equal(
   ),
   true,
   '鍵盤尺寸連續變化後應等待 viewport 穩定再校正聚焦欄位'
+);
+assert.match(
+  configuratorAppSource,
+  /const viewportGeometryChanged =[\s\S]*?if \(viewportGeometryChanged\) \{\s*scheduleFocusedControlVisibility\(\{ afterViewportSettles: true \}\);/,
+  'Safari offset-only visual viewport 位移不得反覆觸發頁面捲動校正'
+);
+assert.match(
+  configuratorStylesSource,
+  /html\[data-input-active\] \{[\s\S]*?overflow-anchor: none;/,
+  '輸入期間應停用 scroll anchoring，避免搜尋結果重建讓頁面跳動'
+);
+assert.match(
+  configuratorHtml,
+  /TSCHOOL_GENERATION_ASSETS_READY = Promise[\s\S]*?all\(generationDependencies\.map\(loadScript\)\)[\s\S]*?Promise\.all\(coreDependencies\.map\(loadScript\)\)[\s\S]*?loadScript\('app\.js'\)/,
+  '核心與程式碼產生資產應平行下載，主應用程式不得等待最後一步才使用的模板'
+);
+assert.equal(
+  configuratorHtml.includes('assets.reduce(function'),
+  false,
+  '啟動資產不得逐一串行下載'
+);
+assert.match(
+  configuratorAppSource,
+  /async function generateOutput\(\)[\s\S]*?await window\.TSCHOOL_GENERATION_ASSETS_READY/,
+  '使用者比模板下載更早完成設定時，產生 Code.gs 必須等待模板就緒'
 );
 const codeMaskStyles = configuratorStylesSource.match(
   /\.control-panel-card \.code-window::after \{([\s\S]*?)\n\}/
@@ -579,12 +634,12 @@ assert.equal(
 );
 
 const generatedCode = global.buildAppsScriptCode({
-  appVersion: '2.0.0-mvp',
+  appVersion: '2.0.0-rc.1',
   sourceApiUrl: scheduleData.API_URL,
   gradeName: '高一',
   calendarName: 'T-SCHOOL 課表',
   notificationEmail: 'test@example.com',
-  autoSyncHours: [5, 12, 18, 22],
+  notificationHours: [5, 12, 18, 22],
   notifySyncHour: 5,
   includeActivities: true,
   excludedActivities: ['高一全校活動'],
@@ -599,6 +654,11 @@ const generatedCode = global.buildAppsScriptCode({
 });
 
 assert.doesNotThrow(() => new Function(generatedCode));
+assert.equal(
+  generatedCode.includes('const APP_VERSION = "2.0.0-rc.1";'),
+  true,
+  '產生的 Code.gs 應標示目前的 2.0.0 release candidate 版本'
+);
 [
   'getSettingsUiData',
   'getSourceCatalogForUi',
@@ -687,29 +747,34 @@ assert.equal(generatedCode.includes('function updateCalendarOutlineFields_('), t
 assert.equal(generatedCode.includes('const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;'), true);
 assert.equal(generatedCode.includes("const TERM_TRANSITION_NOTICE_HANDLER = 'retryTermTransitionNotice';"), true);
 assert.equal(
-  generatedCode.includes('.nearMinute(0)'),
+  generatedCode.includes('const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];'),
   true,
-  '每日行程同步觸發器應在所選整點前後約 15 分鐘啟動'
+  '產生的 Code.gs 應固定保存四個課表偵測與 Calendar 同步時段'
 );
 assert.equal(
-  generatedCode.includes("function syncMyScheduleAtNotificationTime()"),
+  generatedCode.includes("function sendScheduledNotifications()"),
   true,
-  '非最後通知時段應使用排程專用入口'
+  '通知時間應有不執行課表同步的獨立入口'
 );
 assert.equal(
-  generatedCode.includes("notificationWindow: true"),
+  generatedCode.includes("function sendScheduledNotificationsWithDailySummary()"),
   true,
-  '排程入口應直接保留通知時段狀態，避免整點前觸發時被誤判'
+  '最後一個通知時間應有獨立的每日成功摘要入口'
+);
+assert.equal(
+  generatedCode.includes("function retryScheduledNotificationDelivery()"),
+  true,
+  '通知時間與背景同步重疊時應能延後重試，不得遺失待寄異動'
 );
 assert.equal(generatedCode.includes("ui.createMenu('高負載測試')"), true);
 assert.equal(generatedCode.includes('function setupHighLoadTestEnvironment('), false);
 
 const highLoadGeneratedCode = global.buildAppsScriptCode({
-  appVersion: '2.0.0-mvp',
+  appVersion: '2.0.0-rc.1',
   sourceApiUrl: scheduleData.API_URL,
   gradeName: '高二',
   notificationEmail: 'test@example.com',
-  autoSyncHours: [6],
+  notificationHours: [6],
   notifySyncHour: 6,
   includeActivities: true,
   selectedCourses: ['國語文'],
@@ -1077,11 +1142,11 @@ if (fs.existsSync('/tmp/tschool-requirements-grade2.json')) {
 }
 
 const noActivityCode = global.buildAppsScriptCode({
-  appVersion: '2.0.0-mvp',
+  appVersion: '2.0.0-rc.1',
   sourceApiUrl: scheduleData.API_URL,
   gradeName: '高二',
   notificationEmail: 'test@example.com',
-  autoSyncHours: [6],
+  notificationHours: [6],
   notifySyncHour: 6,
   includeActivities: false,
   excludedActivities: [],
@@ -1473,12 +1538,38 @@ context.PropertiesService = {
   }
 };
 const initialGeneratedSettings = context.loadSettings_();
-assert.deepEqual(Array.from(initialGeneratedSettings.autoSyncHours), [5, 12, 18, 22]);
+assert.deepEqual(
+  Array.from(initialGeneratedSettings.autoSyncHours),
+  [3, 11, 18, 21],
+  '課表偵測與 Calendar 同步時段應固定，不得沿用通知時間'
+);
+assert.deepEqual(
+  Array.from(initialGeneratedSettings.notificationHours),
+  [5, 12, 18, 22],
+  '使用者選擇的時段應只控制通知寄送'
+);
 assert.equal(
   initialGeneratedSettings.notifySyncHour,
   22,
   '每日成功摘要應安排在最後一個通知時間，才能讓當日行程調整優先'
 );
+context.writeChunkedJson_('TSCHOOL_SETTINGS', {
+  schemaVersion: 4,
+  autoSyncHours: [7, 19],
+  notifySyncHour: 19
+});
+const migratedNotificationSettings = context.loadSettings_();
+assert.deepEqual(
+  Array.from(migratedNotificationSettings.notificationHours),
+  [7, 19],
+  '舊版 autoSyncHours 應遷移為通知時間'
+);
+assert.deepEqual(
+  Array.from(migratedNotificationSettings.autoSyncHours),
+  [3, 11, 18, 21],
+  '遷移舊設定後仍應使用固定同步時段'
+);
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
 assert.equal(initialGeneratedSettings.notificationPreset, 'standard');
 assert.equal(initialGeneratedSettings.customNotification, '');
 const utf8ChunkPayload = { text: '課綱😀'.repeat(4000) };
@@ -1516,23 +1607,29 @@ context.ScriptApp = {
     projectTriggers = projectTriggers.filter(item => item !== trigger);
   },
   newTrigger(handler) {
+    const schedule = {};
     const builder = {
       timeBased() {
         return builder;
       },
-      atHour() {
+      atHour(hour) {
+        schedule.hour = hour;
         return builder;
       },
-      nearMinute() {
+      nearMinute(minute) {
+        schedule.nearMinute = minute;
         return builder;
       },
-      everyDays() {
+      everyDays(days) {
+        schedule.everyDays = days;
         return builder;
       },
-      inTimezone() {
+      inTimezone(timezone) {
+        schedule.timezone = timezone;
         return builder;
       },
-      after() {
+      after(delay) {
+        schedule.after = delay;
         return builder;
       },
       create() {
@@ -1543,7 +1640,8 @@ context.ScriptApp = {
           },
           getHandlerFunction() {
             return handler;
-          }
+          },
+          schedule: Object.assign({}, schedule)
         };
         projectTriggers.push(trigger);
         return trigger;
@@ -1769,7 +1867,7 @@ emailTemplateFetchShouldFail = false;
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
 const notificationTimingSettings = {
   notificationEmail: 'test@example.com',
-  autoSyncHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
+  notificationHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
   notifySyncHour: (Number(formatDate(new Date(), 'H')) + 1) % 24
 };
 const scheduledChangeResult = {
@@ -1818,26 +1916,94 @@ assert.equal(
   context.loadNotificationQueueState_().pendingChangeData.changeCount,
   1
 );
+const laterScheduledChangeResult = JSON.parse(JSON.stringify(scheduledChangeResult));
+laterScheduledChangeResult.changes[0].oldItem.originalTitle = '第二門測試課程';
+laterScheduledChangeResult.changes[0].newItem.originalTitle = '第二門測試課程';
+laterScheduledChangeResult.changes[0].oldItem.dateKey = '2026-07-29';
+laterScheduledChangeResult.changes[0].newItem.dateKey = '2026-07-30';
 context.sendSyncNotificationsSafe_(
   notificationTimingSettings,
-  {
-    created: 0,
-    updated: 0,
-    outlineUpdated: 0,
-    deleted: 0,
-    unchanged: 9,
-    omittedChangeCount: 0,
-    changes: []
-  },
-  { reason: 'source', notifyOnSuccess: true, notificationWindow: true }
+  laterScheduledChangeResult,
+  { reason: 'source' }
 );
+assert.equal(
+  context.loadNotificationQueueState_().pendingChangeData.changeCount,
+  2,
+  '不同固定同步時段偵測到的兩筆異動應合併保留'
+);
+for (let index = 0; index < 3; index += 1) {
+  context.sendSyncNotificationsSafe_(
+    notificationTimingSettings,
+    {
+      created: 0,
+      updated: 0,
+      outlineUpdated: 0,
+      deleted: 0,
+      unchanged: 9,
+      omittedChangeCount: 0,
+      changes: []
+    },
+    { reason: 'source' }
+  );
+}
+assert.equal(
+  context.loadNotificationQueueState_().pendingChangeData.changeCount,
+  2,
+  '後續三次沒有新異動的同步不得清除先前待寄的行程調整'
+);
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeQueuedChange,
+  '無新異動的固定同步不得提前寄出待寄通知'
+);
+context.writeChunkedJson_('TSCHOOL_SYNC_JOB', {
+  schemaVersion: 1,
+  status: 'running'
+});
+context.requestScheduledNotificationDelivery_(true);
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeQueuedChange,
+  '通知 Trigger 與背景同步重疊時應先等待同步完成'
+);
+assert.equal(
+  projectTriggers.some(trigger =>
+    trigger.getHandlerFunction() === 'retryScheduledNotificationDelivery'
+  ),
+  true,
+  '通知 Trigger 與背景同步重疊時應建立待寄重試'
+);
+context.clearChunkedStore_('TSCHOOL_SYNC_JOB');
+context.retryScheduledNotificationDelivery();
 assert.equal(sentEmailMessages.length, emailsBeforeQueuedChange + 1);
-assert.match(sentEmailMessages.at(-1).subject, /行程調整 1 項/);
+assert.match(sentEmailMessages.at(-1).subject, /行程調整 2 項/);
+assert.match(sentEmailMessages.at(-1).body, /測試課程/);
+assert.match(sentEmailMessages.at(-1).body, /第二門測試課程/);
 assert.doesNotMatch(sentEmailMessages.at(-1).subject, /同步成功/);
 assert.equal(
   context.loadNotificationQueueState_().pendingChangeData,
   null,
   '通知時間應寄出並清除已排程的行程調整'
+);
+context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
+context.writeChunkedJson_('TSCHOOL_STATUS', {
+  ok: true,
+  lastSync: new Date().toISOString(),
+  created: 0,
+  updated: 0,
+  outlineUpdated: 0,
+  deleted: 0,
+  unchanged: 9
+});
+const emailsBeforeDailySummary = sentEmailMessages.length;
+context.requestScheduledNotificationDelivery_(true);
+assert.equal(sentEmailMessages.length, emailsBeforeDailySummary + 1);
+assert.match(sentEmailMessages.at(-1).subject, /行程同步完成/);
+context.requestScheduledNotificationDelivery_(true);
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeDailySummary + 1,
+  '最後通知時間的每日成功摘要同一天不得重複寄送'
 );
 
 const emailsBeforeImmediateError = sentEmailMessages.length;
@@ -1846,6 +2012,7 @@ assert.equal(sentEmailMessages.length, emailsBeforeImmediateError + 1);
 assert.equal(sentEmailMessages.at(-1).body.includes('。'), false);
 assert.match(sentEmailMessages.at(-1).subject, /同步失敗/);
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
+context.clearChunkedStore_('TSCHOOL_STATUS');
 
 const liveOutlineIndexValues = [
   ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '課綱試算表連結'],
@@ -2517,7 +2684,7 @@ const settingsBeforeTermTransition = Object.assign({}, migrationSanitized, {
   selectedCourses: ['測試課程'],
   excludedActivities: ['測試活動'],
   pendingTitles: ['待確認課程'],
-  autoSyncHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
+  notificationHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
   notifySyncHour: (Number(formatDate(new Date(), 'H')) + 1) % 24,
   autoSyncEnabled: true,
   autoSyncEnabledBeforeTermTransition: null,
@@ -2562,7 +2729,7 @@ const failedNoticeSettings = Object.assign({}, settingsBeforeTermTransition, {
   pendingTermKey: '',
   selectedCourses: ['新學期課程'],
   autoSyncEnabled: true,
-  autoSyncHours: [Number(formatDate(new Date(), 'H'))],
+  notificationHours: [Number(formatDate(new Date(), 'H'))],
   notifySyncHour: Number(formatDate(new Date(), 'H'))
 });
 mailFailuresRemaining = 1;
@@ -2848,9 +3015,38 @@ assert.equal(
 context.refreshAutoSyncTriggers_({
   gradeName: '高一',
   autoSyncEnabled: true,
-  autoSyncHours: [5],
-  notifySyncHour: 5
+  notificationHours: [5, 22],
+  notifySyncHour: 22
 });
+const fixedScheduleTriggers = projectTriggers
+  .filter(trigger => trigger.getHandlerFunction() === 'syncMyScheduleToCalendar');
+assert.equal(fixedScheduleTriggers.length, 4);
+assert.deepEqual(
+  fixedScheduleTriggers.map(trigger => trigger.schedule.hour).sort((a, b) => a - b),
+  [3, 11, 18, 21],
+  '通知設定不得改變固定的四個課表偵測與 Calendar 同步時段'
+);
+assert.deepEqual(
+  fixedScheduleTriggers.map(trigger => trigger.schedule.nearMinute),
+  [0, 0, 0, 0],
+  '固定同步時段應使用整點前後約 15 分鐘的 time-driven trigger'
+);
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger => trigger.getHandlerFunction() === 'sendScheduledNotifications')
+    .map(trigger => trigger.schedule.hour),
+  [5],
+  '非最後通知時間只能建立通知寄送 Trigger'
+);
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger =>
+      trigger.getHandlerFunction() === 'sendScheduledNotificationsWithDailySummary'
+    )
+    .map(trigger => trigger.schedule.hour),
+  [22],
+  '最後一個通知時間應寄送待寄異動，無異動時才寄每日成功摘要'
+);
 assert.equal(
   projectTriggers.some(trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily'),
   false,
@@ -2859,13 +3055,20 @@ assert.equal(
 context.refreshAutoSyncTriggers_({
   gradeName: '高二',
   autoSyncEnabled: true,
-  autoSyncHours: [5],
+  notificationHours: [5],
   notifySyncHour: 5
 });
 assert.equal(
   projectTriggers.filter(trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily').length,
   1,
   '高二應建立一個獨立的每日課綱更新觸發器'
+);
+assert.equal(
+  projectTriggers.find(
+    trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily'
+  ).schedule.hour,
+  1,
+  '課綱更新應安排在最早固定同步時段 03:00 的約兩小時前'
 );
 
 projectTriggers = projectTriggers.filter(trigger =>

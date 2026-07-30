@@ -175,7 +175,7 @@ function runHighLoadFirstSyncTest() {
       calendarName,
       notificationEmail: testNotificationEmail,
       autoSyncEnabled: true,
-      autoSyncHours: [6],
+      notificationHours: [6],
       notifySyncHour: 6,
       descriptionPreset: 'standard',
       customDescription: '',
@@ -873,16 +873,16 @@ function buildHighLoadTestSettings_(source) {
 
   window.buildAppsScriptCode = function buildAppsScriptCode(settings) {
     const requestedNotifyHour = normalizeHour(settings.notifySyncHour, 5);
-    const autoSyncHours = normalizeHourArray(
-      settings.autoSyncHours,
+    const notificationHours = normalizeHourArray(
+      settings.notificationHours || settings.autoSyncHours,
       requestedNotifyHour
     );
-    const notifyHour = autoSyncHours[autoSyncHours.length - 1];
+    const notifyHour = notificationHours[notificationHours.length - 1];
     const gradeName = settings.gradeName || '高一';
     const defaultCalendarName = `${gradeName}行程｜T-SCHOOL Schedule Sync`;
     const initialSettings = {
-      schemaVersion: 4,
-      appVersion: settings.appVersion || '2.0.0-mvp',
+      schemaVersion: 5,
+      appVersion: settings.appVersion || '2.0.0-rc.1',
       setupComplete: false,
       gradeName,
       calendarId: '',
@@ -892,7 +892,8 @@ function buildHighLoadTestSettings_(source) {
       includeActivities: settings.includeActivities !== false,
       excludedActivities: settings.excludedActivities || [],
       autoSyncEnabled: true,
-      autoSyncHours,
+      autoSyncHours: [3, 11, 18, 21],
+      notificationHours,
       notifySyncHour: notifyHour,
       notificationPreset: 'standard',
       customNotification: '',
@@ -919,9 +920,10 @@ function buildHighLoadTestSettings_(source) {
       ? buildHighLoadTestAppsScriptCode()
       : '';
 
-    return `const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-mvp')};
-const SETTINGS_SCHEMA_VERSION = 4;
+    return `const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-rc.1')};
+const SETTINGS_SCHEMA_VERSION = 5;
 const TIMEZONE = 'Asia/Taipei';
+const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];
 const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
 const EMAIL_TEMPLATE_MANIFEST_URL = 'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json';
 const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8';
@@ -935,10 +937,14 @@ const STATUS_STORE = 'TSCHOOL_STATUS';
 const SYNC_PROGRESS_STORE = 'TSCHOOL_SYNC_PROGRESS';
 const NOTICE_STORE = 'TSCHOOL_NOTICE_STATE';
 const NOTIFICATION_QUEUE_STORE = 'TSCHOOL_NOTIFICATION_QUEUE';
+const NOTIFICATION_DELIVERY_REQUEST_STORE = 'TSCHOOL_NOTIFICATION_DELIVERY_REQUEST';
 const COURSE_OUTLINE_INDEX_CACHE_STORE = 'TSCHOOL_COURSE_OUTLINE_INDEX_CACHE';
 const SYNC_JOB_SCHEMA_VERSION = 1;
 const SYNC_CONTINUATION_HANDLER = 'continueScheduleSync';
 const SYNC_WATCHDOG_HANDLER = 'watchScheduleSync';
+const NOTIFICATION_HANDLER = 'sendScheduledNotifications';
+const FINAL_NOTIFICATION_HANDLER = 'sendScheduledNotificationsWithDailySummary';
+const NOTIFICATION_DELIVERY_RETRY_HANDLER = 'retryScheduledNotificationDelivery';
 const SYNC_INITIAL_SETUP_BATCH_OPERATIONS = 40;
 const SYNC_BATCH_MAX_CALENDAR_OPERATIONS = 80;
 const SYNC_BATCH_SOFT_LIMIT_MS = 150 * 1000;
@@ -1424,12 +1430,14 @@ function sanitizeSettingsInput_(input, previous, source) {
   }
 
   const requestedNotifyHour = normalizeHour_(value.notifySyncHour, 5);
-  const hours = normalizeHourArray_(
-    (Array.isArray(value.autoSyncHours) ? value.autoSyncHours : [])
+  const notificationHours = normalizeHourArray_(
+    (Array.isArray(value.notificationHours)
+      ? value.notificationHours
+      : (Array.isArray(value.autoSyncHours) ? value.autoSyncHours : []))
       .concat([requestedNotifyHour]),
     requestedNotifyHour
   );
-  const notifyHour = Math.max.apply(null, hours);
+  const notifyHour = Math.max.apply(null, notificationHours);
   const reminderMode = ['none', 'popup', 'email'].indexOf(value.reminderMode) !== -1
     ? value.reminderMode
     : 'none';
@@ -1463,7 +1471,8 @@ function sanitizeSettingsInput_(input, previous, source) {
     calendarName,
     notificationEmail,
     autoSyncEnabled: value.autoSyncEnabled !== false,
-    autoSyncHours: hours,
+    autoSyncHours: SCHEDULE_SYNC_HOURS.slice(),
+    notificationHours,
     notifySyncHour: notifyHour,
     notificationPreset: 'standard',
     customNotification: '',
@@ -1598,18 +1607,11 @@ function syncMyScheduleToCalendar() {
 }
 
 function syncMyScheduleAtNotificationTime() {
-  return runSyncEntryPoint_({
-    reason: 'source',
-    notificationWindow: true
-  });
+  return sendScheduledNotifications();
 }
 
 function syncMyScheduleToCalendarWithNotification() {
-  return runSyncEntryPoint_({
-    reason: 'source',
-    notifyOnSuccess: true,
-    notificationWindow: true
-  });
+  return sendScheduledNotificationsWithDailySummary();
 }
 
 function forceFullSyncMyScheduleToCalendar() {
@@ -1960,9 +1962,7 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
     firstSetup: Boolean(options.firstSetup),
     forceCalendarCheck,
     notifyOnSuccess: Boolean(options.notifyOnSuccess),
-    notificationWindow: Boolean(
-      options.notificationWindow || isConfiguredNotificationHour_(settings)
-    ),
+    notificationWindow: Boolean(options.notificationWindow),
     deletionApproved: Boolean(options.deletionApproved),
     input,
     createdAt: now,
@@ -2329,7 +2329,8 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
   });
   clearChunkedStore_(SYNC_JOB_STORE);
   deleteTriggersByHandlers_([SYNC_CONTINUATION_HANDLER, SYNC_WATCHDOG_HANDLER]);
-    return result;
+  scheduleRequestedNotificationDeliveryRetry_();
+  return result;
 }
 
 function handleSyncJobFailure_(job, error) {
@@ -4687,6 +4688,18 @@ function loadSettings_() {
   const stored = readChunkedJson_(SETTINGS_STORE, null);
   const settings = Object.assign({}, DEFAULT_SETTINGS, stored || {});
   settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
+  const legacyNotificationHours = stored && Array.isArray(stored.autoSyncHours)
+    ? stored.autoSyncHours
+    : DEFAULT_SETTINGS.notificationHours;
+  const storedNotificationHours = stored && Array.isArray(stored.notificationHours)
+    ? stored.notificationHours
+    : legacyNotificationHours;
+  settings.notificationHours = normalizeHourArray_(
+    storedNotificationHours,
+    normalizeHour_(settings.notifySyncHour, 5)
+  );
+  settings.notifySyncHour = Math.max.apply(null, settings.notificationHours);
+  settings.autoSyncHours = SCHEDULE_SYNC_HOURS.slice();
   settings.selectedCourses = uniqueStrings_(settings.selectedCourses || []);
   settings.excludedActivities = uniqueStrings_(settings.excludedActivities || []);
   settings.knownTitles = uniqueStrings_(settings.knownTitles || []);
@@ -4894,10 +4907,23 @@ function refreshAutoSyncTriggers_(settings) {
     deleteCourseOutlineMaintenanceTriggers_();
     return;
   }
-  settings.autoSyncHours.forEach(hour => {
+  SCHEDULE_SYNC_HOURS.forEach(hour => {
+    ScriptApp.newTrigger('syncMyScheduleToCalendar')
+      .timeBased()
+      .atHour(hour)
+      .nearMinute(0)
+      .everyDays(1)
+      .inTimezone(TIMEZONE)
+      .create();
+  });
+  const notificationHours = normalizeHourArray_(
+    settings.notificationHours || settings.autoSyncHours,
+    settings.notifySyncHour
+  );
+  notificationHours.forEach(hour => {
     const handler = hour === settings.notifySyncHour
-      ? 'syncMyScheduleToCalendarWithNotification'
-      : 'syncMyScheduleAtNotificationTime';
+      ? FINAL_NOTIFICATION_HANDLER
+      : NOTIFICATION_HANDLER;
     ScriptApp.newTrigger(handler)
       .timeBased()
       .atHour(hour)
@@ -4920,8 +4946,7 @@ function refreshAutoSyncTriggers_(settings) {
 }
 
 function getCourseOutlineDailyRefreshHour_(settings) {
-  const hours = normalizeHourArray_(settings.autoSyncHours, settings.notifySyncHour);
-  const earliest = Math.min.apply(null, hours);
+  const earliest = Math.min.apply(null, SCHEDULE_SYNC_HOURS);
   return (earliest + 22) % 24;
 }
 
@@ -4930,6 +4955,9 @@ function deleteDailySyncTriggers_() {
     'syncMyScheduleToCalendar',
     'syncMyScheduleAtNotificationTime',
     'syncMyScheduleToCalendarWithNotification',
+    NOTIFICATION_HANDLER,
+    FINAL_NOTIFICATION_HANDLER,
+    NOTIFICATION_DELIVERY_RETRY_HANDLER,
     COURSE_OUTLINE_DAILY_HANDLER
   ]);
 }
@@ -5099,41 +5127,129 @@ function resetSyncState() {
   clearChunkedStore_(STATUS_STORE);
 }
 
+function sendScheduledNotifications() {
+  return requestScheduledNotificationDelivery_(false);
+}
+
+function sendScheduledNotificationsWithDailySummary() {
+  return requestScheduledNotificationDelivery_(true);
+}
+
+function retryScheduledNotificationDelivery() {
+  deleteTriggersByHandlers_([NOTIFICATION_DELIVERY_RETRY_HANDLER]);
+  return processScheduledNotificationDelivery_();
+}
+
+function requestScheduledNotificationDelivery_(includeDailySummary) {
+  const properties = PropertiesService.getScriptProperties();
+  const previous = loadScheduledNotificationDeliveryRequest_();
+  properties.setProperty(NOTIFICATION_DELIVERY_REQUEST_STORE, JSON.stringify({
+    requestedAt: new Date().toISOString(),
+    includeDailySummary: Boolean(
+      includeDailySummary || previous && previous.includeDailySummary
+    )
+  }));
+  return processScheduledNotificationDelivery_();
+}
+
+function loadScheduledNotificationDeliveryRequest_() {
+  const raw = PropertiesService.getScriptProperties()
+    .getProperty(NOTIFICATION_DELIVERY_REQUEST_STORE);
+  if (!raw) return null;
+  try {
+    const request = JSON.parse(raw);
+    return {
+      requestedAt: String(request.requestedAt || ''),
+      includeDailySummary: Boolean(request.includeDailySummary)
+    };
+  } catch (error) {
+    return { requestedAt: '', includeDailySummary: false };
+  }
+}
+
+function scheduleRequestedNotificationDeliveryRetry_() {
+  if (!loadScheduledNotificationDeliveryRequest_()) return false;
+  return ensureOneTimeTrigger_(
+    NOTIFICATION_DELIVERY_RETRY_HANDLER,
+    SYNC_CONTINUATION_DELAY_MS
+  );
+}
+
+function processScheduledNotificationDelivery_() {
+  const request = loadScheduledNotificationDeliveryRequest_();
+  if (!request) return { ok: true, skipped: true };
+  if (isActiveSyncJob_(loadSyncJob_())) {
+    scheduleRequestedNotificationDeliveryRetry_();
+    return { ok: true, deferred: true };
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    scheduleRequestedNotificationDeliveryRetry_();
+    return { ok: true, deferred: true };
+  }
+
+  try {
+    if (isActiveSyncJob_(loadSyncJob_())) {
+      scheduleRequestedNotificationDeliveryRetry_();
+      return { ok: true, deferred: true };
+    }
+    const settings = loadSettings_();
+    const changeNotificationSent = deliverScheduleChangeNotification_(
+      settings,
+      null
+    );
+    const queuedNotificationCount = flushQueuedNotificationsSafe_(settings);
+    const successSummarySent = request.includeDailySummary &&
+      !changeNotificationSent &&
+      !hasChangeNotificationToday_()
+      ? sendLatestSyncSuccessSummaryIfNeeded_(settings)
+      : false;
+
+    PropertiesService.getScriptProperties()
+      .deleteProperty(NOTIFICATION_DELIVERY_REQUEST_STORE);
+    deleteTriggersByHandlers_([NOTIFICATION_DELIVERY_RETRY_HANDLER]);
+    return {
+      ok: true,
+      changeNotificationSent,
+      queuedNotificationCount,
+      successSummarySent
+    };
+  } catch (error) {
+    Logger.log('排程通知寄送失敗，稍後自動重試：' + error.message);
+    scheduleRequestedNotificationDeliveryRetry_();
+    return { ok: false, deferred: true, message: userFacingError_(error) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function sendLatestSyncSuccessSummaryIfNeeded_(settings) {
+  const dateKey = formatDateKey_(new Date());
+  const queueState = loadNotificationQueueState_();
+  if (queueState.lastSuccessSummaryDate === dateKey) return false;
+  const status = loadStatus_();
+  if (!status || status.ok !== true || !status.lastSync) return false;
+
+  sendEmail_(
+    settings,
+    'sync_success',
+    '行程同步完成',
+    formatSyncResultMessage_(status),
+    buildSyncEmailData_(status)
+  );
+  queueState.lastSuccessSummaryDate = dateKey;
+  saveNotificationQueueState_(queueState);
+  return true;
+}
+
 function sendSyncNotificationsSafe_(settings, result, options) {
   try {
-    const notificationWindow = Boolean(options.notificationWindow);
-    let changeNotificationSent = false;
-
     if (options.reason === 'source' && result.changes.length > 0) {
-      const changeData = buildChangeEmailData_(result);
-      if (notificationWindow) {
-        changeNotificationSent = deliverScheduleChangeNotification_(
-          settings,
-          changeData
-        );
-      } else {
-        queueScheduleChangeNotification_(changeData);
-      }
-    } else if (notificationWindow) {
-      changeNotificationSent = deliverScheduleChangeNotification_(settings, null);
-    }
-
-    if (notificationWindow) {
-      flushQueuedNotificationsSafe_(settings);
-    }
-
-    if (options.notifyOnSuccess && notificationWindow &&
-        !changeNotificationSent && !hasChangeNotificationToday_()) {
-      sendEmail_(
-        settings,
-        'sync_success',
-        '行程同步完成',
-        formatSyncResultMessage_(result),
-        buildSyncEmailData_(result)
-      );
+      queueScheduleChangeNotification_(buildChangeEmailData_(result));
     }
   } catch (error) {
-    Logger.log('同步通知寄送失敗：' + error.message);
+    Logger.log('同步異動摘要保存失敗：' + error.message);
   }
 }
 
@@ -5252,7 +5368,7 @@ function sendActionRequiredSafe_(
 
 function isConfiguredNotificationHour_(settings) {
   const hours = normalizeHourArray_(
-    settings && settings.autoSyncHours,
+    settings && (settings.notificationHours || settings.autoSyncHours),
     settings && settings.notifySyncHour
   );
   const currentHour = Number(
@@ -5267,7 +5383,8 @@ function loadNotificationQueueState_() {
     schemaVersion: 1,
     pending: Array.isArray(stored.pending) ? stored.pending.slice(0, 50) : [],
     pendingChangeData: stored.pendingChangeData || null,
-    lastChangeDate: String(stored.lastChangeDate || '')
+    lastChangeDate: String(stored.lastChangeDate || ''),
+    lastSuccessSummaryDate: String(stored.lastSuccessSummaryDate || '')
   };
 }
 
@@ -5276,7 +5393,8 @@ function saveNotificationQueueState_(state) {
     schemaVersion: 1,
     pending: Array.isArray(state.pending) ? state.pending.slice(0, 50) : [],
     pendingChangeData: state.pendingChangeData || null,
-    lastChangeDate: String(state.lastChangeDate || '')
+    lastChangeDate: String(state.lastChangeDate || ''),
+    lastSuccessSummaryDate: String(state.lastSuccessSummaryDate || '')
   });
 }
 

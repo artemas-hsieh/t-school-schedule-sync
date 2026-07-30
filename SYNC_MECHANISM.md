@@ -603,7 +603,7 @@ Google 的 Properties 限制可能調整，正式數值以 [Apps Script 官方�
 
 降低尖峰的方式包括：
 
-- 每日行程同步觸發器使用 `atHour(hour).nearMinute(0)`；依 [Apps Script 官方觸發器說明](https://developers.google.com/apps-script/reference/script/clock-trigger-builder#nearMinute(Integer))，Google 會在所選整點前後約 15 分鐘啟動。觸發器改用排程專用入口，直接保留通知時段狀態，避免整點前啟動時把通知誤排到下一時段。實際 Email 仍在同步完成後寄出，因此大量異動、分批續跑或 Google 服務延遲時可能更晚。
+- 課表偵測與 Calendar 同步固定於每日 03:00、11:00、18:00、21:00，使用 `atHour(hour).nearMinute(0)`；依 [Apps Script 官方觸發器說明](https://developers.google.com/apps-script/reference/script/clock-trigger-builder#nearMinute(Integer))，Google 會在各整點前後約 15 分鐘啟動。使用者通知時間另建立只負責寄信的 Trigger；固定同步偵測到的異動會先持久保存，後續零異動同步不會清除，直到下一個通知時間成功寄出。
 - 課綱每日更新仍只指定小時、不固定分鐘，讓共用 Sheets 的讀取分散在完整一小時內，避免所有學生集中於整點。
 - 課綱每日只讀一次，不綁在每次 Calendar 同步。
 - 每位學生的日常 Calendar 同步只寫異動。

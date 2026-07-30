@@ -554,7 +554,7 @@
         <div class="field">
           <span>通知時間</span>
           <div class="notification-time-list" id="notify-hours-list" aria-label="通知時間"></div>
-          <p class="hint">Google 約在所選時間前後 15 分鐘啟動同步，完成後寄出通知</p>
+          <p class="hint">課表每天約於 03:00、11:00、18:00、21:00 檢查；通知約在所選時間前後 15 分鐘啟動寄送，若同步尚未完成則稍後寄出</p>
         </div>
       </section>
 
@@ -676,7 +676,7 @@
           : settings.autoSyncEnabled;
         byId('reminder-mode').value = settings.reminderMode;
         byId('reminder-minutes').value = String(settings.reminderMinutes || 10);
-        renderNotifyHours(settings.autoSyncHours || [settings.notifySyncHour]);
+        renderNotifyHours(settings.notificationHours || settings.autoSyncHours || [settings.notifySyncHour]);
         renderCalendars(data.calendars, settings.calendarId, settings.calendarName);
         renderSource(data.source);
         renderCourses();
@@ -958,7 +958,7 @@
           calendarName: byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade()),
           notificationEmail: byId('email').value.trim(),
           autoSyncEnabled: byId('auto-sync').checked,
-          autoSyncHours: notificationHours,
+          notificationHours: notificationHours,
           notifySyncHour: Math.max.apply(null, notificationHours),
           reminderMode: byId('reminder-mode').value,
           reminderMinutes: Number(byId('reminder-minutes').value)

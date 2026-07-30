@@ -67,7 +67,7 @@ const MOTION_CONFIG = Object.freeze({
   initialBoundaryMinLerp: 0.12,
   initialBoundaryBlendDistanceRatio: 0.55,
   inputViewportSettleDelay: 120,
-  focusLineRatio: 0.5,
+  focusLineRatio  : 0.5,
   focusSwitchHysteresisForward: 48,
   focusSwitchHysteresisBackward: 96,
   generatedCodeTransitionDelay: 48,
@@ -75,6 +75,8 @@ const MOTION_CONFIG = Object.freeze({
   footerReturnScrollDuration: 3.25,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
+  heroScrambleInterval: 72,
+  heroTileArrivalScrambleDuration: 400,
   heroDesktopPaperTravelRatio: 0.06,
   heroMobilePaperTravelRatio: 0.13,
   heroDesktopTileArc: -30,
@@ -882,9 +884,9 @@ function isHighLoadTestGenerationEnabled() {
 }
 
 function getSettings() {
-  const autoSyncHours = getSelectedNotifyHours();
-  const notifyHour = autoSyncHours.length
-    ? autoSyncHours[autoSyncHours.length - 1]
+  const notificationHours = getSelectedNotifyHours();
+  const notifyHour = notificationHours.length
+    ? notificationHours[notificationHours.length - 1]
     : DEFAULTS.notifyHour;
 
   const summary = state.sourceSummary;
@@ -893,12 +895,12 @@ function getSettings() {
   const includeActivities = activityTitles.some(title => !excludedActivities.has(title));
 
   return {
-    appVersion: '2.0.0-mvp',
+    appVersion: '2.0.0-rc.1',
     sourceApiUrl: window.TSchoolScheduleData.API_URL,
     gradeName: getCurrentGrade(),
     calendarName: getDefaultCalendarName(getCurrentGrade()),
     notificationEmail: elements.notificationEmail.value.trim(),
-    autoSyncHours,
+    notificationHours,
     notifySyncHour: notifyHour,
     includeActivities,
     excludedActivities: Array.from(excludedActivities).sort((a, b) =>
@@ -937,9 +939,19 @@ function updateOutput() {
   }
 }
 
-function generateOutput() {
+async function generateOutput() {
   const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
-  if (!ready || typeof window.buildAppsScriptCode !== 'function') {
+  if (!ready) {
+    updateGeneratedCodeAvailability(false);
+    return false;
+  }
+
+  const generationAssetsReady = await window.TSCHOOL_GENERATION_ASSETS_READY;
+
+  if (
+    generationAssetsReady === false ||
+    typeof window.buildAppsScriptCode !== 'function'
+  ) {
     updateGeneratedCodeAvailability(false);
     return false;
   }
@@ -1149,18 +1161,130 @@ function initHeroScroll() {
   const calendarBoard = stage?.querySelector('.calendar-board');
   const mobileTileHorizontalAnchors = [0.12, 0.18, 0.1];
   const desktopTileEndTopRatios = [0.22, 0.47, 0.72];
+  const scrambleCharacters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
   if (!stage || !visual || !paperTrack || tiles.length === 0) {
     return;
   }
 
+  const tileLabels = tiles.map(tile => ({
+    initial: tile.dataset.initialLabel || tile.textContent || '',
+    final: tile.dataset.finalLabel || tile.textContent || ''
+  }));
   const narrowQuery = window.matchMedia('(max-width: 760px)');
   const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
   let frameId = 0;
+  let scrambleTimerId = 0;
   let renderingActive = true;
   let layoutDirty = true;
   let layout = null;
   let previousProgress = Number.NaN;
+  const tileTextStates = tiles.map(() => 'initial');
+  const tileLocalProgress = tiles.map(() => Number.NaN);
+  const tileArrivalTimers = tiles.map(() => 0);
+  const tileArrivalTargets = tiles.map(() => null);
+
+  function scrambleLabel(label) {
+    return Array.from(label, character => {
+      if (character === ' ' || character === '[' || character === ']' || character === '-') {
+        return character;
+      }
+
+      return scrambleCharacters[
+        Math.floor(Math.random() * scrambleCharacters.length)
+      ];
+    }).join('');
+  }
+
+  function renderScrambledLabels() {
+    tiles.forEach((tile, index) => {
+      if (tileTextStates[index] === 'scrambling') {
+        tile.textContent = scrambleLabel(tileLabels[index].final);
+      }
+    });
+  }
+
+  function stopScrambling() {
+    if (!scrambleTimerId) {
+      return;
+    }
+
+    clearInterval(scrambleTimerId);
+    scrambleTimerId = 0;
+  }
+
+  function refreshScrambleTimer() {
+    const shouldScramble =
+      renderingActive &&
+      !document.hidden &&
+      !reducedMotionQuery.matches &&
+      tileTextStates.includes('scrambling');
+
+    if (!shouldScramble) {
+      stopScrambling();
+      return;
+    }
+
+    if (!scrambleTimerId) {
+      renderScrambledLabels();
+      scrambleTimerId = window.setInterval(
+        renderScrambledLabels,
+        MOTION_CONFIG.heroScrambleInterval
+      );
+    }
+  }
+
+  function setTileTextState(tile, index, nextState) {
+    if (tileTextStates[index] === nextState) {
+      return;
+    }
+
+    tileTextStates[index] = nextState;
+    tile.classList.toggle('is-scrambling', nextState === 'scrambling');
+
+    if (nextState === 'initial') {
+      tile.textContent = tileLabels[index].initial;
+    } else if (nextState === 'final') {
+      tile.textContent = tileLabels[index].final;
+    } else {
+      tile.textContent = scrambleLabel(tileLabels[index].final);
+    }
+  }
+
+  function cancelTileArrival(index) {
+    if (tileArrivalTimers[index]) {
+      clearTimeout(tileArrivalTimers[index]);
+      tileArrivalTimers[index] = 0;
+    }
+
+    tileArrivalTargets[index] = null;
+  }
+
+  function settleTileAfterArrival(tile, index, targetState) {
+    if (
+      tileTextStates[index] === targetState &&
+      !tileArrivalTimers[index]
+    ) {
+      return;
+    }
+
+    if (
+      tileArrivalTimers[index] &&
+      tileArrivalTargets[index] === targetState
+    ) {
+      return;
+    }
+
+    cancelTileArrival(index);
+    tileArrivalTargets[index] = targetState;
+    setTileTextState(tile, index, 'scrambling');
+    tileArrivalTimers[index] = window.setTimeout(() => {
+      tileArrivalTimers[index] = 0;
+      tileArrivalTargets[index] = null;
+      setTileTextState(tile, index, targetState);
+      refreshScrambleTimer();
+    }, MOTION_CONFIG.heroTileArrivalScrambleDuration);
+  }
 
   function getRowCenteredTileTop(boardMetrics, tileHeight, rowIndex) {
     const gridHeight = Math.max(0, boardMetrics.height - boardMetrics.labelHeight);
@@ -1241,19 +1365,47 @@ function initHeroScroll() {
         y: originalEndTop - tile.offsetTop
       };
     });
+    const tileStarts = tiles.map(tile => ({
+      left: tile.offsetLeft,
+      top: tile.offsetTop
+    }));
 
     layout = {
       animationEnd,
+      calendarMetrics,
       isNarrow,
       paperTravelRatio: isNarrow
         ? MOTION_CONFIG.heroMobilePaperTravelRatio
         : MOTION_CONFIG.heroDesktopPaperTravelRatio,
       reducedMotion,
+      scheduleMetrics,
       tileDistances,
+      tileSizes,
+      tileStarts,
       viewportHeight: window.visualViewport?.height || window.innerHeight,
       width
     };
     layoutDirty = false;
+  }
+
+  function tileIsFullyInsideBoard(index, eased, arc, boardMetrics) {
+    if (!boardMetrics) {
+      return false;
+    }
+
+    const start = layout.tileStarts[index];
+    const distance = layout.tileDistances[index];
+    const size = layout.tileSizes[index];
+    const left = start.left + distance.x * eased;
+    const top = start.top + distance.y * eased + arc;
+    const tolerance = 0.5;
+
+    return (
+      left >= boardMetrics.left - tolerance &&
+      left + size.width <= boardMetrics.left + boardMetrics.width + tolerance &&
+      top >= boardMetrics.top - tolerance &&
+      top + size.height <= boardMetrics.top + boardMetrics.height + tolerance
+    );
   }
 
   function update() {
@@ -1295,7 +1447,48 @@ function initHeroScroll() {
       const arc = Math.sin(Math.PI * eased) * arcHeight;
       const tileDistance = layout.tileDistances[index];
       tile.style.transform = `translate3d(${tileDistance.x * eased}px, ${arc + tileDistance.y * eased}px, var(--hero-tile-depth))`;
+      const previousLocalProgress = tileLocalProgress[index];
+      const progressDelta = Number.isNaN(previousLocalProgress)
+        ? 0
+        : localProgress - previousLocalProgress;
+      const direction = Math.abs(progressDelta) < 0.0001
+        ? 0
+        : Math.sign(progressDelta);
+      const isInsideStart =
+        localProgress <= 0.001 ||
+        tileIsFullyInsideBoard(index, eased, arc, layout.scheduleMetrics);
+      const isInsideEnd =
+        localProgress >= 0.999 ||
+        tileIsFullyInsideBoard(index, eased, arc, layout.calendarMetrics);
+
+      if (layout.reducedMotion) {
+        cancelTileArrival(index);
+        setTileTextState(tile, index, 'initial');
+      } else if (Number.isNaN(previousLocalProgress)) {
+        setTileTextState(
+          tile,
+          index,
+          isInsideEnd ? 'final' : isInsideStart ? 'initial' : 'scrambling'
+        );
+      } else if (direction > 0) {
+        if (isInsideEnd) {
+          settleTileAfterArrival(tile, index, 'final');
+        } else {
+          cancelTileArrival(index);
+          setTileTextState(tile, index, 'scrambling');
+        }
+      } else if (direction < 0) {
+        if (isInsideStart) {
+          settleTileAfterArrival(tile, index, 'initial');
+        } else {
+          cancelTileArrival(index);
+          setTileTextState(tile, index, 'scrambling');
+        }
+      }
+
+      tileLocalProgress[index] = localProgress;
     });
+    refreshScrambleTimer();
 
     stage.classList.toggle(
       'is-complete',
@@ -1338,12 +1531,26 @@ function initHeroScroll() {
         cancelAnimationFrame(frameId);
         frameId = 0;
       }
+
+      if (!renderingActive) {
+        stopScrambling();
+      }
     }, {
       // Resume shortly before the Hero returns; stop all animation work beyond it.
       rootMargin: MOTION_CONFIG.heroRenderRootMargin
     });
     intersectionObserver.observe(stage);
   }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopScrambling();
+      return;
+    }
+
+    requestUpdate();
+    refreshScrambleTimer();
+  });
 
   update();
 }
@@ -1501,6 +1708,7 @@ function initStepJourney() {
   let preserveActiveStepAfterLayout = false;
   let editingControl = null;
   let editingBoundaryY = Number.NaN;
+  let editingViewportMetrics = null;
   let editingReleaseTimer = 0;
   let ensureControlFrame = 0;
   let ensureControlTimer = 0;
@@ -1580,7 +1788,7 @@ function initStepJourney() {
             : '產生安裝程式碼';
   }
 
-  function activateCompletionButton(button) {
+  async function activateCompletionButton(button) {
     if (!button || button.disabled) return;
 
     const completedStep = Number(button.dataset.completeStep);
@@ -1609,7 +1817,18 @@ function initStepJourney() {
     }
 
     if (completedStep === 4) {
-      if (!generateOutput()) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      let generated = false;
+
+      try {
+        generated = await generateOutput();
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+      }
+
+      if (!generated) {
         showToast(state.sourceError ? '請先重新讀取課表' : '控制臺程式碼尚未準備完成');
         return;
       }
@@ -2245,6 +2464,7 @@ function initStepJourney() {
 
     editingControl = control;
     editingBoundaryY = getJourneyGeometry().maximumScrollY;
+    editingViewportMetrics = readVisualViewportMetrics();
     focusInputDirection = 0;
     preserveActiveStepAfterLayout = true;
     resetScrollMomentum();
@@ -2264,6 +2484,7 @@ function initStepJourney() {
 
     editingControl = null;
     editingBoundaryY = Number.NaN;
+    editingViewportMetrics = null;
     document.documentElement.removeAttribute('data-input-active');
     document.documentElement.removeAttribute('data-keyboard-open');
     invalidateJourneyGeometry();
@@ -2479,21 +2700,34 @@ function initStepJourney() {
     }
 
     const keyboardWasOpen = document.documentElement.hasAttribute('data-keyboard-open');
+    const previousMetrics = editingViewportMetrics;
+    const nextMetrics = event.detail;
+    editingViewportMetrics = nextMetrics;
     updateEditingViewportState(event.detail);
     invalidateJourneyGeometry();
+    const keyboardIsNowOpen =
+      document.documentElement.hasAttribute('data-keyboard-open');
+    const viewportGeometryChanged =
+      !previousMetrics ||
+      Math.abs(previousMetrics.height - nextMetrics.height) >= 2 ||
+      Math.abs(previousMetrics.width - nextMetrics.width) >= 2 ||
+      keyboardWasOpen !== keyboardIsNowOpen;
 
     if (
       keyboardWasOpen &&
-      !document.documentElement.hasAttribute('data-keyboard-open')
+      !keyboardIsNowOpen
     ) {
       editingBoundaryY = getJourneyGeometry().maximumScrollY;
       clampToCurrentBoundary({ immediate: true });
     }
 
-    // Safari emits several resize/scroll events while its keyboard and
-    // candidate bar animate. Reposition once after those metrics settle so our
-    // own immediate scroll cannot feed another oscillating viewport update.
-    scheduleFocusedControlVisibility({ afterViewportSettles: true });
+    // Safari can pan only the visual viewport while typing. Its offset-only
+    // scroll events already keep the caret visible, so reacting with a second
+    // layout-viewport scroll makes the page oscillate. Reposition only when
+    // the usable viewport size or keyboard state actually changes.
+    if (viewportGeometryChanged) {
+      scheduleFocusedControlVisibility({ afterViewportSettles: true });
+    }
   });
 
   document.addEventListener('keydown', event => {
@@ -2643,11 +2877,6 @@ function initStepJourney() {
   if ('ResizeObserver' in window) {
     const resizeObserver = new ResizeObserver(() => {
       invalidateJourneyGeometry();
-
-      if (editingControl) {
-        scheduleFocusedControlVisibility({ afterViewportSettles: true });
-      }
-
       requestUpdate({ preserveActiveStep: true });
     });
     resizeObserver.observe(document.body);
