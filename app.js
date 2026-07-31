@@ -3,6 +3,7 @@ const DEFAULTS = {
   notificationEmail: '@tschool.tp.edu.tw',
   syncHours: [6],
   notifyHour: 6,
+  instantNotificationsEnabled: true,
   descriptionPreset: 'standard',
   customDescription: [
     '第 {week} 週 / 週{weekday} / 第 {period} 節',
@@ -26,6 +27,11 @@ const ENABLE_SMOOTH_SCROLL = true;
 // Even while true, regular visitors do not receive test code unless the URL contains ?highLoadTest=1.
 const ENABLE_HIGH_LOAD_TEST_FEATURE = true;
 const HIGH_LOAD_TEST_QUERY_PARAMETER = 'highLoadTest';
+const KNOWN_ACADEMIC_TERM_STARTS = Object.freeze([
+  { term: '114-2', year: 2026, monthIndex: 1, day: 23 },
+  { term: '115-1', year: 2026, monthIndex: 7, day: 31 },
+  { term: '115-2', year: 2027, monthIndex: 1, day: 11 }
+]);
 
 const GOOGLE_SHEETS_TEMPLATE_COPY_URL =
   'https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy';
@@ -87,7 +93,33 @@ const MOTION_CONFIG = Object.freeze({
   heroTiltEase: 0.1,
   heroTiltShadowTravel: 3,
   cursorPositionEase: 0.38,
-  cursorAngleEase: 0.3
+  cursorAngleEase: 0.3,
+  // Native macOS pointer tilt; sway values below control movement feedback.
+  cursorBaseAngle: -24,
+  cursorSwayMaxAngle: 64,
+  cursorSwayVelocityScale: 0.8,
+  cursorSwayReturn: 0.9
+});
+
+/*
+ * Hero paper and connector tuning:
+ * - anchor ratios run from 0 (top edge) to 1 (bottom edge).
+ * - separation values are the horizontal pixels moved by EACH paper.
+ * - rotation deltas are added to the two base paper rotations.
+ * - start/end progress use the normalized Hero paper animation timeline.
+ */
+const HERO_PAPER_MOTION_CONFIG = Object.freeze({
+  scheduleBaseRotation: -1.7,
+  calendarBaseRotation: 1.2,
+  scheduleConnectorAnchor: 0.58,
+  calendarConnectorAnchor: 0.42,
+  connectorOverlap: 2,
+  separationStartProgress: 0.08,
+  separationEndProgress: 0.82,
+  desktopSeparationPerPaper: 8,
+  mobileSeparationPerPaper: 10,
+  scheduleRotationDelta: -0.45,
+  calendarRotationDelta: 0.55
 });
 
 document.documentElement.style.setProperty(
@@ -103,7 +135,8 @@ const state = {
   sourceLoading: false,
   sourceError: null,
   requestId: 0,
-  generatedCodeReady: false
+  generatedCodeReady: false,
+  customNotificationHours: DEFAULTS.syncHours.slice()
 };
 
 let notificationEmailCommitTimer = 0;
@@ -112,6 +145,7 @@ const elements = {
   form: document.querySelector('#config-form'),
   highLoadTestBanner: document.querySelector('#high-load-test-banner'),
   notificationEmail: document.querySelector('#notification-email'),
+  instantNotifications: document.querySelector('#instant-notifications'),
   notifyHoursList: document.querySelector('#notify-hours-list'),
   courseSearch: document.querySelector('#course-search'),
   courseSearchSubmit: document.querySelector('#course-search-submit'),
@@ -147,6 +181,7 @@ function init() {
   }
   elements.notificationEmail.value = DEFAULTS.notificationEmail;
   renderNotifyHours(DEFAULTS.syncHours);
+  updateInstantNotificationState();
   updateNotifyHourState();
   configureSheetTemplateLink();
   bindEvents();
@@ -262,7 +297,15 @@ function bindEvents() {
       return;
     }
 
+    if (event.target === elements.instantNotifications) {
+      updateInstantNotificationState();
+      document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
+        detail: { step: 3 }
+      }));
+    }
+
     if (event.target.matches('[data-notify-hour]')) {
+      state.customNotificationHours = getSelectedNotifyHours();
       document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
         detail: { step: 3 }
       }));
@@ -572,8 +615,11 @@ function renderNotifyHours(hours) {
 
 function updateNotifyHourState() {
   const hasValidEmail = isValidNotificationEmail(elements.notificationEmail.value);
+  const instantEnabled = elements.instantNotifications?.checked !== false;
   getNotifyHourSelects().forEach(select => {
-    select.title = hasValidEmail ? '' : '請先填寫有效的校內 Email';
+    select.title = instantEnabled
+      ? '即時通知開啟時，每日摘要固定於 06:00 寄出'
+      : (hasValidEmail ? '' : '請先填寫有效的校內 Email');
   });
 }
 
@@ -619,6 +665,7 @@ function handleNotifyHourAction(event) {
     if (getNotifyHourSelects().length >= MAX_NOTIFY_HOURS) return;
     appendNotifyHourRow(getNextNotifyHour());
     updateNotifyHourOptions();
+    state.customNotificationHours = getSelectedNotifyHours();
     notifyStepConfigurationChanged();
     getNotifyHourSelects().at(-1)?.focus({ preventScroll: true });
     return;
@@ -632,6 +679,7 @@ function handleNotifyHourAction(event) {
     getNotifyHourSelects()[0];
   row?.remove();
   updateNotifyHourOptions();
+  state.customNotificationHours = getSelectedNotifyHours();
   notifyStepConfigurationChanged();
   nextFocus?.focus({ preventScroll: true });
 }
@@ -666,8 +714,10 @@ function getNextNotifyHour() {
 function updateNotifyHourOptions() {
   const selects = getNotifyHourSelects();
   const selectedHours = selects.map(select => Number(select.value));
+  const instantEnabled = elements.instantNotifications?.checked !== false;
 
   selects.forEach((select, selectIndex) => {
+    select.disabled = instantEnabled;
     Array.from(select.options).forEach(option => {
       const optionHour = Number(option.value);
       option.disabled = selectedHours.some((selectedHour, selectedIndex) =>
@@ -679,11 +729,25 @@ function updateNotifyHourOptions() {
   const addButton = elements.notifyHoursList?.querySelector('[data-add-notify-hour]');
   if (addButton) {
     const maximumReached = selects.length >= MAX_NOTIFY_HOURS;
-    addButton.disabled = maximumReached;
+    addButton.disabled = instantEnabled || maximumReached;
     addButton.title = maximumReached ? `最多可設定 ${MAX_NOTIFY_HOURS} 個通知時間` : '';
   }
 
   updateNotifyHourState();
+}
+
+function updateInstantNotificationState() {
+  const instantEnabled = elements.instantNotifications?.checked !== false;
+  const timeField = elements.notifyHoursList?.closest('.notification-time-field');
+  timeField?.classList.toggle('is-instant', instantEnabled);
+
+  if (instantEnabled) {
+    const selectedHours = getSelectedNotifyHours();
+    if (selectedHours.length) state.customNotificationHours = selectedHours;
+    renderNotifyHours([DEFAULTS.notifyHour]);
+  } else {
+    renderNotifyHours(state.customNotificationHours || DEFAULTS.syncHours);
+  }
 }
 
 function notifyStepConfigurationChanged() {
@@ -884,7 +948,10 @@ function isHighLoadTestGenerationEnabled() {
 }
 
 function getSettings() {
-  const notificationHours = getSelectedNotifyHours();
+  const instantNotificationsEnabled = elements.instantNotifications?.checked !== false;
+  const notificationHours = instantNotificationsEnabled
+    ? state.customNotificationHours.slice()
+    : getSelectedNotifyHours();
   const notifyHour = notificationHours.length
     ? notificationHours[notificationHours.length - 1]
     : DEFAULTS.notifyHour;
@@ -900,6 +967,7 @@ function getSettings() {
     gradeName: getCurrentGrade(),
     calendarName: getDefaultCalendarName(getCurrentGrade()),
     notificationEmail: elements.notificationEmail.value.trim(),
+    instantNotificationsEnabled,
     notificationHours,
     notifySyncHour: notifyHour,
     includeActivities,
@@ -1010,6 +1078,35 @@ function playCopyKeyboardPressFeedback() {
   }, { once: true });
 }
 
+function copyGeneratedCodeWithLegacyFallback() {
+  const codeField = elements.generatedCode;
+  const previousActiveElement = document.activeElement;
+  const previousScrollTop = codeField.scrollTop;
+  const previousScrollLeft = codeField.scrollLeft;
+  let copied = false;
+
+  try {
+    codeField.focus({ preventScroll: true });
+    codeField.select();
+    copied = document.execCommand('copy');
+  } finally {
+    codeField.setSelectionRange(0, 0);
+    codeField.scrollTop = previousScrollTop;
+    codeField.scrollLeft = previousScrollLeft;
+
+    if (previousActiveElement && previousActiveElement !== codeField &&
+        typeof previousActiveElement.focus === 'function') {
+      previousActiveElement.focus({ preventScroll: true });
+    } else {
+      codeField.blur();
+    }
+  }
+
+  if (!copied) {
+    throw new Error('瀏覽器無法複製程式碼。');
+  }
+}
+
 async function copyGeneratedCode(event) {
   if (!state.generatedCodeReady || !state.sourceSummary || !validateNotificationEmail()) {
     elements.notificationEmail.reportValidity();
@@ -1021,9 +1118,7 @@ async function copyGeneratedCode(event) {
   try {
     await navigator.clipboard.writeText(elements.generatedCode.value);
   } catch (error) {
-    elements.generatedCode.focus();
-    elements.generatedCode.select();
-    document.execCommand('copy');
+    copyGeneratedCodeWithLegacyFallback();
   }
 
   elements.copyCode.classList.add('is-copied');
@@ -1048,12 +1143,99 @@ function showToast(message) {
 function initVisualExperience() {
   initSmoothScroll();
   initFooterReturn();
+  initHeroMetadata();
   initHeroScroll();
   initHeroDepthInteraction();
   initProgressiveBlurLayers();
   initStepJourney();
   initCodeDisclosure();
   initKineticCursor();
+}
+
+function getHeroAcademicWeekNumber(termStartDate, currentDate) {
+  const termStart = new Date(termStartDate);
+  const current = new Date(currentDate);
+
+  termStart.setHours(0, 0, 0, 0);
+  current.setHours(0, 0, 0, 0);
+
+  const termStartDay = Date.UTC(
+    termStart.getFullYear(),
+    termStart.getMonth(),
+    termStart.getDate()
+  );
+  const currentDay = Date.UTC(
+    current.getFullYear(),
+    current.getMonth(),
+    current.getDate()
+  );
+  const elapsedDays = Math.floor((currentDay - termStartDay) / 86400000);
+
+  if (!Number.isFinite(elapsedDays) || elapsedDays < 0) {
+    return null;
+  }
+
+  return Math.floor(elapsedDays / 7) + 1;
+}
+
+function getKnownAcademicTermStart(currentDate) {
+  const current = new Date(currentDate);
+  current.setHours(0, 0, 0, 0);
+
+  for (let index = KNOWN_ACADEMIC_TERM_STARTS.length - 1; index >= 0; index -= 1) {
+    const item = KNOWN_ACADEMIC_TERM_STARTS[index];
+    const startDate = new Date(item.year, item.monthIndex, item.day);
+
+    if (current >= startDate) {
+      return startDate;
+    }
+  }
+
+  return null;
+}
+
+function initHeroMetadata() {
+  const scheduleWeek = document.querySelector('[data-hero-schedule-week]');
+  const calendarMonth = document.querySelector('[data-hero-calendar-month]');
+  const calendarDay = document.querySelector('[data-hero-calendar-day]');
+  const now = new Date();
+  const weekdayLabels = window.TSchoolScheduleData?.WEEKDAY_LABELS ||
+    ['一', '二', '三', '四', '五', '六', '日'];
+  const weekdayIndex = (now.getDay() + 6) % 7;
+
+  if (calendarMonth) {
+    calendarMonth.textContent = `${now.getMonth() + 1} 月`;
+  }
+
+  if (calendarDay) {
+    calendarDay.textContent = `週${weekdayLabels[weekdayIndex]} ${now.getDate()}`;
+  }
+
+  const renderWeekNumber = termStartDate => {
+    const weekNumber = termStartDate
+      ? getHeroAcademicWeekNumber(termStartDate, new Date())
+      : null;
+
+    if (scheduleWeek && Number.isFinite(weekNumber)) {
+      scheduleWeek.textContent = `第 ${weekNumber} 週`;
+    }
+  };
+
+  renderWeekNumber(getKnownAcademicTermStart(now));
+
+  document.addEventListener('tschool:grade-ready', () => {
+    renderWeekNumber(state.sourceSummary?.firstDate);
+  });
+
+  if (!scheduleWeek || !window.TSchoolScheduleData?.fetchGradeSchedule) {
+    return;
+  }
+
+  window.TSchoolScheduleData
+    .fetchGradeSchedule('高一')
+    .then(payload => window.TSchoolScheduleData.summarizePayload(payload, new Date()))
+    .then(summary => renderWeekNumber(summary.firstDate))
+    .catch(() => {});
 }
 
 function initFooterReturn() {
@@ -1159,6 +1341,7 @@ function initHeroScroll() {
   const visual = stage?.querySelector('.hero-visual');
   const scheduleBoard = stage?.querySelector('.schedule-board');
   const calendarBoard = stage?.querySelector('.calendar-board');
+  const transferPath = stage?.querySelector('.transfer-path');
   const mobileTileHorizontalAnchors = [0.12, 0.18, 0.1];
   const desktopTileEndTopRatios = [0.22, 0.47, 0.72];
   const scrambleCharacters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -1166,6 +1349,15 @@ function initHeroScroll() {
   if (!stage || !visual || !paperTrack || tiles.length === 0) {
     return;
   }
+
+  scheduleBoard?.style.setProperty(
+    '--hero-paper-base-rotation',
+    `${HERO_PAPER_MOTION_CONFIG.scheduleBaseRotation}deg`
+  );
+  calendarBoard?.style.setProperty(
+    '--hero-paper-base-rotation',
+    `${HERO_PAPER_MOTION_CONFIG.calendarBaseRotation}deg`
+  );
 
   const tileLabels = tiles.map(tile => ({
     initial: tile.dataset.initialLabel || tile.textContent || '',
@@ -1294,6 +1486,71 @@ function initHeroScroll() {
     return boardMetrics.top + boardMetrics.labelHeight + rowHeight * rowIndex + rowInset;
   }
 
+  function getPaperEdgePoint(metrics, side, anchorRatio, translateX, rotationDegrees) {
+    const centerX = metrics.left + metrics.width / 2;
+    const centerY = metrics.top + metrics.height / 2;
+    const localX = (side === 'right' ? 1 : -1) * metrics.width / 2;
+    const localY = (anchorRatio - 0.5) * metrics.height;
+    const angle = rotationDegrees * Math.PI / 180;
+    const cosine = Math.cos(angle);
+    const sine = Math.sin(angle);
+
+    return {
+      x: centerX + translateX + localX * cosine - localY * sine,
+      y: centerY + localX * sine + localY * cosine
+    };
+  }
+
+  function positionTransferPath(scheduleMetrics, calendarMetrics, paperMotion) {
+    if (!transferPath || !scheduleMetrics || !calendarMetrics) {
+      return;
+    }
+
+    const schedulePoint = getPaperEdgePoint(
+      scheduleMetrics,
+      'right',
+      HERO_PAPER_MOTION_CONFIG.scheduleConnectorAnchor,
+      paperMotion.scheduleX,
+      paperMotion.scheduleRotation
+    );
+    const calendarPoint = getPaperEdgePoint(
+      calendarMetrics,
+      'left',
+      HERO_PAPER_MOTION_CONFIG.calendarConnectorAnchor,
+      paperMotion.calendarX,
+      paperMotion.calendarRotation
+    );
+    const baseDistanceX = calendarPoint.x - schedulePoint.x;
+    const baseDistanceY = calendarPoint.y - schedulePoint.y;
+    const baseDistance = Math.hypot(baseDistanceX, baseDistanceY);
+
+    if (baseDistanceX <= 0 || baseDistance <= 0) {
+      transferPath.style.removeProperty('left');
+      transferPath.style.removeProperty('top');
+      transferPath.style.removeProperty('right');
+      transferPath.style.removeProperty('width');
+      transferPath.style.removeProperty('transform');
+      return;
+    }
+
+    const directionX = baseDistanceX / baseDistance;
+    const directionY = baseDistanceY / baseDistance;
+    const overlap = HERO_PAPER_MOTION_CONFIG.connectorOverlap;
+    const startX = schedulePoint.x - directionX * overlap;
+    const startY = schedulePoint.y - directionY * overlap;
+    const endX = calendarPoint.x + directionX * overlap;
+    const endY = calendarPoint.y + directionY * overlap;
+    const distanceX = endX - startX;
+    const distanceY = endY - startY;
+
+    transferPath.style.left = `${startX}px`;
+    transferPath.style.top = `${startY}px`;
+    transferPath.style.right = 'auto';
+    transferPath.style.width = `${Math.hypot(distanceX, distanceY)}px`;
+    transferPath.style.transform =
+      `translateZ(var(--hero-path-depth)) rotate(${Math.atan2(distanceY, distanceX)}rad)`;
+  }
+
   function measureLayout() {
     const width = visual.clientWidth || window.innerWidth;
     const isNarrow = narrowQuery.matches;
@@ -1374,6 +1631,9 @@ function initHeroScroll() {
       animationEnd,
       calendarMetrics,
       isNarrow,
+      maximumPaperSeparation: isNarrow
+        ? HERO_PAPER_MOTION_CONFIG.mobileSeparationPerPaper
+        : HERO_PAPER_MOTION_CONFIG.desktopSeparationPerPaper,
       paperTravelRatio: isNarrow
         ? MOTION_CONFIG.heroMobilePaperTravelRatio
         : MOTION_CONFIG.heroDesktopPaperTravelRatio,
@@ -1386,6 +1646,47 @@ function initHeroScroll() {
       width
     };
     layoutDirty = false;
+  }
+
+  function getPaperMotion(progress) {
+    const progressRange = Math.max(
+      0.001,
+      HERO_PAPER_MOTION_CONFIG.separationEndProgress -
+        HERO_PAPER_MOTION_CONFIG.separationStartProgress
+    );
+    const localProgress = clamp(
+      (progress - HERO_PAPER_MOTION_CONFIG.separationStartProgress) / progressRange,
+      0,
+      1
+    );
+    const eased = localProgress * localProgress * localProgress *
+      (localProgress * (localProgress * 6 - 15) + 10);
+    const separation = layout.maximumPaperSeparation * eased;
+
+    return {
+      calendarRotation:
+        HERO_PAPER_MOTION_CONFIG.calendarBaseRotation +
+        HERO_PAPER_MOTION_CONFIG.calendarRotationDelta * eased,
+      calendarX: separation,
+      scheduleRotation:
+        HERO_PAPER_MOTION_CONFIG.scheduleBaseRotation +
+        HERO_PAPER_MOTION_CONFIG.scheduleRotationDelta * eased,
+      scheduleX: -separation
+    };
+  }
+
+  function applyPaperMotion(paperMotion) {
+    scheduleBoard?.style.setProperty('--hero-paper-motion-x', `${paperMotion.scheduleX}px`);
+    scheduleBoard?.style.setProperty(
+      '--hero-paper-motion-rotate',
+      `${paperMotion.scheduleRotation - HERO_PAPER_MOTION_CONFIG.scheduleBaseRotation}deg`
+    );
+    calendarBoard?.style.setProperty('--hero-paper-motion-x', `${paperMotion.calendarX}px`);
+    calendarBoard?.style.setProperty(
+      '--hero-paper-motion-rotate',
+      `${paperMotion.calendarRotation - HERO_PAPER_MOTION_CONFIG.calendarBaseRotation}deg`
+    );
+    positionTransferPath(layout.scheduleMetrics, layout.calendarMetrics, paperMotion);
   }
 
   function tileIsFullyInsideBoard(index, eased, arc, boardMetrics) {
@@ -1434,7 +1735,9 @@ function initHeroScroll() {
       ? 0
       : clamp(progress / layout.animationEnd, 0, 1);
     const paperTravel = layout.width * layout.paperTravelRatio * paperProgress;
+    const paperMotion = getPaperMotion(paperProgress);
     paperTrack.style.transform = `translate3d(${-paperTravel}px, 0, 0)`;
+    applyPaperMotion(paperMotion);
 
     tiles.forEach((tile, index) => {
       const localProgress = layout.reducedMotion
@@ -1889,9 +2192,12 @@ function initStepJourney() {
     }
 
     elements.stageMenuTrigger.setAttribute('aria-expanded', String(open));
-    elements.stageMenuTrigger.dataset.cursorLabel = open ? '關閉階段選單' : '開啟階段選單';
+    const actionLabel = open ? '關閉步驟選單' : '開啟步驟選單';
+    elements.stageMenuTrigger.setAttribute('aria-label', actionLabel);
+    elements.stageMenuTrigger.dataset.cursorLabel = actionLabel;
     elements.stageMenuPanel.hidden = !open;
     elements.stageMenu?.classList.toggle('is-open', open);
+    document.dispatchEvent(new CustomEvent('tschool:cursor-context-change'));
 
     if (open) {
       const currentItem = elements.stageMenuItems.find(item => item.getAttribute('aria-current') === 'step');
@@ -2927,7 +3233,10 @@ function renderSettingsSummary() {
   const unselectedItems = unselectedCourses.concat(unselectedActivities).sort(compareByTraditionalStroke);
   const email = elements.notificationEmail.value.trim();
   const hasValidEmail = isValidNotificationEmail(email);
-  const notificationTimes = getSelectedNotifyHours()
+  const instantNotificationsEnabled = elements.instantNotifications?.checked !== false;
+  const notificationTimes = (instantNotificationsEnabled
+    ? [DEFAULTS.notifyHour]
+    : getSelectedNotifyHours())
     .map(hour => `${pad2(hour)}:00`);
   const grade = getCurrentGrade();
 
@@ -2941,7 +3250,8 @@ function renderSettingsSummary() {
     ], 2, '修改課程與活動'),
     renderSummaryRow([
       ['你想用來收通知的 Email 是：', [email || '未填寫'], hasValidEmail ? '' : 'is-error'],
-      ['你想收到通知的時間是：', notificationTimes]
+      ['你的即時通知：', [instantNotificationsEnabled ? '已開啟' : '已關閉']],
+      [instantNotificationsEnabled ? '每日摘要時間：' : '你想收到通知的時間是：', notificationTimes]
     ], 3, '修改通知偏好')
   ].join('');
 }
@@ -2996,6 +3306,9 @@ function initKineticCursor() {
   let visible = false;
   let frameId = 0;
   let contextTarget = null;
+  const captionViewportMargin = 8;
+  const captionOffsetX = 18;
+  const captionOffsetY = 22;
 
   function cursorSurfaceIsDark(target) {
     let element = target instanceof Element ? target : target?.parentElement;
@@ -3041,6 +3354,7 @@ function initKineticCursor() {
       Boolean(labelled) && !textTarget && labelled.dataset.cursorTone === 'success'
     );
     caption.textContent = labelled && !textTarget ? labelled.dataset.cursorLabel : '';
+    requestCursorFrame();
   }
 
   function updateTarget(event) {
@@ -3050,7 +3364,11 @@ function initKineticCursor() {
     targetY = event.clientY;
 
     if (Math.hypot(dx, dy) > 1.5) {
-      targetAngle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+      targetAngle = clamp(
+        dx * MOTION_CONFIG.cursorSwayVelocityScale,
+        -MOTION_CONFIG.cursorSwayMaxAngle,
+        MOTION_CONFIG.cursorSwayMaxAngle
+      );
     }
 
     targetCursorVelocity = clamp(Math.hypot(dx, dy) / 34, 0, 1);
@@ -3075,6 +3393,37 @@ function initKineticCursor() {
     }
   }
 
+  function positionCursorCaption() {
+    if (!cursor.classList.contains('has-label')) {
+      return;
+    }
+
+    const captionBounds = caption.getBoundingClientRect();
+    const captionWidth = captionBounds.width;
+    const captionHeight = captionBounds.height;
+    const maximumLeft = Math.max(
+      captionViewportMargin,
+      window.innerWidth - captionWidth - captionViewportMargin
+    );
+    const preferredLeft = currentX + captionOffsetX;
+    const captionLeft = clamp(preferredLeft, captionViewportMargin, maximumLeft);
+    const preferredTop = currentY + captionOffsetY;
+    const flippedTop = currentY - captionHeight - captionOffsetY;
+    const captionTop = clamp(
+      preferredTop + captionHeight > window.innerHeight - captionViewportMargin
+        ? flippedTop
+        : preferredTop,
+      captionViewportMargin,
+      Math.max(
+        captionViewportMargin,
+        window.innerHeight - captionHeight - captionViewportMargin
+      )
+    );
+
+    cursor.style.setProperty('--cursor-caption-x', `${captionLeft - currentX}px`);
+    cursor.style.setProperty('--cursor-caption-y', `${captionTop - currentY}px`);
+  }
+
   function animate() {
     frameId = 0;
     currentX += (targetX - currentX) * MOTION_CONFIG.cursorPositionEase;
@@ -3083,10 +3432,17 @@ function initKineticCursor() {
     currentAngle += angleDelta * MOTION_CONFIG.cursorAngleEase;
     cursorVelocity += (targetCursorVelocity - cursorVelocity) * 0.24;
     targetCursorVelocity *= 0.82;
+    targetAngle *= MOTION_CONFIG.cursorSwayReturn;
     cursor.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
-    cursor.style.setProperty('--cursor-angle', cursor.classList.contains('is-text') ? '0deg' : `${currentAngle}deg`);
+    const textCursor = cursor.classList.contains('is-text');
+    cursor.style.setProperty('--cursor-angle', textCursor ? '0deg' : `${currentAngle}deg`);
+    cursor.style.setProperty(
+      '--cursor-pointer-angle',
+      textCursor ? '0deg' : `${MOTION_CONFIG.cursorBaseAngle + currentAngle}deg`
+    );
     cursor.style.setProperty('--cursor-lens-stretch', (1 + cursorVelocity * 0.22).toFixed(3));
     cursor.style.setProperty('--cursor-lens-squash', (1 - cursorVelocity * 0.08).toFixed(3));
+    positionCursorCaption();
 
     angleDelta = ((targetAngle - currentAngle + 540) % 360) - 180;
     const motionPending =
@@ -3101,6 +3457,7 @@ function initKineticCursor() {
   }
 
   window.addEventListener('mousemove', updateTarget, { passive: true });
+  window.addEventListener('resize', requestCursorFrame, { passive: true });
   window.addEventListener('scroll', () => {
     updateCursorContext(document.elementFromPoint(targetX, targetY));
   }, { passive: true });

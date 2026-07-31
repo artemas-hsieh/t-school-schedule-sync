@@ -1,40 +1,30 @@
 {
   "schemaVersion": 1,
-  "shell": "<!doctype html><html lang=\"zh-Hant\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"color-scheme\" content=\"light only\"><meta name=\"supported-color-schemes\" content=\"light only\"><title>{{subject}}</title></head><body style=\"margin:0;padding:0;background:#e7efe9;color:#14211d;font-family:'Noto Sans TC','PingFang TC','Microsoft JhengHei',Arial,sans-serif;\"><div style=\"display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;\">{{preheader}}&#847; &zwnj; &#847; &zwnj; &#847;</div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;background:#e7efe9;\"><tr><td align=\"center\" style=\"padding:28px 12px;\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;max-width:640px;background:#ffffff;border:1px solid {{accent}};border-radius:8px;overflow:hidden;\"><tr><td style=\"padding:30px 32px 12px;\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"><tr><td style=\"font-size:13px;line-height:20px;font-weight:700;color:#14211d;\">T-SCHOOL Schedule Sync</td><td align=\"right\" style=\"font-size:13px;line-height:20px;color:#4f5d57;\">{{sentAt}}</td></tr></table><div style=\"margin-top:22px;\"><span style=\"display:inline-block;padding:6px 10px;border:1px solid {{accent}};border-radius:0;background:{{accentSoft}};color:{{accentDark}};font-size:12px;line-height:16px;font-weight:700;\">{{statusLabel}}</span></div><h1 style=\"margin:16px 0 0;font-size:28px;line-height:1.35;letter-spacing:-.02em;color:#14211d;\">{{headline}}</h1><p style=\"margin:12px 0 0;font-size:16px;line-height:1.75;color:#4f5d57;\">{{lede}}</p></td></tr><tr><td style=\"padding:12px 32px 32px;\">{{{content}}}</td></tr><tr><td style=\"padding:18px 32px;background:#f4f7f2;border-top:1px solid #bac6be;\"><p style=\"margin:0;font-size:12px;line-height:1.7;color:#4f5d57;\">這封信由你的行程同步控制臺自動寄出</p></td></tr></table></td></tr></table></body></html>",
+  "shell": "<!doctype html><html lang=\"zh-Hant\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"color-scheme\" content=\"light only\"><meta name=\"supported-color-schemes\" content=\"light only\"><title>{{subject}}</title></head><body style=\"margin:0;padding:0;background:#e7efe9;color:#14211d;font-family:'Noto Sans TC','PingFang TC','Microsoft JhengHei',Arial,sans-serif;\"><div style=\"display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;\">{{preheader}}&#847; &zwnj; &#847; &zwnj; &#847;</div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;background:#e7efe9;\"><tr><td align=\"center\" style=\"padding:28px 12px;\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;max-width:640px;background:#ffffff;border:1px solid {{accent}};border-radius:8px;overflow:hidden;\"><tr><td style=\"padding:30px 32px 12px;\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"><tr><td style=\"font-size:13px;line-height:20px;font-weight:700;color:#14211d;\">T-SCHOOL Schedule Sync</td><td align=\"right\" style=\"font-size:13px;line-height:20px;color:#4f5d57;\">{{sentAt}}</td></tr></table><div style=\"margin-top:22px;\"><span style=\"display:inline-block;padding:6px 10px;border:1px solid {{accent}};border-radius:0;background:{{accentSoft}};color:{{accentDark}};font-size:12px;line-height:16px;font-weight:700;\">{{statusLabel}}</span></div><h1 style=\"margin:16px 0 0;font-size:28px;line-height:1.35;letter-spacing:-.02em;color:#14211d;\">{{headline}}</h1><p style=\"display:{{ledeDisplay}};margin:12px 0 0;white-space:pre-line;font-size:16px;line-height:1.75;color:#4f5d57;\">{{lede}}</p></td></tr><tr><td style=\"padding:12px 32px 32px;\">{{{content}}}</td></tr><tr><td style=\"padding:18px 32px;background:#f4f7f2;border-top:1px solid #bac6be;\"><p style=\"margin:0;font-size:12px;line-height:1.7;color:#4f5d57;\">這封信由你的行程同步控制臺自動寄出</p></td></tr></table></td></tr></table></body></html>",
   "notifications": {
     "setup_complete": {
       "accent": "#00a676",
       "accentDark": "#007c59",
       "accentSoft": "#dcefe7",
-      "statusLabel": "設定完成",
-      "preheader": "首批事件已同步，課綱資訊稍待幾分鐘便會載入",
-      "headline": "你的行程已開始同步",
-      "lede": "首批事件已同步，課綱資訊稍待幾分鐘便會載入！之後系統會依設定自動更新",
+      "statusLabel": "狀態正常",
+      "preheader": "第一批事件同步完成，系統會在背景完成其餘行程",
+      "headline": "行程同步設定完成",
+      "lede": "第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\n後續則會根據你的設定自動更新事件",
       "content": "<p style=\"margin:8px 0 0;\"><a href=\"{{calendarUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#007c59;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟 Google 日曆</a></p>"
-    },
-    "setup_started": {
-      "accent": "#00a676",
-      "accentDark": "#007c59",
-      "accentSoft": "#dcefe7",
-      "statusLabel": "首批完成",
-      "preheader": "前 {{created}} 筆行程已安全寫入，剩餘 {{remaining}} 筆正在背景同步",
-      "headline": "前 {{created}} 筆已安全寫入日曆",
-      "lede": "首次同步已進入背景處理，你現在可以關閉控制臺",
-      "content": "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;margin:8px 0 0;background:#14211d;border-radius:4px;overflow:hidden;\"><tr><td valign=\"bottom\" style=\"padding:22px 20px 16px;\"><span style=\"display:block;font-size:11px;line-height:16px;font-weight:700;letter-spacing:.12em;color:#9fb2aa;\">已安全寫入</span><strong style=\"display:inline-block;margin-top:4px;font-size:44px;line-height:1;color:#ffffff;\">{{created}}</strong><span style=\"display:inline-block;margin-left:6px;font-size:14px;color:#dcefe7;\">筆行程</span></td><td align=\"right\" valign=\"bottom\" style=\"padding:22px 20px 20px;\"><span style=\"display:block;font-size:11px;line-height:16px;color:#9fb2aa;\">本次共需同步</span><strong style=\"display:block;margin-top:4px;font-size:18px;line-height:24px;color:#ffffff;\">{{total}} 筆</strong></td></tr><tr><td colspan=\"2\" style=\"padding:0 20px 22px;\"><div style=\"height:6px;background:#32433d;border-radius:4px;overflow:hidden;\"><div style=\"width:{{progressPercent}}%;height:6px;background:#00a676;border-radius:4px;\"></div></div><span style=\"display:block;margin-top:8px;font-size:11px;line-height:16px;color:#9fb2aa;\">目前進度 {{progressPercent}}%</span></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;margin-top:14px;border:1px solid #bac6be;border-radius:4px;\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:14px 16px;border-right:1px solid #bac6be;\"><span style=\"display:block;font-size:11px;line-height:16px;font-weight:700;color:#4f5d57;\">首批保存點</span><strong style=\"display:block;margin-top:5px;font-size:14px;line-height:20px;color:#007c59;\">{{processed}} 次操作完成</strong></td><td width=\"50%\" valign=\"top\" style=\"padding:14px 16px;\"><span style=\"display:block;font-size:11px;line-height:16px;font-weight:700;color:#4f5d57;\">背景佇列</span><strong style=\"display:block;margin-top:5px;font-size:14px;line-height:20px;color:#14211d;\">剩餘約 {{remaining}} 筆</strong></td></tr></table><div style=\"margin-top:14px;padding:14px 16px;background:#dcefe7;border-radius:4px;color:#14211d;\"><strong style=\"display:block;font-size:14px;line-height:20px;\">接下來不需要留在控制臺</strong><span style=\"display:block;margin-top:4px;font-size:13px;line-height:1.7;color:#4f5d57;\">系統會自動完成剩餘行程，基本行程全部寫入後再寄送「行程已開始同步」通知</span></div><p style=\"margin:18px 0 0;\"><a href=\"{{calendarUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#007c59;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">查看已同步的行程</a></p>"
     },
     "schedule_changes": {
       "accent": "#f05a47",
       "accentDark": "#a63c2f",
       "accentSoft": "#fae3df",
-      "statusLabel": "行程調整",
+      "statusLabel": "需要注意",
       "preheader": "偵測到 {{changeCount}} 項行程調整",
-      "headline": "有 {{changeCount}} 項行程需要留意",
-      "lede": "原安排與新安排並列如下，請確認日期、節次與地點",
-      "content": "{{{changesHtml}}}<p style=\"margin:16px 0 0;font-size:13px;line-height:1.7;color:#4f5d57;\">{{omittedNote}}</p><div style=\"margin-top:18px;padding:14px 16px;background:#f4f7f2;border:1px solid #bac6be;border-radius:4px;font-size:14px;line-height:1.7;color:#4f5d57;\">同步結果：{{summary}}</div>",
+      "headline": "有 {{changeCount}} 項行程調整",
+      "lede": "",
+      "content": "{{{changesHtml}}}<p style=\"display:{{omittedNoteDisplay}};margin:16px 0 0;font-size:13px;line-height:1.7;color:#4f5d57;\">{{omittedNote}}</p>",
       "repeaters": {
         "changesHtml": {
           "source": "changes",
-          "template": "<div style=\"margin:0 0 12px;border:1px solid #bac6be;border-radius:4px;overflow:hidden;\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"><tr><td colspan=\"2\" style=\"padding:14px 16px;background:#f4f7f2;border-bottom:1px solid #bac6be;\"><strong style=\"font-size:15px;line-height:1.5;color:#14211d;\">{{course}}</strong><span style=\"float:right;padding:3px 6px;border:1px solid #f05a47;border-radius:0;background:#fae3df;font-size:11px;line-height:15px;font-weight:700;color:#a63c2f;\">{{type}}</span></td></tr><tr><td width=\"50%\" valign=\"top\" style=\"padding:14px 16px;border-right:1px solid #bac6be;\"><span style=\"display:block;margin-bottom:6px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#4f5d57;\">原安排</span><span style=\"font-size:14px;line-height:1.7;color:#4f5d57;\">{{oldStandard}}</span></td><td width=\"50%\" valign=\"top\" style=\"padding:14px 16px;\"><span style=\"display:block;margin-bottom:6px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#007c59;\">新安排</span><span style=\"font-size:14px;line-height:1.7;color:#14211d;\">{{newStandard}}</span></td></tr></table></div>"
+          "template": "<div style=\"margin:0 0 12px;border:1px solid #bac6be;border-radius:4px;overflow:hidden;\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"><tr><td colspan=\"2\" style=\"padding:14px 16px;background:#f4f7f2;border-bottom:1px solid #bac6be;\"><strong style=\"font-size:15px;line-height:1.5;color:#14211d;\">{{course}}</strong><span style=\"float:right;padding:3px 6px;border:1px solid #f05a47;border-radius:0;background:#fae3df;font-size:11px;line-height:15px;font-weight:700;color:#a63c2f;\">{{type}}</span></td></tr><tr><td width=\"50%\" valign=\"top\" style=\"padding:14px 16px;border-right:1px solid #bac6be;\"><span style=\"display:block;margin-bottom:6px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#4f5d57;\">原安排</span><span style=\"white-space:pre-line;font-size:14px;line-height:1.7;color:#4f5d57;\">{{oldStandard}}</span></td><td width=\"50%\" valign=\"top\" style=\"padding:14px 16px;\"><span style=\"display:block;margin-bottom:6px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#007c59;\">新安排</span><span style=\"white-space:pre-line;font-size:14px;line-height:1.7;color:#14211d;\">{{newStandard}}</span></td></tr></table></div>"
         }
       }
     },
@@ -42,29 +32,29 @@
       "accent": "#00a676",
       "accentDark": "#007c59",
       "accentSoft": "#dcefe7",
-      "statusLabel": "同步完成",
+      "statusLabel": "狀態正常",
       "preheader": "今日同步完成，行程維持最新狀態",
-      "headline": "行程已是最新狀態",
-      "lede": "這是你設定的每日成功摘要，目前沒有需要處理的項目",
+      "headline": "行程同步狀態正常",
+      "lede": "",
       "content": "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;margin:8px 0 18px;border:1px solid #bac6be;border-radius:4px;\"><tr><td width=\"25%\" align=\"center\" style=\"padding:16px 6px;border-right:1px solid #bac6be;\"><strong style=\"display:block;font-size:22px;color:#14211d;\">{{created}}</strong><span style=\"font-size:12px;color:#4f5d57;\">新增</span></td><td width=\"25%\" align=\"center\" style=\"padding:16px 6px;border-right:1px solid #bac6be;\"><strong style=\"display:block;font-size:22px;color:#14211d;\">{{updated}}</strong><span style=\"font-size:12px;color:#4f5d57;\">更新</span></td><td width=\"25%\" align=\"center\" style=\"padding:16px 6px;border-right:1px solid #bac6be;\"><strong style=\"display:block;font-size:22px;color:#14211d;\">{{deleted}}</strong><span style=\"font-size:12px;color:#4f5d57;\">移除</span></td><td width=\"25%\" align=\"center\" style=\"padding:16px 6px;\"><strong style=\"display:block;font-size:22px;color:#14211d;\">{{unchanged}}</strong><span style=\"font-size:12px;color:#4f5d57;\">未變更</span></td></tr></table><p style=\"margin:0;font-size:14px;line-height:1.75;color:#4f5d57;\">課綱說明更新：{{outlineUpdated}} 項</p>"
     },
     "sync_failure": {
       "accent": "#f05a47",
       "accentDark": "#a63c2f",
       "accentSoft": "#fae3df",
-      "statusLabel": "同步失敗",
+      "statusLabel": "需要注意",
       "preheader": "這次同步沒有完成，請查看錯誤說明",
-      "headline": "這次同步沒有完成",
+      "headline": "行程同步失敗",
       "lede": "系統已保留目前狀態，原有日曆行程不會因此消失",
-      "content": "<div style=\"padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:18px 0 0;font-size:14px;line-height:1.75;color:#4f5d57;\">請開啟行程同步控制臺查看目前狀態，若錯誤持續出現，再依完整訊息回報</p><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟行程同步控制臺</a></p>"
+      "content": "<div style=\"padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:18px 0 0;font-size:14px;line-height:1.75;color:#4f5d57;\">請開啟行程同步控制臺查看目前狀態，若錯誤持續出現，再依完整訊息回報</p><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟控制臺試算表</a></p>"
     },
     "course_outline_failure": {
       "accent": "#f05a47",
       "accentDark": "#a63c2f",
       "accentSoft": "#fae3df",
-      "statusLabel": "課綱更新失敗",
+      "statusLabel": "需要處理",
       "preheader": "課綱已嘗試兩次仍無法更新",
-      "headline": "課綱資料暫時無法更新",
+      "headline": "課綱更新失敗",
       "lede": "基本行程仍會繼續同步，系統會沿用最後成功的課綱快照",
       "content": "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;border:1px solid #bac6be;border-radius:4px;\"><tr><td style=\"padding:12px 16px;background:#f4f7f2;border-bottom:1px solid #bac6be;font-size:12px;font-weight:700;color:#4f5d57;\">最後成功課綱</td></tr><tr><td style=\"padding:14px 16px;font-size:14px;color:#14211d;\">{{lastSuccess}}</td></tr></table><div style=\"margin-top:14px;padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:16px 0 0;font-size:14px;line-height:1.75;color:#4f5d57;\">若從未有成功快照，這段期間只會同步基本行程，不會加入單元主題與課程內容</p>"
     },
@@ -72,21 +62,21 @@
       "accent": "#f05a47",
       "accentDark": "#a63c2f",
       "accentSoft": "#fae3df",
-      "statusLabel": "需要重新選課",
+      "statusLabel": "需要處理",
       "preheader": "偵測到 {{dateRange}} 的新學期行程",
-      "headline": "新學期行程已更新",
-      "lede": "為避免把上學期的選課直接套到新學期，自動同步已暫停",
-      "content": "<div style=\"padding:16px 18px;background:#f4f7f2;border:1px solid #bac6be;border-radius:4px;\"><span style=\"display:block;font-size:12px;font-weight:700;color:#4f5d57;\">新行程日期</span><strong style=\"display:block;margin-top:6px;font-size:18px;color:#14211d;\">{{dateRange}}</strong></div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin-top:18px;\"><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#007c59;\">✓</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">既有 Google 日曆行程會完整保留</td></tr><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#f05a47;\">→</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">開啟「行程同步」→「開啟設定」，重新選擇本學期課程並儲存</td></tr></table><p style=\"margin:14px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">前往重新選課</a></p>"
+      "headline": "需要重新選課",
+      "lede": "已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課",
+      "content": "<div style=\"padding:16px 18px;background:#f4f7f2;border:1px solid #bac6be;border-radius:4px;\"><span style=\"display:block;font-size:12px;font-weight:700;color:#4f5d57;\">新行程日期</span><strong style=\"display:block;margin-top:6px;font-size:18px;color:#14211d;\">{{dateRange}}</strong></div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin-top:18px;\"><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#007c59;\">✓</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">既有 Google 日曆行程會完整保留</td></tr><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#f05a47;\">→</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">在控制臺試算表選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」，重新選擇本學期課程並儲存</td></tr></table><p style=\"margin:14px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟控制臺試算表</a></p>"
     },
     "new_schedule_items": {
       "accent": "#f05a47",
       "accentDark": "#a63c2f",
       "accentSoft": "#fae3df",
-      "statusLabel": "需要確認",
+      "statusLabel": "需要處理",
       "preheader": "發現 {{itemCount}} 個新的行程項目",
       "headline": "發現新的行程項目",
       "lede": "系統已先把新項目加入日曆，請確認它們是否屬於你",
-      "content": "<div style=\"border:1px solid #bac6be;border-radius:4px;overflow:hidden;\">{{{itemsHtml}}}</div><p style=\"margin:16px 0 0;font-size:14px;line-height:1.75;color:#4f5d57;\">不屬於你的項目可在控制臺取消，之後同步會一併移除相關的未來行程</p><p style=\"margin:16px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">檢查課程與活動</a></p>",
+      "content": "<div style=\"border:1px solid #bac6be;border-radius:4px;overflow:hidden;\">{{{itemsHtml}}}</div><p style=\"margin:16px 0 0;font-size:14px;line-height:1.75;color:#4f5d57;\">不屬於你的項目可在控制臺取消，之後同步會一併移除相關的未來行程</p><p style=\"margin:16px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟控制臺試算表</a></p>",
       "repeaters": {
         "itemsHtml": {
           "source": "items",
@@ -99,10 +89,10 @@
       "accentDark": "#a63c2f",
       "accentSoft": "#fae3df",
       "statusLabel": "需要處理",
-      "preheader": "同步已停止，請查看需要確認的事項",
-      "headline": "同步已停止，需要檢查",
+      "preheader": "同步已暫停，請查看需要確認的事項",
+      "headline": "同步已暫停",
       "lede": "系統偵測到需要由你確認的狀況，因此沒有繼續寫入日曆",
-      "content": "<div style=\"padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟行程同步控制臺</a></p>"
+      "content": "<div style=\"padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟控制臺試算表</a></p>"
     },
     "action_required": {
       "accent": "#f05a47",
@@ -111,8 +101,30 @@
       "statusLabel": "需要處理",
       "preheader": "{{subject}}，請查看處理說明",
       "headline": "{{subject}}",
-      "lede": "請查看下方說明並回到控制臺處理",
-      "content": "<div style=\"padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟行程同步控制臺</a></p>"
+      "lede": "",
+      "content": "<div style=\"padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟控制臺試算表</a></p>"
+    },
+    "course_outline_index_changed": {
+      "accent": "#f05a47",
+      "accentDark": "#a63c2f",
+      "accentSoft": "#fae3df",
+      "statusLabel": "需要注意",
+      "preheader": "中央課綱來源索引已更新，共有 {{changeCount}} 項變動",
+      "headline": "課綱索引已更新",
+      "lede": "中央課綱來源索引已更新，內容摘要如下",
+      "content": "{{{semesterReviewsHtml}}}<p style=\"display:{{omittedNoteDisplay}};margin:16px 0 0;font-size:13px;line-height:1.7;color:#4f5d57;\">{{omittedNote}}</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;margin-top:18px;border:1px solid #bac6be;border-radius:4px;\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:12px 16px;border-right:1px solid #bac6be;\"><span style=\"display:block;margin-bottom:6px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#4f5d57;\">舊指紋</span><span style=\"font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.6;color:#4f5d57;overflow-wrap:anywhere;\">{{previousFingerprint}}</span></td><td width=\"50%\" valign=\"top\" style=\"padding:12px 16px;\"><span style=\"display:block;margin-bottom:6px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#007c59;\">新指紋</span><span style=\"font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.6;color:#14211d;overflow-wrap:anywhere;\">{{currentFingerprint}}</span></td></tr></table><p style=\"margin:18px 0 0;font-size:14px;line-height:1.75;color:#4f5d57;\">如果你覺得更新內容怪怪的，請聯繫齊宣處理</p>",
+      "repeaters": {
+        "semesterReviewsHtml": {
+          "source": "semesterReviews",
+          "template": "<div style=\"margin:0 0 14px;border:1px solid #bac6be;border-radius:4px;overflow:hidden;\"><div style=\"padding:12px 16px;background:#f4f7f2;border-bottom:1px solid #bac6be;\"><strong style=\"font-size:15px;line-height:1.5;color:#14211d;\">{{semesterLabel}}</strong></div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;\">{{{reviewRowsHtml}}}</table></div>",
+          "repeaters": {
+            "reviewRowsHtml": {
+              "source": "rows",
+              "template": "<tr><td width=\"34\" valign=\"top\" style=\"padding:11px 0 11px 14px;border-bottom:1px solid {{borderColor}};background:{{backgroundColor}};font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;line-height:1.55;font-weight:800;color:{{textColor}};\">{{sign}}</td><td valign=\"top\" style=\"padding:11px 14px 11px 4px;border-bottom:1px solid {{borderColor}};background:{{backgroundColor}};font-size:14px;line-height:1.65;color:#14211d;\">{{label}}</td></tr>"
+            }
+          }
+        }
+      }
     }
   }
 }

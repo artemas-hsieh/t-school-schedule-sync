@@ -32,6 +32,28 @@ const sidebarByIdReferences = Array.from(
   )
 );
 
+assert.equal(configuratorHtml.includes('id="instant-notifications"'), true);
+assert.equal(
+  configuratorHtml.includes('id="instant-notifications" name="instantNotificationsEnabled" type="checkbox" role="switch" checked'),
+  true,
+  '網站即時通知應預設開啟'
+);
+assert.equal(configuratorHtml.includes('偵測到行程調整就盡快通知'), true);
+assert.equal(configuratorHtml.includes('Email 和通知偏好都沒錯 ↵'), true);
+assert.equal(configuratorStylesSource.includes('.notification-grid #field-notification-email'), true);
+assert.equal(configuratorStylesSource.includes('grid-column: 1 / -1'), true);
+assert.equal(configuratorHtml.includes('class="instant-notification-track"'), true);
+assert.equal(configuratorHtml.includes('class="instant-notification-copy"'), true);
+assert.equal(configuratorStylesSource.includes('width: 44px;'), true);
+const kineticCursorSource = configuratorAppSource.slice(
+  configuratorAppSource.indexOf('function initKineticCursor()'),
+  configuratorAppSource.indexOf('function prefersReducedMotion()')
+);
+assert.equal(kineticCursorSource.includes('Math.atan2'), false);
+assert.equal(kineticCursorSource.includes('cursorSwayMaxAngle'), true);
+assert.equal(kineticCursorSource.includes('targetAngle *= MOTION_CONFIG.cursorSwayReturn'), true);
+assert.equal(kineticCursorSource.includes('cursorBaseAngle + currentAngle'), true);
+
 assert.equal(sidebarIdSet.size, sidebarIds.length, 'Google Sheet 控制臺不應出現重複 id');
 assert.deepEqual(
   sidebarByIdReferences.filter(id => !sidebarIdSet.has(id)),
@@ -84,6 +106,12 @@ assert.equal(
   true
 );
 assert.equal(sidebarHtml.includes('--chrome-line: #B7C6BF'), true);
+assert.equal(
+  sidebarHtml.includes('--body: "Noto Sans TC Variable", "Noto Sans TC", sans-serif;'),
+  true,
+  '控制臺應與網站共用 Noto Sans TC 字體設定'
+);
+assert.equal(sidebarHtml.includes('font-family: ui-monospace'), false);
 assert.equal(sidebarHtml.includes('border-bottom: 1px solid var(--chrome-line)'), true);
 assert.equal(sidebarHtml.includes('border-top: 1px solid var(--chrome-line)'), true);
 assert.equal(sidebarHtml.includes('<h2>通知</h2>'), true);
@@ -183,11 +211,25 @@ assert.equal(
   true
 );
 assert.equal(sidebarHtml.includes('<span>通知 Email</span>'), false);
+assert.equal(
+  sidebarHtml.includes('.field > span { color: var(--ink);'),
+  true,
+  '控制臺同層級欄位標題應使用近 #14211d 的系統深色'
+);
 assert.equal(sidebarHtml.includes('id="notify-hours-list"'), true);
+assert.equal(sidebarHtml.includes('id="instant-notifications"'), true);
+assert.equal(sidebarHtml.includes('偵測到行程調整就盡快通知'), true);
 assert.equal(sidebarHtml.includes('data-add-notify-hour'), true);
 assert.equal(sidebarHtml.includes('data-remove-notify-hour'), true);
 assert.equal(sidebarHtml.includes('notificationHours: notificationHours'), true);
 assert.equal(sidebarHtml.includes('notifySyncHour: Math.max.apply(null, notificationHours)'), true);
+assert.equal(
+  sidebarHtml.indexOf('id="instant-notifications"') <
+    sidebarHtml.indexOf('id="notify-hours-list"') &&
+    sidebarHtml.indexOf('id="notify-hours-list"') < sidebarHtml.indexOf('id="email"'),
+  true,
+  '控制臺通知區段應依序顯示即時通知、通知時間與 Email'
+);
 assert.equal(
   sidebarHtml.includes("'prepareFirstSyncCourseOutlinesFromUi'"),
   true,
@@ -201,6 +243,21 @@ assert.equal(sidebarHtml.includes('<span>每日成功摘要</span>'), false);
 assert.equal(sidebarHtml.includes('id="include-activities"'), false);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), true);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner" role="status" hidden'), true);
+assert.equal(
+  configuratorHtml.includes('cloudflareinsights.com'),
+  false,
+  '暫停瀏覽統計時不得放行或載入 Cloudflare Analytics'
+);
+assert.equal(
+  configuratorHtml.includes('privacy.html'),
+  false,
+  '暫停瀏覽統計時首頁不得保留相關連結'
+);
+assert.equal(
+  fs.existsSync(path.join(root, 'analytics.js')) || fs.existsSync(path.join(root, 'privacy.html')),
+  false,
+  '暫停瀏覽統計時不得保留未使用的統計程式與公開頁面'
+);
 assert.match(
   configuratorHtml,
   /<link id="app-stylesheet" rel="stylesheet" href="styles\.css\?v=[^"]+">/,
@@ -220,6 +277,16 @@ assert.doesNotMatch(
   configuratorHtml,
   /id="generated-code"[^>]*\sdata-lenis-prevent(?:\s|>)/,
   '程式碼預覽沒有內嵌捲動，不得繞過頁面的 Lenis 捲動'
+);
+assert.match(
+  configuratorAppSource,
+  /function copyGeneratedCodeWithLegacyFallback\(\)[\s\S]*?codeField\.select\(\)[\s\S]*?document\.execCommand\('copy'\)[\s\S]*?finally \{[\s\S]*?codeField\.setSelectionRange\(0, 0\)[\s\S]*?previousActiveElement\.focus\(\{ preventScroll: true \}\)/,
+  '舊式複製備援應在同一輪操作內清除全選狀態並恢復焦點'
+);
+assert.match(
+  configuratorAppSource,
+  /catch \(error\) \{\s*copyGeneratedCodeWithLegacyFallback\(\);\s*\}/,
+  'Clipboard API 失敗時才使用不留下選取狀態的舊式複製備援'
 );
 assert.match(
   configuratorHtml,
@@ -243,10 +310,10 @@ assert.deepEqual(
   [
     'action_required',
     'course_outline_failure',
+    'course_outline_index_changed',
     'new_schedule_items',
     'schedule_changes',
     'setup_complete',
-    'setup_started',
     'sync_failure',
     'sync_stopped',
     'sync_success',
@@ -256,16 +323,87 @@ assert.deepEqual(
 );
 assert.equal(
   emailTemplateManifest.notifications.setup_complete.statusLabel,
-  '設定完成'
+  '狀態正常'
 );
 assert.equal(
   emailTemplateManifest.notifications.setup_complete.headline,
-  '你的行程已開始同步'
+  '行程同步設定完成'
 );
 assert.equal(
   emailTemplateManifest.notifications.setup_complete.lede,
-  '首批事件已同步，課綱資訊稍待幾分鐘便會載入！之後系統會依設定自動更新'
+  '第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\n' +
+    '後續則會根據你的設定自動更新事件'
 );
+assert.equal(emailTemplateManifest.notifications.setup_started, undefined);
+assert.equal(
+  emailTemplateManifest.notifications.schedule_changes.headline,
+  '有 {{changeCount}} 項行程調整'
+);
+assert.equal(
+  emailTemplateManifest.notifications.schedule_changes.statusLabel,
+  '需要注意'
+);
+assert.equal(emailTemplateManifest.notifications.schedule_changes.lede, '');
+assert.equal(
+  emailTemplateManifest.notifications.sync_success.statusLabel,
+  '狀態正常'
+);
+assert.equal(
+  emailTemplateManifest.notifications.sync_success.headline,
+  '行程同步狀態正常'
+);
+assert.equal(emailTemplateManifest.notifications.sync_success.lede, '');
+assert.equal(
+  emailTemplateManifest.notifications.sync_failure.headline,
+  '行程同步失敗'
+);
+assert.equal(
+  emailTemplateManifest.notifications.course_outline_failure.headline,
+  '課綱更新失敗'
+);
+[
+  'course_outline_failure',
+  'term_transition',
+  'new_schedule_items',
+  'sync_stopped',
+  'action_required'
+].forEach(templateKind => {
+  assert.equal(
+    emailTemplateManifest.notifications[templateKind].statusLabel,
+    '需要處理',
+    `${templateKind} 應使用需要處理標籤`
+  );
+});
+[
+  'sync_failure',
+  'course_outline_index_changed'
+].forEach(templateKind => {
+  assert.equal(
+    emailTemplateManifest.notifications[templateKind].statusLabel,
+    '需要注意',
+    `${templateKind} 應使用需要注意標籤`
+  );
+});
+assert.equal(
+  emailTemplateManifest.notifications.term_transition.headline,
+  '需要重新選課'
+);
+assert.equal(
+  emailTemplateManifest.notifications.term_transition.lede,
+  '已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課'
+);
+assert.equal(
+  emailTemplateManifest.notifications.sync_stopped.headline,
+  '同步已暫停'
+);
+assert.equal(emailTemplateManifest.notifications.action_required.lede, '');
+assert.equal(
+  (emailTemplateManifestText.match(/>開啟控制臺試算表<\/a>/g) || []).length,
+  5
+);
+assert.equal(emailTemplateManifestText.includes('>開啟行程同步控制臺</a>'), false);
+assert.equal(emailTemplateManifestText.includes('>前往重新選課</a>'), false);
+assert.equal(emailTemplateManifestText.includes('>檢查課程與活動</a>'), false);
 assert.equal(/<(script|iframe)\b/i.test(emailTemplateManifestText), false);
 assert.equal(emailTemplateManifestText.includes('。'), false);
 assert.equal(/border-left\s*:/i.test(emailTemplateManifestText), false);
@@ -445,10 +583,80 @@ assert.match(
   /data-initial-label="實體課 \[吉林基地\]" data-final-label="實體課 \[吉林基地-協作坊\]"[\s\S]*?data-initial-label="線上課 \[線上教室\]" data-final-label="線上課 \[線上教室\]"[\s\S]*?data-initial-label="活動 \[弘道基地\]" data-final-label="活動 \[弘道基地-未來教室\]"/,
   'Hero 三張行程卡應分別保留課表起點與日曆終點文案'
 );
+assert.match(
+  configuratorHtml,
+  /<span>課程規劃表<\/span>[\s\S]*?data-hero-schedule-week[\s\S]*?data-hero-calendar-month[\s\S]*?data-hero-calendar-day/,
+  'Hero 兩張紙張應保留可依瀏覽日期更新的學期週次、月份與星期日期'
+);
+assert.equal(
+  configuratorHtml.includes('path-tick'),
+  false,
+  'Hero 紙張連接線不得保留刻度'
+);
+assert.match(
+  configuratorAppSource,
+  /KNOWN_ACADEMIC_TERM_STARTS[\s\S]*?'114-2'[\s\S]*?2026[\s\S]*?23[\s\S]*?'115-1'[\s\S]*?2026[\s\S]*?31[\s\S]*?'115-2'[\s\S]*?2027[\s\S]*?11/,
+  'Hero 應保留 114-2、115-1、115-2 的已知開學日作為立即顯示的週次 fallback'
+);
+assert.match(
+  configuratorAppSource,
+  /function initHeroMetadata\(\)[\s\S]*?renderWeekNumber\(getKnownAcademicTermStart\(now\)\)[\s\S]*?fetchGradeSchedule\('高一'\)[\s\S]*?renderWeekNumber\(summary\.firstDate\)/,
+  'Hero 應先用已知開學日計算週次，再由正式課表起日更新'
+);
+assert.equal(
+  /data-hero-schedule-week>第\s*[…⋯–-]/.test(configuratorHtml),
+  false,
+  'Hero 課表週次不得在正式來源完成前顯示省略號或破折號'
+);
+assert.match(
+  configuratorAppSource,
+  /function getPaperEdgePoint\(metrics, side, anchorRatio, translateX, rotationDegrees\)[\s\S]*?function positionTransferPath\(scheduleMetrics, calendarMetrics, paperMotion\)[\s\S]*?scheduleConnectorAnchor[\s\S]*?calendarConnectorAnchor[\s\S]*?Math\.atan2\(distanceY, distanceX\)/,
+  'Hero 連接線應固定於兩張紙的指定邊線點，並隨紙張位移及旋轉重算'
+);
+assert.match(
+  configuratorStylesSource,
+  /--hero-paper-plane-depth:\s*0px;[\s\S]*?--hero-schedule-depth:\s*var\(--hero-paper-plane-depth\);[\s\S]*?--hero-calendar-depth:\s*var\(--hero-paper-plane-depth\);[\s\S]*?--hero-path-depth:\s*var\(--hero-paper-plane-depth\);/,
+  'Hero 紙張與連接線應位於同一 3D 平面'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.hero-paper-track \.visual-board \{\s*z-index:\s*2;[\s\S]*?\.hero-paper-track \.transfer-path \{\s*z-index:\s*1;/,
+  'Hero 紙張應以堆疊順序覆蓋連接線端部'
+);
+assert.match(
+  configuratorAppSource,
+  /const HERO_PAPER_MOTION_CONFIG = Object\.freeze\(\{[\s\S]*?desktopSeparationPerPaper:[\s\S]*?scheduleRotationDelta:[\s\S]*?calendarRotationDelta:/,
+  'Hero 紙張分離、旋轉與連接點應集中提供調整參數'
+);
+assert.match(
+  configuratorAppSource,
+  /function getPaperMotion\(progress\)[\s\S]*?localProgress \* localProgress \* localProgress[\s\S]*?function applyPaperMotion\(paperMotion\)[\s\S]*?positionTransferPath\(layout\.scheduleMetrics, layout\.calendarMetrics, paperMotion\)/,
+  'Hero 紙張分離應使用平滑起訖曲線，且連接線逐幀跟隨紙張'
+);
 assert.equal(
   configuratorAppSource.includes('heroScrambleInterval: 72'),
   true,
   'Hero 行程卡移動期間應以受控頻率更新動態亂碼'
+);
+assert.match(
+  configuratorHtml,
+  /id="stage-menu-trigger" aria-label="開啟步驟選單"[\s\S]*?data-cursor-label="開啟步驟選單"/,
+  '步驟選單按鈕初始的輔助標籤與游標標籤應使用一致文案'
+);
+assert.match(
+  configuratorAppSource,
+  /const actionLabel = open \? '關閉步驟選單' : '開啟步驟選單';[\s\S]*?tschool:cursor-context-change/,
+  '步驟選單切換時應同步更新游標標籤'
+);
+assert.equal(
+  configuratorStylesSource.includes('.stage-menu-trigger:hover,'),
+  false,
+  '步驟選單按鈕 hover 不得顯示綠色外框或底色'
+);
+assert.match(
+  configuratorAppSource,
+  /function positionCursorCaption\(\)[\s\S]*?window\.innerWidth - captionWidth - captionViewportMargin[\s\S]*?window\.innerHeight - captionHeight - captionViewportMargin/,
+  '動態游標標籤應限制在目前 viewport 範圍內'
 );
 assert.equal(
   configuratorAppSource.includes('heroTileArrivalScrambleDuration: 400'),
@@ -572,11 +780,16 @@ assert.equal(
   '程式碼預覽遮罩應只使用黑色透明度漸層，不得恢復模糊或 mask 濾鏡'
 );
 
-function makeCatalogPayload(weekNumbers, entriesByWeek) {
+function makeCatalogPayload(weekNumbers, entriesByWeek, rowSpan = 6) {
   const rows = weekNumbers.map((weekNumber, index) => ({
     isHeader: false,
     weekNum: String(weekNumber),
-    cells: [{ value: entriesByWeek[index] || '' }]
+    cells: [{
+      value: entriesByWeek[index] || '',
+      day: 1,
+      period: 1,
+      rowSpan
+    }]
   }));
 
   while (rows.length < 10) {
@@ -632,6 +845,31 @@ assert.equal(
   0,
   '連續週次的課表應維持原本的課程／活動兩類'
 );
+assert.equal(
+  scheduleData.MIN_COURSE_SCHEDULED_PERIODS,
+  5,
+  '無活動關鍵字項目的節數邊界應設定為 5 節'
+);
+const lowPeriodCatalog = scheduleData.extractCatalog(makeCatalogPayload(
+  [1],
+  ['沒有活動關鍵字的單次講座'],
+  4
+));
+assert.deepEqual(
+  lowPeriodCatalog.activities.map(item => item.title),
+  ['沒有活動關鍵字的單次講座'],
+  '沒有活動關鍵字但全期少於 5 節的項目仍應判定為活動'
+);
+const boundaryPeriodCatalog = scheduleData.extractCatalog(makeCatalogPayload(
+  [1],
+  ['五節正式課程'],
+  5
+));
+assert.deepEqual(
+  boundaryPeriodCatalog.courses.map(item => item.title),
+  ['五節正式課程'],
+  '剛好 5 節的正式課程不得被節數邊界誤判為活動'
+);
 
 const generatedCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-rc.1',
@@ -639,6 +877,7 @@ const generatedCode = global.buildAppsScriptCode({
   gradeName: '高一',
   calendarName: 'T-SCHOOL 課表',
   notificationEmail: 'test@example.com',
+  instantNotificationsEnabled: true,
   notificationHours: [5, 12, 18, 22],
   notifySyncHour: 5,
   includeActivities: true,
@@ -940,6 +1179,24 @@ assert.deepEqual(
   ].sort(),
   '控制臺的 Code.gs 課程目錄應保留學期間與寒暑假分類'
 );
+assert.deepEqual(
+  Array.from(context.extractCatalogFromPayload_(makeCatalogPayload(
+    [1],
+    ['沒有活動關鍵字的單次講座'],
+    4
+  )), item => `${item.type}:${item.title}`),
+  ['activity:沒有活動關鍵字的單次講座'],
+  'Code.gs 也應將少於 5 節、無活動關鍵字的項目判定為活動'
+);
+assert.deepEqual(
+  Array.from(context.extractCatalogFromPayload_(makeCatalogPayload(
+    [1],
+    ['五節正式課程'],
+    5
+  )), item => `${item.type}:${item.title}`),
+  ['course:五節正式課程'],
+  'Code.gs 應保留剛好 5 節的正式課程'
+);
 
 const parsedOutlineIndex = context.parseCourseOutlineSourceIndexValues_([
   ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '備註', '課綱試算表連結'],
@@ -1050,14 +1307,16 @@ function recordGeneratedMenus(generatedAppsScriptCode) {
 
 assert.deepEqual(
   recordGeneratedMenus(generatedCode),
-  ['行程同步'],
+  ['T-SCHOOL Schedule Sync'],
   '一般 Code.gs 不應建立高負載測試選單'
 );
 assert.deepEqual(
   recordGeneratedMenus(highLoadGeneratedCode),
-  ['行程同步', '高負載測試'],
+  ['T-SCHOOL Schedule Sync', '高負載測試'],
   '測試版 Code.gs 應在既有行程同步選單加入高負載測試子選單'
 );
+assert.match(generatedCode, /\.addItem\('開啟控制臺介面', 'showSettingsSidebar'\)/);
+assert.match(generatedCode, /\.addItem\('關閉 \/ 啟用自動同步', 'toggleAutoSyncFromMenu'\)/);
 
 const outlineWindowEvents = [
   { dateKey: '2026-02-22' },
@@ -1551,7 +1810,13 @@ assert.deepEqual(
 assert.equal(
   initialGeneratedSettings.notifySyncHour,
   22,
-  '每日成功摘要應安排在最後一個通知時間，才能讓當日行程調整優先'
+  '自訂時間應保留最後一個時段，供關閉即時通知後恢復'
+);
+assert.equal(initialGeneratedSettings.instantNotificationsEnabled, true);
+assert.deepEqual(
+  Array.from(context.getEffectiveNotificationHours_(initialGeneratedSettings)),
+  [6],
+  '即時通知開啟時，每日摘要觸發時間應固定為 06:00'
 );
 context.writeChunkedJson_('TSCHOOL_SETTINGS', {
   schemaVersion: 4,
@@ -1729,7 +1994,7 @@ const renderedFailureEmail = context.buildEmailHtmlSafe_(
 assert.match(renderedFailureEmail, /<!doctype html>/);
 assert.match(renderedFailureEmail, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; 權限不足/);
 assert.equal(renderedFailureEmail.includes('<script>alert("x")</script>'), false);
-assert.match(renderedFailureEmail, /這次同步沒有完成/);
+assert.match(renderedFailureEmail, /行程同步失敗/);
 assert.match(
   renderedFailureEmail,
   /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/test\/edit"/,
@@ -1769,6 +2034,9 @@ const sampleEmailData = {
   deleted: 0,
   unchanged: 8,
   changeCount: 1,
+  countsLabel: '目前來源組：高一 1 組、高二 1 組、高三 0 組',
+  previousFingerprint: 'old-fingerprint',
+  currentFingerprint: 'new-fingerprint',
   omittedNote: '',
   processed: 40,
   total: 422,
@@ -1777,9 +2045,30 @@ const sampleEmailData = {
   dateRange: '2026-09-01–2027-01-31',
   itemCount: 1,
   items: [{ label: '測試活動' }],
+  semesterReviews: [{
+    semesterKey: '高一|2',
+    semesterLabel: '高一下',
+    rows: [
+      {
+        sign: '−',
+        label: '114-1 高一—必修',
+        backgroundColor: '#fae3df',
+        borderColor: '#f05a47',
+        textColor: '#a63c2f'
+      },
+      {
+        sign: '+',
+        label: '114-2 高一—必修',
+        backgroundColor: '#dcefe7',
+        borderColor: '#00a676',
+        textColor: '#007c59'
+      }
+    ]
+  }],
   changes: [{
     type: '時間變更',
     course: '測試課程',
+    sourceName: '高二｜115-1-high2',
     oldStandard: '2026/07/27 第 5 節 舊教室',
     newStandard: '2026/07/28 第 6 節 新教室',
     displayText: '時間變更｜測試課程'
@@ -1798,57 +2087,88 @@ Object.keys(emailTemplateManifest.notifications).forEach(templateKind => {
     `${templateKind} 不應留下未解析變數`
   );
 });
+const renderedIndexReview = context.buildEmailHtmlSafe_(
+  'course_outline_index_changed',
+  '課綱索引已更新',
+  {
+    sentAt: '2026/07/31 16:20',
+    previousFingerprint: 'old-fingerprint',
+    currentFingerprint: 'new-fingerprint',
+    changeCount: 2,
+    semesterReviews: [{
+      semesterKey: '高一|2',
+      semesterLabel: '高一下',
+      rows: [
+        {
+          sign: '-',
+          label: '<img src=x onerror=alert(1)> 舊課綱',
+          backgroundColor: '#fae3df',
+          borderColor: '#f05a47',
+          textColor: '#a63c2f'
+        },
+        {
+          sign: '+',
+          label: '新課綱',
+          backgroundColor: '#dcefe7',
+          borderColor: '#00a676',
+          textColor: '#007c59'
+        }
+      ]
+    }]
+  }
+);
+assert.match(renderedIndexReview, /高一下/);
+assert.match(renderedIndexReview, />-<\/td>/);
+assert.match(renderedIndexReview, />\+<\/td>/);
+assert.match(renderedIndexReview, /background:#fae3df/);
+assert.match(renderedIndexReview, /background:#dcefe7/);
+assert.match(renderedIndexReview, /&lt;img src=x onerror=alert\(1\)&gt; 舊課綱/);
+assert.equal(renderedIndexReview.includes('<img src=x onerror=alert(1)>'), false);
 
-const emailsBeforeFirstBatchNotice = sentEmailMessages.length;
-assert.equal(
-  context.sendFirstBatchStartedNotificationSafe_(
-    { notificationEmail: 'test@example.com' },
-    {
-      processedOperations: 40,
-      desiredCount: 422,
-      created: 40
-    }
-  ),
-  true
-);
-assert.equal(sentEmailMessages.length, emailsBeforeFirstBatchNotice + 1);
-assert.equal(
-  sentEmailMessages.at(-1).subject,
-  '首批 40 筆同步完成｜T-SCHOOL Schedule Sync'
-);
-assert.match(sentEmailMessages.at(-1).body, /其餘約 382 筆會在背景自動繼續/);
-assert.match(sentEmailMessages.at(-1).htmlBody, /前 40 筆已安全寫入日曆/);
-assert.match(sentEmailMessages.at(-1).htmlBody, /目前進度 9%/);
-assert.match(sentEmailMessages.at(-1).htmlBody, /剩餘約 382 筆/);
 const emailsBeforeStartedNotice = sentEmailMessages.length;
-context.sendFirstSetupNotificationSafe_({
-  created: 422,
+assert.equal(context.sendFirstSetupNotificationSafe_({
+  created: 40,
   updated: 0,
   outlineUpdated: 0,
   deleted: 0,
   unchanged: 0
-});
+}), true);
 assert.equal(sentEmailMessages.length, emailsBeforeStartedNotice + 1);
 assert.equal(
   sentEmailMessages.at(-1).subject,
-  '行程已開始同步｜T-SCHOOL Schedule Sync'
+  '行程同步設定完成｜T-SCHOOL Schedule Sync'
 );
 assert.equal(
   sentEmailMessages.at(-1).body,
-  '首批事件已同步，課綱資訊稍待幾分鐘便會載入！之後系統會依設定自動更新'
+  '第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\n' +
+    '後續則會根據你的設定自動更新事件'
 );
-assert.match(sentEmailMessages.at(-1).htmlBody, /你的行程已開始同步/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /行程同步設定完成/);
 assert.match(
   sentEmailMessages.at(-1).htmlBody,
-  /首批事件已同步，課綱資訊稍待幾分鐘便會載入！之後系統會依設定自動更新/
+  /第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\n後續則會根據你的設定自動更新事件/
+);
+assert.equal(
+  generatedCode.includes('sendFirstBatchStartedNotificationSafe_'),
+  false
+);
+assert.equal(generatedCode.includes("'setup_started'"), false);
+assert.match(
+  generatedCode,
+  /job\.firstSetup &&[\s\S]*?!job\.setupNotificationClaimed[\s\S]*?sendFirstSetupNotificationSafe_/
 );
 assert.equal(
   context.formatNotificationSubject_('[T-SCHOOL] 行程同步失敗'),
   '行程同步失敗｜T-SCHOOL Schedule Sync'
 );
 assert.equal(
-  context.formatNotificationSubject_('行程已開始同步｜T-SCHOOL Schedule Sync'),
-  '行程已開始同步｜T-SCHOOL Schedule Sync'
+  context.formatNotificationSubject_('行程同步設定完成｜T-SCHOOL Schedule Sync'),
+  '行程同步設定完成｜T-SCHOOL Schedule Sync'
+);
+assert.match(
+  generatedCode,
+  /pendingDiscovered\.length\) \{\s*sendActionRequiredSafe_\(\s*settings,\s*'同步已暫停',[\s\S]*?'new_schedule_items'/,
+  '新行程項目通知的主旨前段應為同步已暫停'
 );
 
 cachedEmailTemplateManifest = '';
@@ -1867,6 +2187,7 @@ emailTemplateFetchShouldFail = false;
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
 const notificationTimingSettings = {
   notificationEmail: 'test@example.com',
+  instantNotificationsEnabled: false,
   notificationHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
   notifySyncHour: (Number(formatDate(new Date(), 'H')) + 1) % 24
 };
@@ -1916,6 +2237,26 @@ assert.equal(
   context.loadNotificationQueueState_().pendingChangeData.changeCount,
   1
 );
+context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
+const emailsBeforeInstantChange = sentEmailMessages.length;
+context.sendSyncNotificationsSafe_(
+  Object.assign({}, notificationTimingSettings, { instantNotificationsEnabled: true }),
+  scheduledChangeResult,
+  { reason: 'source' }
+);
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeInstantChange + 1,
+  '即時通知開啟時，行程調整應在同步完成後盡快寄出'
+);
+assert.equal(context.loadNotificationQueueState_().pendingChangeData, null);
+context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
+context.sendSyncNotificationsSafe_(
+  notificationTimingSettings,
+  scheduledChangeResult,
+  { reason: 'source' }
+);
+const emailsBeforeQueuedDelivery = sentEmailMessages.length;
 const laterScheduledChangeResult = JSON.parse(JSON.stringify(scheduledChangeResult));
 laterScheduledChangeResult.changes[0].oldItem.originalTitle = '第二門測試課程';
 laterScheduledChangeResult.changes[0].newItem.originalTitle = '第二門測試課程';
@@ -1953,7 +2294,7 @@ assert.equal(
 );
 assert.equal(
   sentEmailMessages.length,
-  emailsBeforeQueuedChange,
+  emailsBeforeQueuedDelivery,
   '無新異動的固定同步不得提前寄出待寄通知'
 );
 context.writeChunkedJson_('TSCHOOL_SYNC_JOB', {
@@ -1963,7 +2304,7 @@ context.writeChunkedJson_('TSCHOOL_SYNC_JOB', {
 context.requestScheduledNotificationDelivery_(true);
 assert.equal(
   sentEmailMessages.length,
-  emailsBeforeQueuedChange,
+  emailsBeforeQueuedDelivery,
   '通知 Trigger 與背景同步重疊時應先等待同步完成'
 );
 assert.equal(
@@ -1975,8 +2316,8 @@ assert.equal(
 );
 context.clearChunkedStore_('TSCHOOL_SYNC_JOB');
 context.retryScheduledNotificationDelivery();
-assert.equal(sentEmailMessages.length, emailsBeforeQueuedChange + 1);
-assert.match(sentEmailMessages.at(-1).subject, /行程調整 2 項/);
+assert.equal(sentEmailMessages.length, emailsBeforeQueuedDelivery + 1);
+assert.match(sentEmailMessages.at(-1).subject, /有 2 項行程調整/);
 assert.match(sentEmailMessages.at(-1).body, /測試課程/);
 assert.match(sentEmailMessages.at(-1).body, /第二門測試課程/);
 assert.doesNotMatch(sentEmailMessages.at(-1).subject, /同步成功/);
@@ -1998,7 +2339,7 @@ context.writeChunkedJson_('TSCHOOL_STATUS', {
 const emailsBeforeDailySummary = sentEmailMessages.length;
 context.requestScheduledNotificationDelivery_(true);
 assert.equal(sentEmailMessages.length, emailsBeforeDailySummary + 1);
-assert.match(sentEmailMessages.at(-1).subject, /行程同步完成/);
+assert.match(sentEmailMessages.at(-1).subject, /行程同步狀態正常/);
 context.requestScheduledNotificationDelivery_(true);
 assert.equal(
   sentEmailMessages.length,
@@ -2013,6 +2354,124 @@ assert.equal(sentEmailMessages.at(-1).body.includes('。'), false);
 assert.match(sentEmailMessages.at(-1).subject, /同步失敗/);
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
 context.clearChunkedStore_('TSCHOOL_STATUS');
+context.writeChunkedJson_('TSCHOOL_SETTINGS', {
+  gradeName: '高一',
+  termKey: '一年級|2026-09-01'
+});
+assert.deepEqual(
+  Array.from(context.getCourseOutlineIndexNoticeSemesterContexts_({
+    gradeName: '高一',
+    termKey: '一年級|2026-09-01'
+  }), item => item.semesterLabel),
+  ['高一上', '高一下'],
+  '上學期應追蹤當學期與下一學期'
+);
+assert.deepEqual(
+  Array.from(context.getCourseOutlineIndexNoticeSemesterContexts_({
+    gradeName: '高一',
+    termKey: '一年級|2027-02-01'
+  }), item => item.semesterLabel),
+  ['高一下', '高二上'],
+  '下學期的下一學期應是下一年級上學期'
+);
+assert.deepEqual(
+  Array.from(context.getCourseOutlineIndexNoticeSemesterContexts_({
+    gradeName: '高三',
+    termKey: '三年級|2027-02-01'
+  }), item => item.semesterLabel),
+  ['高三下'],
+  '高三下學期沒有下一學期可通知，不得外推'
+);
+
+const simulatedOutlineIndexHeader = [
+  '啟用',
+  '來源組鍵',
+  '課綱名稱',
+  '年級',
+  '適用起日',
+  '適用迄日',
+  '課綱試算表連結'
+];
+const simulatedHigh1FirstSemesterRows = [
+  '必修',
+  '多元選修',
+  '跨班選修',
+  '彈性學習'
+].map((outlineName, index) => [
+  'TRUE',
+  '114-1-high1',
+  '114-1 高一—' + outlineName,
+  '高一',
+  '2025-08-25',
+  '2026-01-31',
+  'https://docs.google.com/spreadsheets/d/simulated-high1-first-' + index + '/edit'
+]);
+const simulatedHigh1SecondSemesterRows = [
+  '必修',
+  '多元選修',
+  '跨班選修',
+  '彈性學習'
+].map((outlineName, index) => [
+  'TRUE',
+  '114-2-high1',
+  '114-2 高一—' + outlineName,
+  '高一',
+  '2026-02-23',
+  '2026-07-31',
+  'https://docs.google.com/spreadsheets/d/simulated-high1-second-' + index + '/edit'
+]);
+const simulatedHigh1FirstSemesterIndex = context.parseCourseOutlineSourceIndexValues_([
+  simulatedOutlineIndexHeader,
+  ...simulatedHigh1FirstSemesterRows
+]);
+const simulatedHigh1SecondSemesterIndex = context.parseCourseOutlineSourceIndexValues_([
+  simulatedOutlineIndexHeader,
+  ...simulatedHigh1FirstSemesterRows,
+  ...simulatedHigh1SecondSemesterRows
+]);
+const simulatedHigh1Notice = context.buildCourseOutlineSourceIndexChangeData_(
+  simulatedHigh1FirstSemesterIndex,
+  simulatedHigh1SecondSemesterIndex,
+  context.getCourseOutlineIndexNoticeSemesterContexts_({
+    gradeName: '高一',
+    termKey: '一年級|2025-09-01'
+  })
+);
+assert.equal(simulatedHigh1Notice.changeCount, 4);
+assert.equal(simulatedHigh1Notice.semesterReviews.length, 1);
+assert.equal(simulatedHigh1Notice.semesterReviews[0].semesterLabel, '高一下');
+assert.deepEqual(
+  Array.from(simulatedHigh1Notice.semesterReviews[0].rows, row => row.sign),
+  ['+', '+', '+', '+']
+);
+assert.match(simulatedHigh1Notice.semesterReviews[0].rows[0].label, /114-2 高一—必修/);
+assert.match(simulatedHigh1Notice.semesterReviews[0].rows[3].label, /114-2 高一—彈性學習/);
+assert.equal(
+  simulatedHigh1Notice.semesterReviews.some(review =>
+    review.rows.some(row => row.sign === '-')
+  ),
+  false,
+  '正確新增下學期來源時，上學期仍保持啟用，不應顯示移除列'
+);
+
+const simulatedHigh1DisabledNotice = context.buildCourseOutlineSourceIndexChangeData_(
+  simulatedHigh1SecondSemesterIndex,
+  context.parseCourseOutlineSourceIndexValues_([
+    simulatedOutlineIndexHeader,
+    ...simulatedHigh1SecondSemesterRows
+  ]),
+  context.getCourseOutlineIndexNoticeSemesterContexts_({
+    gradeName: '高一',
+    termKey: '一年級|2025-09-01'
+  })
+);
+assert.equal(simulatedHigh1DisabledNotice.changeCount, 4);
+assert.equal(simulatedHigh1DisabledNotice.semesterReviews[0].semesterLabel, '高一上');
+assert.deepEqual(
+  Array.from(simulatedHigh1DisabledNotice.semesterReviews[0].rows, row => row.sign),
+  ['-', '-', '-', '-'],
+  '取消啟用來源組時，每份課綱都應顯示橘色移除列'
+);
 
 const liveOutlineIndexValues = [
   ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '課綱試算表連結'],
@@ -2072,17 +2531,56 @@ liveOutlineIndexValues.push([
   'https://docs.google.com/spreadsheets/d/live-index-second-sheet/edit'
 ]);
 context.resetCourseOutlineSourceIndexRuntimeCache_();
+const emailsBeforeIrrelevantOutlineIndexChange = sentEmailMessages.length;
+const unrelatedOutlineIndex = context.loadCourseOutlineSourceIndex_();
+assert.equal(unrelatedOutlineIndex.setsByGrade['高二'][0].key, '115-1-high2');
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeIrrelevantOutlineIndexChange,
+  '上學期只應通知當學期與下一學期，不得寄送其他年級的索引變動'
+);
+
+liveOutlineIndexValues.push([
+  'TRUE',
+  '115-2-high1',
+  '115-2 高一—必修',
+  '高一',
+  '2027-02-01',
+  '2027-07-31',
+  'https://docs.google.com/spreadsheets/d/live-index-high1-second-term/edit'
+]);
+context.resetCourseOutlineSourceIndexRuntimeCache_();
 const emailsBeforeOutlineIndexChange = sentEmailMessages.length;
 const changedOutlineIndex = context.loadCourseOutlineSourceIndex_();
-assert.equal(changedOutlineIndex.setsByGrade['高二'][0].key, '115-1-high2');
+assert.equal(changedOutlineIndex.setsByGrade['高一'][1].key, '115-2-high1');
 assert.equal(sentEmailMessages.length, emailsBeforeOutlineIndexChange + 1);
 assert.equal(
   sentEmailMessages.at(-1).subject,
   '課綱索引已更新｜T-SCHOOL Schedule Sync'
 );
-assert.match(sentEmailMessages.at(-1).body, /新增：高二｜115-1-high2/);
+assert.match(sentEmailMessages.at(-1).body, /高一下/);
+assert.match(sentEmailMessages.at(-1).body, /\+ 115-2 高一—必修/);
 assert.match(sentEmailMessages.at(-1).body, /舊指紋：/);
 assert.match(sentEmailMessages.at(-1).body, /新指紋：/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /需要注意/);
+assert.match(
+  sentEmailMessages.at(-1).htmlBody,
+  /中央課綱來源索引已更新，內容摘要如下/
+);
+assert.match(sentEmailMessages.at(-1).htmlBody, /高一下/);
+assert.match(sentEmailMessages.at(-1).htmlBody, />\+<\/td>/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /background:#dcefe7/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /115-2 高一—必修/);
+assert.doesNotMatch(sentEmailMessages.at(-1).htmlBody, /115-1 高二—必修/);
+assert.doesNotMatch(sentEmailMessages.at(-1).htmlBody, /第 \d+ 行/);
+assert.match(
+  sentEmailMessages.at(-1).htmlBody,
+  /如果你覺得更新內容怪怪的，請聯繫齊宣處理/
+);
+assert.equal(
+  sentEmailMessages.at(-1).body.includes('若這不是預期變更'),
+  false
+);
 assert.equal(
   Object.prototype.hasOwnProperty.call(
     context.readChunkedJson_('TSCHOOL_COURSE_OUTLINE_INDEX_CACHE', null),
@@ -2092,7 +2590,26 @@ assert.equal(
   '變動通知成功後應清除待寄狀態'
 );
 
-liveOutlineIndexValues[1][2] = '115-1 高一—必修（更新）';
+context.writeChunkedJson_('TSCHOOL_SETTINGS', {
+  gradeName: '高一',
+  termKey: '一年級|2027-02-01'
+});
+liveOutlineIndexValues[2][2] = '115-1 高二—必修（預先更新）';
+context.resetCourseOutlineSourceIndexRuntimeCache_();
+const emailsBeforeNextGradeOutlineIndexChange = sentEmailMessages.length;
+context.loadCourseOutlineSourceIndex_();
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeNextGradeOutlineIndexChange + 1,
+  '下學期應一併通知下一個年級的課綱索引變動'
+);
+assert.match(sentEmailMessages.at(-1).body, /高二上/);
+assert.match(sentEmailMessages.at(-1).body, /- 115-1 高二—必修/);
+assert.match(sentEmailMessages.at(-1).body, /\+ 115-1 高二—必修（預先更新）/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /background:#fae3df/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /background:#dcefe7/);
+
+liveOutlineIndexValues[3][2] = '115-2 高一—必修（更新）';
 mailFailuresRemaining = 1;
 context.resetCourseOutlineSourceIndexRuntimeCache_();
 const emailsBeforeFailedOutlineIndexNotice = sentEmailMessages.length;
@@ -2107,11 +2624,19 @@ assert.equal(
   true,
   '課綱索引通知寄送失敗後應保留待寄狀態'
 );
+assert.equal(
+  context.readChunkedJson_('TSCHOOL_COURSE_OUTLINE_INDEX_CACHE', null)
+    .changeNotice.semesterReviews[0].rows[0].sign,
+  '-',
+  '課綱索引通知寄送失敗後應保留 Review 差異資料'
+);
 context.resetCourseOutlineSourceIndexRuntimeCache_();
 context.loadCourseOutlineSourceIndex_();
 assert.equal(sentEmailMessages.length, emailsBeforeFailedOutlineIndexNotice + 1);
-assert.match(sentEmailMessages.at(-1).body, /更新前：高一｜115-1-high1/);
-assert.match(sentEmailMessages.at(-1).body, /更新後：高一｜115-1-high1/);
+assert.match(sentEmailMessages.at(-1).body, /- 115-2 高一—必修/);
+assert.match(sentEmailMessages.at(-1).body, /\+ 115-2 高一—必修（更新）/);
+assert.match(sentEmailMessages.at(-1).htmlBody, />-<\/td>/);
+assert.match(sentEmailMessages.at(-1).htmlBody, />\+<\/td>/);
 assert.equal(
   Object.prototype.hasOwnProperty.call(
     context.readChunkedJson_('TSCHOOL_COURSE_OUTLINE_INDEX_CACHE', null),
@@ -2120,6 +2645,7 @@ assert.equal(
   false,
   '下一次成功讀取相同索引時應重試並完成待寄通知'
 );
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
 
 context.SpreadsheetApp = {
   openById() {
@@ -2684,6 +3210,7 @@ const settingsBeforeTermTransition = Object.assign({}, migrationSanitized, {
   selectedCourses: ['測試課程'],
   excludedActivities: ['測試活動'],
   pendingTitles: ['待確認課程'],
+  instantNotificationsEnabled: false,
   notificationHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
   notifySyncHour: (Number(formatDate(new Date(), 'H')) + 1) % 24,
   autoSyncEnabled: true,
@@ -2708,9 +3235,15 @@ assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition);
 assert.equal(context.loadNotificationQueueState_().pending.length, 1);
 context.flushQueuedNotificationsSafe_(transitionedSettings);
 assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition + 1);
-assert.match(sentEmailSubjects.at(-1), /新學期行程已更新/);
-assert.match(sentEmailMessages.at(-1).body, /自動同步已暫停/);
-assert.match(sentEmailMessages.at(-1).htmlBody, /需要重新選課/);
+assert.match(sentEmailSubjects.at(-1), /需要重新選課/);
+assert.match(
+  sentEmailMessages.at(-1).body,
+  /已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課/
+);
+assert.match(
+  sentEmailMessages.at(-1).htmlBody,
+  /在控制臺試算表選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」/
+);
 assert.match(sentEmailMessages.at(-1).htmlBody, /2026-09-01–2027-01-31/);
 context.deliverTermTransitionNotice_(transitionedSettings, newTermSource);
 assert.equal(
@@ -3015,6 +3548,7 @@ assert.equal(
 context.refreshAutoSyncTriggers_({
   gradeName: '高一',
   autoSyncEnabled: true,
+  instantNotificationsEnabled: false,
   notificationHours: [5, 22],
   notifySyncHour: 22
 });
@@ -3047,6 +3581,29 @@ assert.deepEqual(
   [22],
   '最後一個通知時間應寄送待寄異動，無異動時才寄每日成功摘要'
 );
+context.refreshAutoSyncTriggers_({
+  gradeName: '高一',
+  autoSyncEnabled: true,
+  instantNotificationsEnabled: true,
+  notificationHours: [5, 22],
+  notifySyncHour: 22
+});
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger =>
+      trigger.getHandlerFunction() === 'sendScheduledNotificationsWithDailySummary'
+    )
+    .map(trigger => trigger.schedule.hour),
+  [6],
+  '即時通知開啟時應只在 06:00 建立每日摘要 Trigger'
+);
+assert.equal(
+  projectTriggers.some(trigger =>
+    trigger.getHandlerFunction() === 'sendScheduledNotifications'
+  ),
+  false,
+  '即時通知開啟時不應建立自訂時間的佇列寄送 Trigger'
+);
 assert.equal(
   projectTriggers.some(trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily'),
   false,
@@ -3055,6 +3612,7 @@ assert.equal(
 context.refreshAutoSyncTriggers_({
   gradeName: '高二',
   autoSyncEnabled: true,
+  instantNotificationsEnabled: false,
   notificationHours: [5],
   notifySyncHour: 5
 });
@@ -3174,7 +3732,8 @@ outlineFailureState = context.loadCourseOutlineState_();
 assert.equal(outlineFailureState.status, 'failed');
 assert.equal(sentOutlineFailureEmails, 1, '第二次課綱失敗應寄信一次');
 assert.match(sentEmailMessages.at(-1).body, /課綱已嘗試兩次仍無法更新/);
-assert.match(sentEmailMessages.at(-1).htmlBody, /課綱資料暫時無法更新/);
+assert.match(sentEmailMessages.at(-1).subject, /課綱更新失敗/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /課綱更新失敗/);
 assert.notEqual(outlineFailureState.failureNotifiedAt, '');
 
 const repeatedFailureRun = Object.assign({}, outlineFailureState, {
@@ -3220,7 +3779,13 @@ const results = fixtures.map(fixture => {
   assert.equal(runtimeSummary.firstDateKey, installerSummary.firstDateKey);
   assert.equal(runtimeSummary.lastDateKey, installerSummary.lastDateKey);
   assert.equal(runtimeSummary.events.some(event => /\[[^\]]+\]\s*$/.test(event.originalTitle)), false);
-  assert.equal(runtimeSummary.catalog.activities.every(item => context.isActivityTitle_(item.title)), true);
+  const runtimePeriodCounts = context.countScheduledPeriodsByTitle_(payload);
+  assert.equal(
+    runtimeSummary.catalog.activities.every(item =>
+      context.classifyScheduleTitle_(item.title, runtimePeriodCounts) === 'activity'
+    ),
+    true
+  );
 
   return {
     grade: fixture.grade,

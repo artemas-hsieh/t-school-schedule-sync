@@ -881,7 +881,7 @@ function buildHighLoadTestSettings_(source) {
     const gradeName = settings.gradeName || '高一';
     const defaultCalendarName = `${gradeName}行程｜T-SCHOOL Schedule Sync`;
     const initialSettings = {
-      schemaVersion: 5,
+      schemaVersion: 6,
       appVersion: settings.appVersion || '2.0.0-rc.1',
       setupComplete: false,
       gradeName,
@@ -893,6 +893,7 @@ function buildHighLoadTestSettings_(source) {
       excludedActivities: settings.excludedActivities || [],
       autoSyncEnabled: true,
       autoSyncHours: [3, 11, 18, 21],
+      instantNotificationsEnabled: settings.instantNotificationsEnabled !== false,
       notificationHours,
       notifySyncHour: notifyHour,
       notificationPreset: 'standard',
@@ -921,9 +922,10 @@ function buildHighLoadTestSettings_(source) {
       : '';
 
     return `const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-rc.1')};
-const SETTINGS_SCHEMA_VERSION = 5;
+const SETTINGS_SCHEMA_VERSION = 6;
 const TIMEZONE = 'Asia/Taipei';
 const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];
+const INSTANT_NOTIFICATION_SUMMARY_HOUR = 6;
 const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
 const EMAIL_TEMPLATE_MANIFEST_URL = 'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json';
 const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8';
@@ -997,6 +999,7 @@ const SETTINGS_SIDEBAR_HTML = ${formatLongString(sidebarHtml)};
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const MANUAL_MERGE_EXCEPTIONS = {};
+const MIN_COURSE_SCHEDULED_PERIODS = 5;
 // 中央索引暫時不可讀且沒有最後成功快取時使用，避免既有 114-2 課綱立即失效。
 const COURSE_OUTLINE_SOURCE_SETS_BY_GRADE = {
   '高一': [],
@@ -1032,11 +1035,11 @@ const ACTIVITY_PATTERNS = [
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   const menu = ui
-    .createMenu('行程同步')
-    .addItem('開啟設定', 'showSettingsSidebar')
+    .createMenu('T-SCHOOL Schedule Sync')
+    .addItem('開啟控制臺介面', 'showSettingsSidebar')
     .addSeparator()
     .addItem('立即同步', 'syncMyScheduleToCalendar')
-    .addItem('暫停／恢復自動同步', 'toggleAutoSyncFromMenu')
+    .addItem('關閉 / 啟用自動同步', 'toggleAutoSyncFromMenu')
     .addItem('查看同步狀態', 'showSyncStatus')
     .addItem('強制修復', 'forceFullSyncMyScheduleToCalendar')
     .addSeparator();
@@ -1438,6 +1441,12 @@ function sanitizeSettingsInput_(input, previous, source) {
     requestedNotifyHour
   );
   const notifyHour = Math.max.apply(null, notificationHours);
+  const instantNotificationsEnabled = Object.prototype.hasOwnProperty.call(
+    value,
+    'instantNotificationsEnabled'
+  )
+    ? value.instantNotificationsEnabled !== false
+    : previous.instantNotificationsEnabled !== false;
   const reminderMode = ['none', 'popup', 'email'].indexOf(value.reminderMode) !== -1
     ? value.reminderMode
     : 'none';
@@ -1472,6 +1481,7 @@ function sanitizeSettingsInput_(input, previous, source) {
     notificationEmail,
     autoSyncEnabled: value.autoSyncEnabled !== false,
     autoSyncHours: SCHEDULE_SYNC_HOURS.slice(),
+    instantNotificationsEnabled,
     notificationHours,
     notifySyncHour: notifyHour,
     notificationPreset: 'standard',
@@ -1827,11 +1837,11 @@ function syncSchedule_(options) {
       saveSyncJob_(job);
       if (job.firstSetup &&
           job.processedOperations >= SYNC_INITIAL_SETUP_BATCH_OPERATIONS &&
-          !job.firstBatchNotificationClaimed) {
-        job.firstBatchNotificationClaimed = true;
+          !job.setupNotificationClaimed) {
+        job.setupNotificationClaimed = true;
         saveSyncJob_(job);
-        if (!sendFirstBatchStartedNotificationSafe_(settings, job)) {
-          job.firstBatchNotificationClaimed = false;
+        if (!sendFirstSetupNotificationSafe_(buildSyncJobResult_(job, true))) {
+          job.setupNotificationClaimed = false;
           saveSyncJob_(job);
         }
       }
@@ -1988,7 +1998,7 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
     migrationEntries,
     migrationCursor: 0,
     completionNotificationClaimed: false,
-    firstBatchNotificationClaimed: false
+    setupNotificationClaimed: false
   };
   saveSyncJob_(job);
   return job;
@@ -2318,7 +2328,11 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
       notifyOnSuccess: job.notifyOnSuccess,
       notificationWindow: job.notificationWindow
     });
-    if (job.firstSetup) sendFirstSetupNotificationSafe_(result);
+    if (job.firstSetup && !job.setupNotificationClaimed) {
+      job.setupNotificationClaimed = true;
+      saveSyncJob_(job);
+      sendFirstSetupNotificationSafe_(result);
+    }
   }
 
   writeSyncProgress_(100, '同步完成', 'complete', {
@@ -2376,7 +2390,7 @@ function handleSyncJobFailure_(job, error) {
   if (actionRequired) {
     sendActionRequiredSafe_(
       loadSettings_(),
-      '同步已停止，需要檢查',
+      '同步已暫停',
       message,
       '',
       'sync_stopped',
@@ -2553,7 +2567,7 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
   }
 
   if (!quiet) {
-    throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟設定並重新選課。');
+    throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟控制臺介面並重新選課。');
   }
 
   return settings;
@@ -2564,12 +2578,13 @@ function buildTermTransitionNotice_(settings, source) {
     ? source.firstDateKey + (source.lastDateKey ? '–' + source.lastDateKey : '')
     : '新學期';
   return {
-    subject: '新學期行程已更新',
+    subject: '需要重新選課',
     dateRange,
     body:
       '系統偵測到 ' + dateRange + ' 的新學期行程\\n\\n' +
-      '自動同步已暫停，既有日曆事件會完整保留。' +
-      '請開啟「行程同步」→「開啟設定」，重新選擇本學期課程並儲存。'
+      '已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課\\n' +
+      '既有日曆事件會完整保留\\n' +
+      '在控制臺試算表選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」，重新選擇本學期課程並儲存'
   };
 }
 
@@ -2657,7 +2672,7 @@ function registerNewTitles_(settings, source) {
   if (pendingDiscovered.length) {
     sendActionRequiredSafe_(
       settings,
-      '發現新的行程項目',
+      '同步已暫停',
       '下列項目已先加入日曆，請在控制臺確認是否屬於你：\\n\\n' +
         pendingDiscovered.join('\\n'),
       '',
@@ -3434,63 +3449,237 @@ function readCourseOutlineSourceIndexSpreadsheet_() {
   return parseCourseOutlineSourceIndexValues_(values);
 }
 
-function mapCourseOutlineSourceIndexSets_(payload) {
+function getCourseOutlineIndexNoticeSemesterNumber_(settings) {
+  const termKey = String(
+    settings && (settings.pendingTermKey || settings.termKey) ||
+    DEFAULT_SETTINGS.termKey ||
+    ''
+  );
+  const termDateMatch = termKey.match(/\\|(\\d{4})-(\\d{2})-\\d{2}$/);
+  const termStartMonth = termDateMatch
+    ? Number(termDateMatch[2])
+    : Number(Utilities.formatDate(scheduleBusinessNow_(), TIMEZONE, 'M'));
+  return termStartMonth >= 2 && termStartMonth <= 7 ? 2 : 1;
+}
+
+function makeCourseOutlineSemesterKey_(gradeName, semesterNumber) {
+  return gradeName + '|' + semesterNumber;
+}
+
+function formatCourseOutlineSemesterLabel_(gradeName, semesterNumber) {
+  return gradeName + (Number(semesterNumber) === 2 ? '下' : '上');
+}
+
+function getCourseOutlineIndexNoticeSemesterContexts_(settings) {
+  const gradeNames = ['高一', '高二', '高三'];
+  const gradeName = settings && gradeNames.indexOf(settings.gradeName) !== -1
+    ? settings.gradeName
+    : '';
+  if (!gradeName) return [];
+
+  const semesterNumber = getCourseOutlineIndexNoticeSemesterNumber_(settings);
+  const result = [{
+    gradeName,
+    semesterNumber,
+    semesterKey: makeCourseOutlineSemesterKey_(gradeName, semesterNumber),
+    semesterLabel: formatCourseOutlineSemesterLabel_(gradeName, semesterNumber)
+  }];
+  const nextGradeName = gradeNames[gradeNames.indexOf(gradeName) + 1] || '';
+  const nextContext = semesterNumber === 1
+    ? { gradeName, semesterNumber: 2 }
+    : (nextGradeName ? { gradeName: nextGradeName, semesterNumber: 1 } : null);
+  if (nextContext) {
+    nextContext.semesterKey = makeCourseOutlineSemesterKey_(
+      nextContext.gradeName,
+      nextContext.semesterNumber
+    );
+    nextContext.semesterLabel = formatCourseOutlineSemesterLabel_(
+      nextContext.gradeName,
+      nextContext.semesterNumber
+    );
+    result.push(nextContext);
+  }
+  return result;
+}
+
+function getCourseOutlineSourceSetSemesterNumber_(sourceSet) {
+  const keyMatch = String(sourceSet && sourceSet.key || '')
+    .match(/^\\d{3,4}-([12])(?:-|$)/);
+  if (keyMatch) return Number(keyMatch[1]);
+  const validFromMatch = String(sourceSet && sourceSet.validFrom || '')
+    .match(/^\\d{4}-(\\d{2})-\\d{2}$/);
+  const startMonth = validFromMatch ? Number(validFromMatch[1]) : 0;
+  return startMonth >= 2 && startMonth <= 7 ? 2 : 1;
+}
+
+function mapCourseOutlineSourceIndexSets_(payload, includedSemesterContexts) {
   const mapped = {};
-  ['高一', '高二', '高三'].forEach(gradeName => {
+  const contexts = Array.isArray(includedSemesterContexts)
+    ? includedSemesterContexts
+    : [];
+  const includedSemesterKeys = {};
+  contexts.forEach(context => {
+    includedSemesterKeys[context.semesterKey] = true;
+  });
+  const gradeNames = contexts.length
+    ? uniqueExactStrings_(contexts.map(context => context.gradeName))
+    : ['高一', '高二', '高三'];
+  gradeNames.forEach(gradeName => {
     const sets = payload && payload.setsByGrade && payload.setsByGrade[gradeName];
     (Array.isArray(sets) ? sets : []).forEach(set => {
+      const semesterNumber = getCourseOutlineSourceSetSemesterNumber_(set);
+      const semesterKey = makeCourseOutlineSemesterKey_(gradeName, semesterNumber);
+      if (contexts.length && !includedSemesterKeys[semesterKey]) return;
       const key = gradeName + '|' + set.key;
       mapped[key] = {
+        gradeName,
+        semesterNumber,
+        semesterKey,
+        semesterLabel: formatCourseOutlineSemesterLabel_(gradeName, semesterNumber),
+        sourceKey: set.key,
         comparable: JSON.stringify(set),
-        summary: gradeName + '｜' + set.key + '｜' +
-          set.validFrom + '–' + set.validUntil + '｜' +
-          (set.label || (set.outlineNames || []).join('、') || '未命名來源') +
-          '｜' + set.spreadsheetIds.length + ' 份試算表'
+        outlineNames: uniqueExactStrings_(set.outlineNames || []),
+        spreadsheetIds: (set.spreadsheetIds || []).slice()
       };
     });
   });
   return mapped;
 }
 
-function summarizeCourseOutlineSourceIndexChange_(previousPayload, nextPayload) {
-  const previousSets = mapCourseOutlineSourceIndexSets_(previousPayload);
-  const nextSets = mapCourseOutlineSourceIndexSets_(nextPayload);
-  const changes = [];
+function buildCourseOutlineReviewRow_(type, label) {
+  const isAdded = type === 'added';
+  return {
+    type,
+    sign: isAdded ? '+' : '-',
+    label: label || '未命名課綱',
+    backgroundColor: isAdded ? '#dcefe7' : '#fae3df',
+    borderColor: isAdded ? '#00a676' : '#f05a47',
+    textColor: isAdded ? '#007c59' : '#a63c2f'
+  };
+}
+
+function buildCourseOutlineSourceIndexChangeData_(
+  previousPayload,
+  nextPayload,
+  includedSemesterContexts
+) {
+  const contexts = Array.isArray(includedSemesterContexts)
+    ? includedSemesterContexts
+    : [];
+  const previousSets = mapCourseOutlineSourceIndexSets_(previousPayload, contexts);
+  const nextSets = mapCourseOutlineSourceIndexSets_(nextPayload, contexts);
+  const reviewsBySemester = {};
+
+  function addReviewRow(sourceSet, type, label) {
+    const semesterKey = sourceSet.semesterKey;
+    if (!reviewsBySemester[semesterKey]) {
+      reviewsBySemester[semesterKey] = {
+        semesterKey,
+        semesterLabel: sourceSet.semesterLabel,
+        rows: []
+      };
+    }
+    reviewsBySemester[semesterKey].rows.push(
+      buildCourseOutlineReviewRow_(type, label)
+    );
+  }
 
   Object.keys(nextSets).sort().forEach(key => {
     if (!previousSets[key]) {
-      changes.push('新增：' + nextSets[key].summary);
+      nextSets[key].outlineNames.forEach(outlineName => {
+        addReviewRow(nextSets[key], 'added', outlineName);
+      });
     } else if (previousSets[key].comparable !== nextSets[key].comparable) {
-      changes.push(
-        previousSets[key].summary === nextSets[key].summary
-          ? '更新：' + nextSets[key].summary + '｜來源試算表清單已變更'
-          : '更新前：' + previousSets[key].summary +
-            '\\n更新後：' + nextSets[key].summary
-      );
+      const previousNames = previousSets[key].outlineNames;
+      const nextNames = nextSets[key].outlineNames;
+      const removedNames = previousNames.filter(name => nextNames.indexOf(name) === -1);
+      const addedNames = nextNames.filter(name => previousNames.indexOf(name) === -1);
+      if (!removedNames.length && !addedNames.length) {
+        previousNames.forEach(outlineName => {
+          addReviewRow(previousSets[key], 'removed', outlineName);
+        });
+        nextNames.forEach(outlineName => {
+          addReviewRow(nextSets[key], 'added', outlineName);
+        });
+      } else {
+        removedNames.forEach(outlineName => {
+          addReviewRow(previousSets[key], 'removed', outlineName);
+        });
+        addedNames.forEach(outlineName => {
+          addReviewRow(nextSets[key], 'added', outlineName);
+        });
+      }
     }
   });
   Object.keys(previousSets).sort().forEach(key => {
-    if (!nextSets[key]) changes.push('移除：' + previousSets[key].summary);
+    if (!nextSets[key]) {
+      previousSets[key].outlineNames.forEach(outlineName => {
+        addReviewRow(previousSets[key], 'removed', outlineName);
+      });
+    }
   });
 
-  const counts = ['高一', '高二', '高三'].map(gradeName => {
-    const sets = nextPayload.setsByGrade[gradeName];
-    return gradeName + ' ' + (Array.isArray(sets) ? sets.length : 0) + ' 組';
+  const orderedSemesterKeys = contexts.length
+    ? contexts.map(context => context.semesterKey)
+    : Object.keys(reviewsBySemester).sort();
+  const semesterReviews = orderedSemesterKeys
+    .filter(semesterKey => reviewsBySemester[semesterKey])
+    .map(semesterKey => reviewsBySemester[semesterKey]);
+  const allRows = [];
+  semesterReviews.forEach(review => {
+    review.rows.forEach(row => {
+      allRows.push({
+        semesterKey: review.semesterKey,
+        semesterLabel: review.semesterLabel,
+        row
+      });
+    });
   });
-  const visibleChanges = changes.slice(0, COURSE_OUTLINE_INDEX_NOTICE_DETAIL_LIMIT);
-  if (changes.length > visibleChanges.length) {
-    visibleChanges.push('另有 ' + (changes.length - visibleChanges.length) + ' 項變動未列出');
-  }
-  if (!visibleChanges.length) visibleChanges.push('來源組結構未顯示差異，但內容指紋已改變');
-
-  return [
-    '目前來源組：' + counts.join('、'),
-    '',
-    visibleChanges.join('\\n'),
+  const visibleRows = allRows.slice(0, COURSE_OUTLINE_INDEX_NOTICE_DETAIL_LIMIT);
+  const visibleReviewsBySemester = {};
+  visibleRows.forEach(item => {
+    if (!visibleReviewsBySemester[item.semesterKey]) {
+      visibleReviewsBySemester[item.semesterKey] = {
+        semesterKey: item.semesterKey,
+        semesterLabel: item.semesterLabel,
+        rows: []
+      };
+    }
+    visibleReviewsBySemester[item.semesterKey].rows.push(item.row);
+  });
+  const visibleSemesterReviews = orderedSemesterKeys
+    .filter(semesterKey => visibleReviewsBySemester[semesterKey])
+    .map(semesterKey => visibleReviewsBySemester[semesterKey]);
+  const omittedCount = Math.max(0, allRows.length - visibleRows.length);
+  const omittedNote = omittedCount
+    ? '另有 ' + omittedCount + ' 項變動未列出'
+    : '';
+  const summary = [
+    visibleSemesterReviews.map(review => [
+      review.semesterLabel,
+      review.rows.map(row => row.sign + ' ' + row.label).join('\\n')
+    ].join('\\n')).join('\\n\\n'),
+    omittedNote,
     '',
     '舊指紋：' + previousPayload.fingerprint,
     '新指紋：' + nextPayload.fingerprint
-  ].join('\\n');
+  ].filter(Boolean).join('\\n');
+
+  return {
+    changeCount: allRows.length,
+    semesterReviews: visibleSemesterReviews,
+    semesterKeys: contexts.map(context => context.semesterKey),
+    hasRelevantChanges: visibleRows.length > 0,
+    omittedCount,
+    omittedNote,
+    previousFingerprint: previousPayload.fingerprint,
+    currentFingerprint: nextPayload.fingerprint,
+    summary
+  };
+}
+
+function summarizeCourseOutlineSourceIndexChange_(previousPayload, nextPayload) {
+  return buildCourseOutlineSourceIndexChangeData_(previousPayload, nextPayload).summary;
 }
 
 function prepareCourseOutlineSourceIndexChangeNotice_(previousPayload, nextPayload) {
@@ -3505,32 +3694,29 @@ function prepareCourseOutlineSourceIndexChangeNotice_(previousPayload, nextPaylo
       ? pending
       : null;
   }
+  const settings = loadSettings_();
+  const noticeSemesterContexts = getCourseOutlineIndexNoticeSemesterContexts_(settings);
+  const changeData = buildCourseOutlineSourceIndexChangeData_(
+    previousPayload,
+    nextPayload,
+    noticeSemesterContexts
+  );
+  if (!changeData.hasRelevantChanges) return null;
   return {
     pending: true,
     previousFingerprint: previousPayload.fingerprint,
     currentFingerprint: nextPayload.fingerprint,
     detectedAt: new Date().toISOString(),
-    summary: summarizeCourseOutlineSourceIndexChange_(previousPayload, nextPayload)
+    changeCount: changeData.changeCount,
+    semesterReviews: changeData.semesterReviews,
+    semesterKeys: changeData.semesterKeys,
+    omittedCount: changeData.omittedCount,
+    omittedNote: changeData.omittedNote,
+    summary: changeData.summary
   };
 }
 
-function sendPendingCourseOutlineSourceIndexChangeNotice_(payload) {
-  const notice = payload && payload.changeNotice;
-  if (!notice || !notice.pending) return;
-  try {
-    sendEmail_(
-      loadSettings_(),
-      'course_outline_index_changed',
-      '課綱索引已更新',
-      '中央課綱來源索引已更新，內容摘要如下\\n\\n' + notice.summary +
-      '\\n\\n若這不是預期變更，請聯絡索引維護者確認後再繼續同步',
-      { message: notice.summary }
-    );
-  } catch (mailError) {
-    Logger.log('課綱來源索引變動通知寄送失敗，將於下次成功讀取索引時重試：' + mailError.message);
-    return;
-  }
-
+function clearPendingCourseOutlineSourceIndexChangeNotice_(payload) {
   delete payload.changeNotice;
   if (courseOutlineSourceIndexRuntimeCache_ &&
       courseOutlineSourceIndexRuntimeCache_.fingerprint === payload.fingerprint) {
@@ -3541,6 +3727,67 @@ function sendPendingCourseOutlineSourceIndexChangeNotice_(payload) {
   } catch (cacheError) {
     Logger.log('課綱來源索引通知狀態保存失敗，後續可能重複通知：' + cacheError.message);
   }
+}
+
+function sendPendingCourseOutlineSourceIndexChangeNotice_(payload) {
+  const notice = payload && payload.changeNotice;
+  if (!notice || !notice.pending) return;
+  const settings = loadSettings_();
+  const relevantSemesterContexts = getCourseOutlineIndexNoticeSemesterContexts_(settings);
+  const relevantSemesterKeys = relevantSemesterContexts.map(context => context.semesterKey);
+  const semesterReviews = (Array.isArray(notice.semesterReviews)
+    ? notice.semesterReviews
+    : []).filter(review => {
+    return relevantSemesterKeys.indexOf(review.semesterKey) !== -1 &&
+      Array.isArray(review.rows) &&
+      review.rows.length;
+  });
+  if (!semesterReviews.length) {
+    clearPendingCourseOutlineSourceIndexChangeNotice_(payload);
+    return;
+  }
+
+  const visibleChangeCount = semesterReviews.reduce(
+    (count, review) => count + review.rows.length,
+    0
+  );
+  const omittedCount = Number(notice.omittedCount) || 0;
+  const omittedNote = omittedCount
+    ? '另有 ' + omittedCount + ' 項變動未列出'
+    : '';
+  const noticeSummary = [
+    semesterReviews.map(review => [
+      review.semesterLabel,
+      review.rows.map(row => row.sign + ' ' + row.label).join('\\n')
+    ].join('\\n')).join('\\n\\n'),
+    omittedNote,
+    '',
+    '舊指紋：' + (notice.previousFingerprint || ''),
+    '新指紋：' + (notice.currentFingerprint || '')
+  ].filter((line, index, lines) =>
+    line !== '' || (index > 0 && lines[index - 1] !== '')
+  ).join('\\n');
+  try {
+    sendEmail_(
+      settings,
+      'course_outline_index_changed',
+      '課綱索引已更新',
+      '中央課綱來源索引已更新，內容摘要如下\\n\\n' + noticeSummary +
+      '\\n\\n如果你覺得更新內容怪怪的，請聯繫齊宣處理',
+      {
+        changeCount: visibleChangeCount + omittedCount,
+        semesterReviews,
+        omittedNote,
+        previousFingerprint: notice.previousFingerprint || '',
+        currentFingerprint: notice.currentFingerprint || ''
+      }
+    );
+  } catch (mailError) {
+    Logger.log('課綱來源索引變動通知寄送失敗，將於下次成功讀取索引時重試：' + mailError.message);
+    return;
+  }
+
+  clearPendingCourseOutlineSourceIndexChangeNotice_(payload);
 }
 
 function loadCourseOutlineSourceIndex_() {
@@ -4345,7 +4592,7 @@ function sendCourseOutlineFailureNotification_(incidentId) {
     sendEmail_(
       loadSettings_(),
       'course_outline_failure',
-      '課綱更新連續失敗',
+      '課綱更新失敗',
       '課綱已嘗試兩次仍無法更新。\\n\\n錯誤：' + (state.lastError || '未知錯誤') +
       '\\n最後成功課綱：' + lastSuccess +
       '\\n\\n基本行程與行事曆同步仍會使用最後成功快照；若沒有快照，則只同步基本行程。',
@@ -4410,6 +4657,7 @@ function assertSourcePayload_(payload, expectedGrade) {
 
 function parseSchedulePayload_(payload, gradeName, now) {
   const datedHeaders = inferHeaderDates_(payload, now);
+  const scheduledPeriodCounts = countScheduledPeriodsByTitle_(payload);
   const dateLookup = {};
   datedHeaders.forEach(item => { dateLookup[item.rowIndex + '|' + item.dayIndex] = item.dateKey; });
   const events = [];
@@ -4445,7 +4693,7 @@ function parseSchedulePayload_(payload, gradeName, now) {
           if (!parsed.title || !dateKey) return;
           events.push({
             originalTitle: parsed.title,
-            type: isActivityTitle_(parsed.title) ? 'activity' : 'course',
+            type: classifyScheduleTitle_(parsed.title, scheduledPeriodCounts),
             isAllDay: false,
             weekNum,
             weekday: WEEKDAY_LABELS[dayIndex],
@@ -4471,7 +4719,8 @@ function parseSchedulePayload_(payload, gradeName, now) {
       splitCellEntries_(cell.value).forEach(rawEntry => {
         if (isStructuralValue_(rawEntry)) return;
         const parsed = parseEntry_(rawEntry);
-        if (!parsed.title || !dateKey || !isActivityTitle_(parsed.title)) return;
+        if (!parsed.title || !dateKey ||
+            classifyScheduleTitle_(parsed.title, scheduledPeriodCounts) !== 'activity') return;
         const start = makeTaipeiDate_(dateKey, '00:00');
         const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
         events.push({
@@ -4494,7 +4743,7 @@ function parseSchedulePayload_(payload, gradeName, now) {
     });
   });
 
-  const catalogAll = extractCatalogFromPayload_(payload);
+  const catalogAll = extractCatalogFromPayload_(payload, scheduledPeriodCounts);
   const firstDateKey = datedHeaders[0].dateKey;
   const lastDateKey = datedHeaders[datedHeaders.length - 1].dateKey;
   const termKey = GRADE_API_NAMES[gradeName] + '|' + firstDateKey;
@@ -4552,9 +4801,10 @@ function getVacationWeekNumbersFromPayload_(payload) {
   return vacationWeeks;
 }
 
-function extractCatalogFromPayload_(payload) {
+function extractCatalogFromPayload_(payload, scheduledPeriodCounts) {
   const catalogMap = {};
   const vacationWeeks = getVacationWeekNumbersFromPayload_(payload);
+  const titlePeriodCounts = scheduledPeriodCounts || countScheduledPeriodsByTitle_(payload);
   (payload.tableData || []).forEach(row => {
     if (!row || row.isHeader || !Array.isArray(row.cells)) return;
     row.cells.forEach(cell => {
@@ -4565,7 +4815,7 @@ function extractCatalogFromPayload_(payload) {
         if (!key) return;
         const existing = catalogMap[key] || {
           title: parsed.title,
-          type: isActivityTitle_(parsed.title) ? 'activity' : 'course',
+          type: classifyScheduleTitle_(parsed.title, titlePeriodCounts),
           hasVacationOccurrence: false
         };
         existing.hasVacationOccurrence =
@@ -4657,6 +4907,36 @@ function isActivityTitle_(title) {
   return ACTIVITY_PATTERNS.some(pattern => pattern.test(normalizeText_(title)));
 }
 
+function countScheduledPeriodsByTitle_(payload) {
+  const counts = Object.create(null);
+  (payload.tableData || []).forEach(row => {
+    if (!row || row.isHeader || !Array.isArray(row.cells)) return;
+    row.cells.forEach(cell => {
+      const day = Number(cell && cell.day);
+      const periodStart = Number(cell && cell.period);
+      if (!isFinite(day) || !isFinite(periodStart)) return;
+      const rowSpan = Math.max(1, Number(cell.rowSpan) || 1);
+      const scheduledPeriods = Math.max(1, Math.min(8 - periodStart + 1, rowSpan));
+      splitCellEntries_(cell.value).forEach(rawEntry => {
+        if (isStructuralValue_(rawEntry)) return;
+        const key = normalizeTitle_(parseEntry_(rawEntry).title);
+        if (key) counts[key] = (counts[key] || 0) + scheduledPeriods;
+      });
+    });
+  });
+  return counts;
+}
+
+function classifyScheduleTitle_(title, scheduledPeriodCounts) {
+  const key = normalizeTitle_(title);
+  const scheduledPeriods = key && scheduledPeriodCounts
+    ? Number(scheduledPeriodCounts[key]) || 0
+    : 0;
+  return isActivityTitle_(title) || scheduledPeriods < MIN_COURSE_SCHEDULED_PERIODS
+    ? 'activity'
+    : 'course';
+}
+
 function isCrossSchoolCourseName_(title) {
   return /跨校/.test(normalizeText_(title));
 }
@@ -4699,6 +4979,7 @@ function loadSettings_() {
     normalizeHour_(settings.notifySyncHour, 5)
   );
   settings.notifySyncHour = Math.max.apply(null, settings.notificationHours);
+  settings.instantNotificationsEnabled = settings.instantNotificationsEnabled !== false;
   settings.autoSyncHours = SCHEDULE_SYNC_HOURS.slice();
   settings.selectedCourses = uniqueStrings_(settings.selectedCourses || []);
   settings.excludedActivities = uniqueStrings_(settings.excludedActivities || []);
@@ -4916,12 +5197,10 @@ function refreshAutoSyncTriggers_(settings) {
       .inTimezone(TIMEZONE)
       .create();
   });
-  const notificationHours = normalizeHourArray_(
-    settings.notificationHours || settings.autoSyncHours,
-    settings.notifySyncHour
-  );
+  const notificationHours = getEffectiveNotificationHours_(settings);
+  const dailySummaryHour = getDailySummaryHour_(settings);
   notificationHours.forEach(hour => {
-    const handler = hour === settings.notifySyncHour
+    const handler = hour === dailySummaryHour
       ? FINAL_NOTIFICATION_HANDLER
       : NOTIFICATION_HANDLER;
     ScriptApp.newTrigger(handler)
@@ -4943,6 +5222,23 @@ function refreshAutoSyncTriggers_(settings) {
   } else {
     deleteCourseOutlineMaintenanceTriggers_();
   }
+}
+
+function getEffectiveNotificationHours_(settings) {
+  if (!settings || settings.instantNotificationsEnabled !== false) {
+    return [INSTANT_NOTIFICATION_SUMMARY_HOUR];
+  }
+  return normalizeHourArray_(
+    settings.notificationHours || settings.autoSyncHours,
+    settings.notifySyncHour
+  );
+}
+
+function getDailySummaryHour_(settings) {
+  const hours = getEffectiveNotificationHours_(settings);
+  return settings && settings.instantNotificationsEnabled === false
+    ? Math.max.apply(null, hours)
+    : INSTANT_NOTIFICATION_SUMMARY_HOUR;
 }
 
 function getCourseOutlineDailyRefreshHour_(settings) {
@@ -5037,13 +5333,13 @@ function toggleAutoSyncFromMenu() {
   try {
     settings = loadSettings_();
     settings.autoSyncEnabled = !settings.autoSyncEnabled;
-    settings.pausedReason = settings.autoSyncEnabled ? '' : '由使用者暫停。';
+    settings.pausedReason = settings.autoSyncEnabled ? '' : '由使用者關閉。';
     saveSettings_(settings);
     refreshAutoSyncTriggers_(settings);
   } finally {
     lock.releaseLock();
   }
-  SpreadsheetApp.getUi().alert(settings.autoSyncEnabled ? '已恢復自動同步。' : '已暫停自動同步。');
+  SpreadsheetApp.getUi().alert(settings.autoSyncEnabled ? '已啟用自動同步。' : '已關閉自動同步。');
 }
 
 function showSyncStatus() {
@@ -5234,7 +5530,7 @@ function sendLatestSyncSuccessSummaryIfNeeded_(settings) {
   sendEmail_(
     settings,
     'sync_success',
-    '行程同步完成',
+    '行程同步狀態正常',
     formatSyncResultMessage_(status),
     buildSyncEmailData_(status)
   );
@@ -5247,6 +5543,14 @@ function sendSyncNotificationsSafe_(settings, result, options) {
   try {
     if (options.reason === 'source' && result.changes.length > 0) {
       queueScheduleChangeNotification_(buildChangeEmailData_(result));
+      if (settings.instantNotificationsEnabled !== false) {
+        try {
+          deliverScheduleChangeNotification_(settings, null);
+        } catch (deliveryError) {
+          Logger.log('即時調課通知寄送失敗，已保留並安排重試：' + deliveryError.message);
+          requestScheduledNotificationDelivery_(false);
+        }
+      }
     }
   } catch (error) {
     Logger.log('同步異動摘要保存失敗：' + error.message);
@@ -5258,44 +5562,14 @@ function sendFirstSetupNotificationSafe_(result) {
     sendEmail_(
       loadSettings_(),
       'setup_complete',
-      '行程已開始同步',
-      '首批事件已同步，課綱資訊稍待幾分鐘便會載入！' +
-        '之後系統會依設定自動更新',
+      '行程同步設定完成',
+      '第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\\n' +
+        '後續則會根據你的設定自動更新事件',
       buildSyncEmailData_(result)
-    );
-  } catch (error) {
-    Logger.log('行程開始同步通知寄送失敗：' + error.message);
-  }
-}
-
-function sendFirstBatchStartedNotificationSafe_(settings, job) {
-  try {
-    const processed = Number(job.processedOperations) || 0;
-    const created = Number(job.created) || 0;
-    const total = Number(job.desiredCount) || 0;
-    const remaining = Math.max(0, total - created);
-    const progressPercent = total
-      ? Math.max(0, Math.min(100, Math.round(created / total * 100)))
-      : 0;
-    sendEmail_(
-      settings,
-      'setup_started',
-      '首批 ' + created + ' 筆同步完成',
-      '首批 ' + processed + ' 次操作已成功保存。\\n\\n' +
-        '目前已建立 ' + created + ' 筆行程，' +
-        '其餘約 ' + remaining + ' 筆會在背景自動繼續。\\n\\n' +
-        '你現在可以關閉控制臺，基本行程全部寫入後會再收到「行程已開始同步」通知。',
-      {
-        processed,
-        created,
-        total,
-        remaining,
-        progressPercent
-      }
     );
     return true;
   } catch (error) {
-    Logger.log('首次同步開始通知寄送失敗：' + error.message);
+    Logger.log('行程同步設定完成通知寄送失敗：' + error.message);
     return false;
   }
 }
@@ -5367,10 +5641,7 @@ function sendActionRequiredSafe_(
 }
 
 function isConfiguredNotificationHour_(settings) {
-  const hours = normalizeHourArray_(
-    settings && (settings.notificationHours || settings.autoSyncHours),
-    settings && settings.notifySyncHour
-  );
+  const hours = getEffectiveNotificationHours_(settings);
   const currentHour = Number(
     Utilities.formatDate(new Date(), TIMEZONE, 'H')
   );
@@ -5455,7 +5726,7 @@ function deliverScheduleChangeNotification_(settings, currentChangeData) {
     sendEmail_(
       settings,
       'schedule_changes',
-      '行程調整 ' + changeData.changeCount + ' 項',
+      '有 ' + changeData.changeCount + ' 項行程調整',
       formatChangeDigestFromEmailData_(changeData),
       changeData
     );
@@ -5605,29 +5876,22 @@ function buildEmailHtmlSafe_(templateKind, subject, templateData) {
       message: '',
       omittedNote: ''
     }, templateData || {});
-    const rawSections = {};
-
-    Object.keys(notification.repeaters || {}).forEach(outputKey => {
-      const repeater = notification.repeaters[outputKey] || {};
-      const items = Array.isArray(values[repeater.source])
-        ? values[repeater.source].slice(0, SYNC_CHANGE_DETAIL_LIMIT)
-        : [];
-      rawSections[outputKey] = items
-        .map(item => renderEmailHtmlTemplate_(repeater.template, item, {}))
-        .join('');
-    });
+    values.omittedNoteDisplay = values.omittedNote ? 'block' : 'none';
+    const rawSections = buildEmailRepeaterSections_(notification.repeaters, values);
 
     const content = renderEmailHtmlTemplate_(
       notification.content,
       values,
       rawSections
     );
+    const lede = renderEmailTextTemplate_(notification.lede, values);
     const shellValues = Object.assign({}, values, {
       subject,
       preheader: renderEmailTextTemplate_(notification.preheader, values),
       statusLabel: renderEmailTextTemplate_(notification.statusLabel, values),
       headline: renderEmailTextTemplate_(notification.headline, values),
-      lede: renderEmailTextTemplate_(notification.lede, values),
+      lede,
+      ledeDisplay: lede ? 'block' : 'none',
       accent: normalizeEmailTemplateColor_(notification.accent, '#00a676'),
       accentDark: normalizeEmailTemplateColor_(notification.accentDark, '#007c59'),
       accentSoft: normalizeEmailTemplateColor_(notification.accentSoft, '#dcefe7')
@@ -5639,6 +5903,24 @@ function buildEmailHtmlSafe_(templateKind, subject, templateData) {
     Logger.log('HTML 信件版型無法套用，改寄純文字：' + error.message);
     return '';
   }
+}
+
+function buildEmailRepeaterSections_(repeaters, values) {
+  const rawSections = {};
+  Object.keys(repeaters || {}).forEach(outputKey => {
+    const repeater = repeaters[outputKey] || {};
+    const items = Array.isArray(values[repeater.source])
+      ? values[repeater.source].slice(0, SYNC_CHANGE_DETAIL_LIMIT)
+      : [];
+    rawSections[outputKey] = items
+      .map(item => renderEmailHtmlTemplate_(
+        repeater.template,
+        item,
+        buildEmailRepeaterSections_(repeater.repeaters, item)
+      ))
+      .join('');
+  });
+  return rawSections;
 }
 
 function loadEmailTemplateManifest_() {
@@ -5698,13 +5980,21 @@ function assertEmailTemplateManifest_(manifest) {
     if (!notification || typeof notification.content !== 'string') {
       throw new Error('HTML 信件版型內容無效：' + key);
     }
-    Object.keys(notification.repeaters || {}).forEach(outputKey => {
-      const repeater = notification.repeaters[outputKey];
-      if (!repeater || typeof repeater.source !== 'string' ||
-          typeof repeater.template !== 'string') {
-        throw new Error('HTML 信件重複區塊無效：' + key + '/' + outputKey);
-      }
-    });
+    assertEmailTemplateRepeaters_(notification.repeaters, key);
+  });
+}
+
+function assertEmailTemplateRepeaters_(repeaters, path) {
+  Object.keys(repeaters || {}).forEach(outputKey => {
+    const repeater = repeaters[outputKey];
+    if (!repeater || typeof repeater.source !== 'string' ||
+        typeof repeater.template !== 'string') {
+      throw new Error('HTML 信件重複區塊無效：' + path + '/' + outputKey);
+    }
+    assertEmailTemplateRepeaters_(
+      repeater.repeaters,
+      path + '/' + outputKey
+    );
   });
 }
 

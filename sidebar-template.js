@@ -21,6 +21,9 @@
       --warning-surface: #fff0d5;
       --error: #a62d23;
       --error-surface: #ffe5e0;
+      --display: "Noto Sans TC Variable", "Noto Sans TC", sans-serif;
+      --body: "Noto Sans TC Variable", "Noto Sans TC", sans-serif;
+      --technical: "Noto Sans TC Variable", "Noto Sans TC", sans-serif;
       --space-1: 4px;
       --space-2: 8px;
       --space-3: 12px;
@@ -45,9 +48,10 @@
       margin: 0;
       background: var(--paper);
       color: var(--ink);
-      font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+      font-family: var(--body);
       font-size: 13px;
       line-height: 20px;
+      text-rendering: optimizeLegibility;
     }
     button, input, select { font: inherit; }
     button:focus-visible, input:focus-visible, select:focus-visible {
@@ -88,12 +92,12 @@
       grid-area: eyebrow;
       margin: 0;
       color: var(--ink);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--technical);
       font-size: 10px;
-      font-weight: 850;
+      font-weight: 640;
       line-height: 16px;
     }
-    h1 { grid-area: title; margin: 0; font-size: 21px; font-weight: 850; line-height: 28px; }
+    h1 { grid-area: title; margin: 0; font-size: 21px; font-weight: 640; line-height: 28px; }
     .top-status {
       grid-area: status;
       align-self: center;
@@ -103,7 +107,7 @@
       background: var(--error-surface);
       color: var(--shift);
       font-size: 11px;
-      font-weight: 850;
+      font-weight: 640;
       line-height: 16px;
       white-space: nowrap;
     }
@@ -126,9 +130,9 @@
     .term-transition-kicker {
       margin: 0;
       color: var(--warning);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--technical);
       font-size: 10px;
-      font-weight: 850;
+      font-weight: 640;
       line-height: 16px;
     }
     .term-transition h2 { margin: var(--space-1) 0 0; font-size: 16px; line-height: 22px; }
@@ -143,7 +147,7 @@
       color: var(--paper-bright);
       cursor: pointer;
       font-size: 11px;
-      font-weight: 850;
+      font-weight: 640;
     }
 
     .content { display: grid; padding: 0 var(--space-3) var(--space-6); }
@@ -153,8 +157,8 @@
     }
     .section:last-child { padding-bottom: var(--space-6); }
     .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--section-content-gap); }
-    .section-head h2 { margin: 0; font-size: 15px; font-weight: 850; line-height: 20px; }
-    .section-head span { color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 16px; text-align: right; }
+    .section-head h2 { margin: 0; font-size: 15px; font-weight: 640; line-height: 20px; }
+    .section-head span { color: var(--ink-soft); font-family: var(--technical); font-size: 10px; line-height: 16px; text-align: right; }
 
     .source-health {
       display: grid;
@@ -180,7 +184,7 @@
     .field { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
     .section-head + .field,
     .section-head + .calendar-picker > .field:first-child { margin-top: 0; }
-    .field > span { color: var(--ink-soft); font-size: 11px; font-weight: 800; line-height: 16px; }
+    .field > span { color: var(--ink); font-size: 11px; font-weight: 640; line-height: 16px; }
     input[type="text"], input[type="email"], input[type="search"], select {
       width: 100%;
       min-height: 44px;
@@ -211,7 +215,7 @@
       color: var(--ink);
       cursor: pointer;
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 640;
       transition: background 150ms var(--ease-out), color 150ms var(--ease-out), transform 150ms var(--ease-out);
     }
     .small-button:hover, .icon-button:hover {
@@ -262,7 +266,7 @@
       margin: 0;
       color: var(--ink-soft);
       font-size: 10px;
-      font-weight: 850;
+      font-weight: 640;
       line-height: 16px;
     }
     .course-group-list { display: grid; gap: var(--space-2); }
@@ -290,7 +294,7 @@
     .pending-item { padding: var(--space-3); border: 1px solid var(--shift); border-left-width: 4px; border-radius: var(--radius-panel); background: #fff4f1; }
     .pending-item strong { display: block; font-size: 12px; }
     .pending-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3); }
-    .pending-actions button { min-height: 36px; padding: 0 var(--space-2); border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 10px; font-weight: 800; }
+    .pending-actions button { min-height: 36px; padding: 0 var(--space-2); border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 10px; font-weight: 640; }
     .pending-actions .keep { background: var(--ink); color: var(--paper-bright); }
     .pending-actions .remove { border-color: var(--shift); background: var(--paper-bright); color: var(--error); }
 
@@ -313,7 +317,7 @@
     .metric { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper-bright); }
     .metric span, .metric strong { display: block; }
     .metric span { color: var(--ink-soft); font-size: 10px; line-height: 16px; }
-    .metric strong { margin-top: var(--space-1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+    .metric strong { margin-top: var(--space-1); font-family: var(--technical); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
     .sync-stat-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -335,9 +339,9 @@
     .sync-stat span { color: var(--ink-soft); font-size: 10px; line-height: 16px; }
     .sync-stat strong {
       margin-top: var(--space-1);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--technical);
       font-size: 20px;
-      font-weight: 850;
+      font-weight: 640;
       line-height: 24px;
       overflow-wrap: anywhere;
     }
@@ -355,6 +359,15 @@
       border-color: var(--line-dark);
       color: var(--ink-soft);
     }
+    .instant-notification-switch { margin-top: 0; }
+    .notification-time-field.is-instant .notification-time-row { grid-template-columns: minmax(0, 1fr); }
+    .notification-time-field.is-instant .notification-time-action { display: none; }
+    .notification-time-field.is-instant select:disabled {
+      border-color: var(--line);
+      background: var(--surface-soft);
+      color: var(--ink-soft);
+      opacity: .62;
+    }
 
     .footer {
       position: fixed;
@@ -370,7 +383,7 @@
       background: rgba(244, 247, 242, .97);
       backdrop-filter: blur(12px);
     }
-    .footer > button, .sync-primary, .sync-menu-toggle { min-height: 48px; border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 12px; font-weight: 850; transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+    .footer > button, .sync-primary, .sync-menu-toggle { min-height: 48px; border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 12px; font-weight: 640; transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
     .footer > button:hover, .sync-primary:hover, .sync-menu-toggle:hover { box-shadow: 3px 3px 0 rgba(20, 33, 29, .22); transform: translate(-1px, -1px); }
     .footer > button:active, .sync-primary:active, .sync-menu-toggle:active { box-shadow: none; transform: translate(1px, 1px); }
     .save { padding: 0 var(--space-4); background: var(--paper-bright); color: var(--ink); }
@@ -417,7 +430,7 @@
       color: var(--ink);
       cursor: pointer;
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 640;
       text-align: left;
     }
     .sync-menu button:hover, .sync-menu button:focus-visible { background: var(--surface-green); }
@@ -426,15 +439,15 @@
     button[data-validation-disabled="true"]:disabled { cursor: not-allowed; }
 
     .loading { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(244, 247, 242, .96); }
-    .loader { display: grid; width: min(224px, calc(100vw - 48px)); gap: var(--space-3); justify-items: center; color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-align: center; }
+    .loader { display: grid; width: min(224px, calc(100vw - 48px)); gap: var(--space-3); justify-items: center; color: var(--ink-soft); font-family: var(--technical); font-size: 11px; text-align: center; }
     .loader-track { position: relative; width: 152px; height: var(--space-1); overflow: hidden; background: var(--line); }
     .loader-track::after { content: ""; position: absolute; inset: 0; width: 44%; background: var(--sync); animation: scan 1s var(--ease-out) infinite; }
     .sync-progress { display: grid; width: 100%; gap: var(--space-2); }
-    .sync-progress-head { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--ink); font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif; font-size: 11px; font-weight: 800; text-align: left; }
+    .sync-progress-head { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--ink); font-family: var(--body); font-size: 11px; font-weight: 640; text-align: left; }
     .sync-progress-track { height: var(--space-2); overflow: hidden; border: 1px solid var(--line-dark); background: var(--paper-bright); }
     .sync-progress-track span { display: block; width: 0; height: 100%; background: var(--sync); transition: width 280ms var(--ease-out); }
-    .sync-progress-detail { color: var(--ink-soft); font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif; font-size: 10px; line-height: 16px; text-align: left; }
-    .sync-progress-warning { margin: 0; color: var(--warning); font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif; font-size: 11px; font-weight: 850; line-height: 16px; text-align: left; }
+    .sync-progress-detail { color: var(--ink-soft); font-family: var(--body); font-size: 10px; line-height: 16px; text-align: left; }
+    .sync-progress-warning { margin: 0; color: var(--warning); font-family: var(--body); font-size: 11px; font-weight: 640; line-height: 16px; text-align: left; }
     .toast { position: fixed; right: var(--space-3); bottom: 76px; left: var(--space-3); z-index: 60; padding: var(--space-3); border: 1px solid var(--paper-bright); border-radius: var(--radius-control); background: var(--ink); color: var(--paper-bright); font-size: 11px; line-height: 16px; opacity: 0; pointer-events: none; transform: translateY(var(--space-2)); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
     .toast.show { opacity: 1; transform: translateY(0); }
     .app.is-ready .section { animation: section-in 360ms var(--ease-out) both; }
@@ -451,8 +464,8 @@
       .content { padding-inline: var(--space-2); }
       .calendar-create, .status-grid { grid-template-columns: 1fr; }
       .pending-actions { grid-template-columns: 1fr; }
-      .footer { grid-template-columns: 1fr 1.35fr; padding: var(--space-2); }
-      .footer button { padding-inline: var(--space-2); }
+      .footer { grid-template-columns: auto minmax(0, 1fr); padding: var(--space-2); }
+      .sync-primary { padding-inline: var(--space-2); }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -550,12 +563,17 @@
 
       <section class="section">
         <div class="section-head"><h2>通知</h2></div>
-        <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email"><small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small></label>
-        <div class="field">
+        <label class="switch instant-notification-switch">
+          <input type="checkbox" id="instant-notifications" role="switch">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-copy"><strong>即時通知</strong><span>偵測到行程調整就盡快通知</span></span>
+        </label>
+        <div class="field notification-time-field" id="notification-time-field">
           <span>通知時間</span>
           <div class="notification-time-list" id="notify-hours-list" aria-label="通知時間"></div>
-          <p class="hint">課表每天約於 03:00、11:00、18:00、21:00 檢查；通知約在所選時間前後 15 分鐘啟動寄送，若同步尚未完成則稍後寄出</p>
+          <p class="hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動～</p>
         </div>
+        <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email"><small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small></label>
       </section>
 
     </main>
@@ -585,6 +603,7 @@
       var activeSyncJobId = '';
       var termTransitionAnnounced = false;
       var MAX_NOTIFY_HOURS = 4;
+      var customNotificationHours = [6];
 
       function byId(id) { return document.getElementById(id); }
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -676,7 +695,11 @@
           : settings.autoSyncEnabled;
         byId('reminder-mode').value = settings.reminderMode;
         byId('reminder-minutes').value = String(settings.reminderMinutes || 10);
-        renderNotifyHours(settings.notificationHours || settings.autoSyncHours || [settings.notifySyncHour]);
+        customNotificationHours = normalizeNotifyHours(
+          settings.notificationHours || settings.autoSyncHours || [settings.notifySyncHour]
+        );
+        byId('instant-notifications').checked = settings.instantNotificationsEnabled !== false;
+        renderNotificationPreferences();
         renderCalendars(data.calendars, settings.calendarId, settings.calendarName);
         renderSource(data.source);
         renderCourses();
@@ -752,7 +775,7 @@
         byId('source-detail').textContent = source.firstDate + '–' + source.lastDate + ' · ' + source.courseCount + ' 門課 · ' + source.activityCount + ' 項活動';
       }
 
-      function renderNotifyHours(hours) {
+      function normalizeNotifyHours(hours) {
         var normalizedHours = Array.from(new Set((hours || [])
           .map(Number)
           .filter(function (hour) {
@@ -760,10 +783,20 @@
           })))
           .sort(function (left, right) { return left - right; })
           .slice(0, MAX_NOTIFY_HOURS);
-        var initialHours = normalizedHours.length ? normalizedHours : [6];
+        return normalizedHours.length ? normalizedHours : [6];
+      }
+
+      function renderNotifyHours(hours) {
+        var initialHours = normalizeNotifyHours(hours);
         byId('notify-hours-list').innerHTML = '';
         initialHours.forEach(appendNotifyHourRow);
         updateNotifyHourOptions();
+      }
+
+      function renderNotificationPreferences() {
+        var instantEnabled = byId('instant-notifications').checked;
+        byId('notification-time-field').classList.toggle('is-instant', instantEnabled);
+        renderNotifyHours(instantEnabled ? [6] : customNotificationHours);
       }
 
       function appendNotifyHourRow(hour) {
@@ -815,7 +848,12 @@
       function updateNotifyHourOptions() {
         var selects = getNotifyHourSelects();
         var selectedHours = selects.map(function (select) { return Number(select.value); });
+        var instantEnabled = byId('instant-notifications').checked;
         selects.forEach(function (select, selectIndex) {
+          select.disabled = instantEnabled;
+          select.title = instantEnabled
+            ? '即時通知開啟時，每日摘要固定於 06:00 寄出'
+            : '';
           Array.prototype.forEach.call(select.options, function (option) {
             var optionHour = Number(option.value);
             option.disabled = selectedHours.some(function (selectedHour, selectedIndex) {
@@ -826,7 +864,7 @@
         var addButton = byId('notify-hours-list').querySelector('[data-add-notify-hour]');
         if (addButton) {
           var maximumReached = selects.length >= MAX_NOTIFY_HOURS;
-          addButton.disabled = maximumReached;
+          addButton.disabled = instantEnabled || maximumReached;
           addButton.title = maximumReached ? '最多可設定 4 個通知時間' : '';
         }
       }
@@ -948,7 +986,10 @@
       }
 
       function collectSettings() {
-        var notificationHours = getSelectedNotifyHours();
+        var instantNotificationsEnabled = byId('instant-notifications').checked;
+        var notificationHours = instantNotificationsEnabled
+          ? customNotificationHours.slice()
+          : getSelectedNotifyHours();
         return {
           gradeName: getCheckedGrade(),
           selectedCourses: Array.from(selectedCourses),
@@ -958,6 +999,7 @@
           calendarName: byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade()),
           notificationEmail: byId('email').value.trim(),
           autoSyncEnabled: byId('auto-sync').checked,
+          instantNotificationsEnabled: instantNotificationsEnabled,
           notificationHours: notificationHours,
           notifySyncHour: Math.max.apply(null, notificationHours),
           reminderMode: byId('reminder-mode').value,
@@ -1058,7 +1100,14 @@
           }
           renderCourses();
         }
-        if (event.target.matches('[data-notify-hour]')) updateNotifyHourOptions();
+        if (event.target.matches('[data-notify-hour]')) {
+          customNotificationHours = getSelectedNotifyHours();
+          updateNotifyHourOptions();
+        }
+        if (event.target.id === 'instant-notifications') {
+          if (event.target.checked) customNotificationHours = getSelectedNotifyHours();
+          renderNotificationPreferences();
+        }
         if (event.target.id === 'calendar') updateCalendarFields();
         if (event.target.name === 'grade') {
           if (byId('calendar-name').dataset.autoName === 'true') byId('calendar-name').value = defaultCalendarName(event.target.value);
@@ -1104,6 +1153,7 @@
           if (getNotifyHourSelects().length >= MAX_NOTIFY_HOURS) return;
           appendNotifyHourRow(getNextNotifyHour());
           updateNotifyHourOptions();
+          customNotificationHours = getSelectedNotifyHours();
           getNotifyHourSelects()[getNotifyHourSelects().length - 1].focus();
           return;
         }
@@ -1114,6 +1164,7 @@
           : (row.nextElementSibling ? row.nextElementSibling.querySelector('select') : getNotifyHourSelects()[0]);
         row.remove();
         updateNotifyHourOptions();
+        customNotificationHours = getSelectedNotifyHours();
         if (nextFocus) nextFocus.focus();
       });
       byId('term-transition-action').addEventListener('click', function () {

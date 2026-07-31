@@ -16,7 +16,7 @@
   </style>
   <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
   <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
-  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260730-04">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260730-09">
   <script>
     (function () {
       var stylesheet = document.getElementById('app-stylesheet');
@@ -28,7 +28,7 @@
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div class="high-load-test-banner" id="high-load-test-banner" role="status" hidden>
-    測試版：Code.gs 會包含「行程同步 → 高負載測試」。
+    測試版：Code.gs 會包含「T-SCHOOL Schedule Sync → 高負載測試」。
   </div>
 
   <div class="kinetic-cursor" id="kinetic-cursor" aria-hidden="true">
@@ -42,7 +42,7 @@
       <span class="brand-name">T-SCHOOL Schedule Sync</span>
     </a>
     <div class="stage-menu" id="stage-menu">
-      <button type="button" class="stage-menu-trigger" id="stage-menu-trigger" aria-label="設定階段" aria-expanded="false" aria-controls="stage-menu-panel" data-cursor-label="開啟階段選單">
+      <button type="button" class="stage-menu-trigger" id="stage-menu-trigger" aria-label="開啟步驟選單" aria-expanded="false" aria-controls="stage-menu-panel" data-cursor-label="開啟步驟選單">
         <span class="stage-menu-icon" aria-hidden="true">
           <span class="material-symbols-outlined stage-menu-icon-menu">menu</span>
           <span class="material-symbols-outlined stage-menu-icon-close">close</span>
@@ -83,7 +83,10 @@
           <div class="hero-paper-track">
             <div class="hero-depth-scene">
               <section class="schedule-board visual-board">
-                <div class="board-label"><span>課表</span><span>08:00–16:00</span></div>
+                <div class="board-label">
+                  <span>課程規劃表</span>
+                  <span data-hero-schedule-week>學期週次</span>
+                </div>
                 <div class="schedule-grid">
                   <span></span><span></span><span></span>
                   <span></span><span></span><span></span>
@@ -91,15 +94,13 @@
                 </div>
               </section>
 
-              <div class="transfer-path">
-                <span class="path-tick"></span>
-                <span class="path-tick"></span>
-                <span class="path-tick"></span>
-                <span class="path-tick"></span>
-              </div>
+              <div class="transfer-path"></div>
 
               <section class="calendar-board visual-board">
-                <div class="board-label"><span>日曆</span><span>本週</span></div>
+                <div class="board-label">
+                  <span data-hero-calendar-month>… 月</span>
+                  <span data-hero-calendar-day>週… …</span>
+                </div>
                 <div class="calendar-grid">
                   <span class="calendar-time">09</span><span></span>
                   <span class="calendar-time">11</span><span></span>
@@ -196,7 +197,22 @@
               <span class="step-position" aria-label="步驟 3，共 5 步">步驟 3/5</span>
             </header>
 
-            <div class="two-column notification-grid">
+            <div class="notification-grid">
+              <div class="field instant-notification-field">
+                <span>即時通知</span>
+                <label class="instant-notification-toggle">
+                  <input id="instant-notifications" name="instantNotificationsEnabled" type="checkbox" role="switch" checked aria-describedby="instant-notifications-hint">
+                  <span class="instant-notification-track" aria-hidden="true"></span>
+                  <span class="instant-notification-copy" id="instant-notifications-hint">偵測到行程調整就盡快通知</span>
+                </label>
+              </div>
+
+              <div class="field notification-time-field">
+                <span id="notification-time-label">通知時間</span>
+                <div class="notification-time-list" id="notify-hours-list"></div>
+                <span class="field-hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動～</span>
+              </div>
+
               <label class="field validated-field" id="field-notification-email" data-cursor-mode="text">
                 <span>收通知的 Email</span>
                 <div class="input-wrap">
@@ -205,17 +221,11 @@
                 </div>
                 <span class="field-hint" id="notification-email-hint" aria-live="polite">為了讓程式能存取課綱，請輸入校內 Email</span>
               </label>
-
-              <div class="field notification-time-field">
-                <span id="notification-time-label">通知時間</span>
-                <div class="notification-time-list" id="notify-hours-list"></div>
-                <span class="field-hint">課表每天約於 03:00、11:00、18:00、21:00 檢查；通知約在所選時間前後 15 分鐘啟動寄送，若同步尚未完成則稍後寄出</span>
-              </div>
             </div>
 
           </div>
           <div class="step-completion">
-            <button type="button" class="step-complete-button" data-complete-step="3" data-cursor-label="確認通知設定" aria-keyshortcuts="Enter" aria-pressed="false">Email 和通知時間都沒錯 ↵</button>
+            <button type="button" class="step-complete-button" data-complete-step="3" data-cursor-label="確認通知設定" aria-keyshortcuts="Enter" aria-pressed="false">Email 和通知偏好都沒錯 ↵</button>
           </div>
         </section>
 

@@ -19,6 +19,7 @@
   };
   const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
   const MANUAL_MERGE_EXCEPTIONS = Object.freeze({});
+  const MIN_COURSE_SCHEDULED_PERIODS = 5;
   const ACTIVITY_PATTERNS = [
     /全校(?:性)?活動/,
     /^高[一二三](?:導入期|全校活動)$/,
@@ -107,6 +108,54 @@
     return ACTIVITY_PATTERNS.some(pattern => pattern.test(text));
   }
 
+  function countScheduledPeriodsByTitle(payload) {
+    assertPayload(payload);
+    const counts = new Map();
+
+    payload.tableData.forEach(row => {
+      if (!row || row.isHeader || !Array.isArray(row.cells)) {
+        return;
+      }
+
+      row.cells.forEach(cell => {
+        const day = Number(cell && cell.day);
+        const periodStart = Number(cell && cell.period);
+
+        if (!Number.isFinite(day) || !Number.isFinite(periodStart)) {
+          return;
+        }
+
+        const rowSpan = Math.max(1, Number(cell.rowSpan) || 1);
+        const scheduledPeriods = Math.max(1, Math.min(8 - periodStart + 1, rowSpan));
+
+        splitCellEntries(cell.value).forEach(rawEntry => {
+          if (isStructuralValue(rawEntry)) {
+            return;
+          }
+
+          const key = normalizeTitle(parseEntry(rawEntry).title);
+
+          if (key) {
+            counts.set(key, (counts.get(key) || 0) + scheduledPeriods);
+          }
+        });
+      });
+    });
+
+    return counts;
+  }
+
+  function classifyScheduleTitle(title, scheduledPeriodCounts) {
+    const key = normalizeTitle(title);
+    const scheduledPeriods = key && scheduledPeriodCounts instanceof Map
+      ? scheduledPeriodCounts.get(key) || 0
+      : 0;
+
+    return isActivityTitle(title) || scheduledPeriods < MIN_COURSE_SCHEDULED_PERIODS
+      ? 'activity'
+      : 'course';
+  }
+
   function assertPayload(payload) {
     if (!payload || typeof payload !== 'object') {
       throw new Error('課表來源沒有回傳可讀取的資料。');
@@ -144,6 +193,7 @@
     assertPayload(payload);
     const byKey = new Map();
     const vacationWeekNumbers = getVacationWeekNumbers(payload);
+    const scheduledPeriodCounts = countScheduledPeriodsByTitle(payload);
 
     payload.tableData.forEach(row => {
       if (!row || row.isHeader || !Array.isArray(row.cells)) {
@@ -165,7 +215,7 @@
 
           const existing = byKey.get(key) || {
             title: parsed.title,
-            type: isActivityTitle(parsed.title) ? 'activity' : 'course',
+            type: classifyScheduleTitle(parsed.title, scheduledPeriodCounts),
             hasVacationOccurrence: false
           };
           existing.hasVacationOccurrence =
@@ -365,6 +415,7 @@
   return {
     API_URL,
     GRADE_API_NAMES,
+    MIN_COURSE_SCHEDULED_PERIODS,
     ACTIVITY_PATTERNS,
     MANUAL_MERGE_EXCEPTIONS,
     WEEKDAY_LABELS,
@@ -373,6 +424,8 @@
     splitCellEntries,
     parseEntry,
     isActivityTitle,
+    countScheduledPeriodsByTitle,
+    classifyScheduleTitle,
     assertPayload,
     getVacationWeekNumbers,
     extractCatalog,

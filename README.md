@@ -1,167 +1,102 @@
-# T-SCHOOL 行程同步
+# T-SCHOOL Schedule Sync
 
-T-SCHOOL 行程同步是一個純靜態設定器，會依使用者的年級、選課與偏好產生一份 Google Apps Script `Code.gs`。程式在使用者自己的 Google 帳號中執行，從目前的課表 API 讀取資料，並同步至專用 Google 日曆。
+T-SCHOOL Schedule Sync 會把你選擇的課程與活動結合它們的資料，同步到專用 Google Calendar，並在課表調整時更新行程、寄送通知。
 
-線上設定器：
+[開啟線上設定器](https://artemas-hsieh.github.io/t-school-schedule-sync/)
 
-<https://artemas-hsieh.github.io/t-school-schedule-sync/>
+## 可以做什麼
 
-## 功能
+- 依年級讀取目前的課程與活動，讓你選擇要同步的項目。
+- 把日期、節次與地點加入專用 Google Calendar。
+- 在適用的年級與學期，補上未來 30 天的課綱內容與實體課程教室。
+- 每天約於 03:00、11:00、18:00、21:00 檢查課表；發現變動後立即更新 Calendar。
+- 預設開啟即時通知：偵測到行程調整並完成 Calendar 同步後盡快寄出，每日摘要固定於 06:00。
+- 從 Google Sheet 控制臺調整選課、即時通知、通知時間、Calendar 與自動同步設定。
 
-- 直接從課表 API 載入一、二、三年級資料，動態產生去重後的課程選單。
-- 同步選定課程、年級活動與全校活動到專用 Google Calendar；活動預設全選，也可逐項排除。
-- 支援的年級與學期可從校內課綱 Google Sheets 補入實體課程教室、單元主題與課程內容；來源清單由中央索引更新，目前先支援 114-2 高二。
-- 課綱只讀取未來 30 天內的相關課程，整學期基本行程仍照常同步。
-- 比對新增、取消、改名、日期、節次、時間與地點變更，於設定時間寄送標準「行程調整」HTML Email 與手機純文字摘要。
-- 每天約於 03:00、11:00、18:00、21:00 固定偵測課表並同步 Calendar；通知時間可另外設定，並支援每日狀態摘要、事件提醒及以標準格式為基礎的進階自訂說明。
-- 安裝後可從 Google Sheet 的「行程同步」選單與側邊欄調整設定，不需再回 Apps Script 編輯器。
-- 一般同步保留使用者對日曆事件的手動編輯；必要時可使用「強制修復」重新套用來源資料。
-- 大量首次同步會先以 40 次 Calendar 操作建立安全檢查點，後續每批最多 80 次；每批都有安全存檔點，關閉側欄後仍可背景續跑。
-- 事件標題與地點會合併課表地點及課綱中的實體課程教室；隱藏同步標籤可防止「Calendar 已建立、狀態尚未保存」造成重複事件。暫時失敗會重試一次，下一次仍失敗才寄信。
-- 偵測新學期後會暫停寫入、保留已有事件，以 Email 與側欄警示要求使用者重新選課；儲存後可恢復原本的自動同步偏好。
+## 開始前準備
+
+你需要：
+
+- 可以使用 Google Sheet、Google Calendar 與 Apps Script 的 Google 帳號。
+- 如果要使用課綱補充，需要能開啟適用課綱的校內帳號。
+- 一個只交給 T-SCHOOL Schedule Sync 管理的專用 Calendar；也可以在首次設定時讓程式建立。
+
+請不要使用主要日曆。專用 Calendar 能讓你在設定錯誤或停止使用時，更容易確認與整理同步行程。
 
 ## 安裝
 
-### 1. 產生程式碼
+### 1. 產生 Code.gs
 
 1. 開啟線上設定器。
-2. 選擇年級，等待課程資料載入。
-3. 搜尋並選擇課程與活動，再填寫通知 Email 與一至四個通知時間。課表每天約於 03:00、11:00、18:00、21:00 固定檢查並同步 Calendar；通知 Trigger 約在所選時間前後 15 分鐘啟動，若同步尚未完成則稍後寄出。
-4. 檢查設定摘要並確認後，前往程式碼輸出區複製完整 `Code.gs`。
+2. 選擇年級，等待課表讀取完成。
+3. 選擇要同步的課程與活動。
+4. 填寫收通知的校內 Email；即時通知預設開啟，若關閉則可設定一至四個通知時間。
+5. 檢查設定後，按下「產生安裝程式碼」。
+6. 在第五步按下「複製程式碼」。
 
 ### 2. 建立 Google Sheet 控制臺
 
-1. 從設定器下載控制臺範本，上傳至 Google Drive 並以 Google 試算表開啟；若介面提供公開範本連結，則直接建立自己的副本。
-2. 在控制臺試算表中開啟「擴充功能」→「Apps Script」。
-3. 刪除編輯器中的範例內容，貼上 `Code.gs` 並儲存。
-4. 回到試算表並重新整理頁面。
-5. 從上方「行程同步」→「開啟設定」進入側邊欄。所有設定都在側邊欄完成，不需要編輯試算表儲存格。
+1. 點擊設定器提供的「模板連結」並建立副本。
+2. 在副本中選擇「擴充功能」→「Apps Script」。
+3. 刪除編輯器內原有的範例內容。
+4. 貼上剛才複製的完整 `Code.gs`，再按下儲存。
+5. 回到 Google Sheet 並重新整理頁面。
 
 ### 3. 完成首次同步
 
-1. 確認年級、課程與通知 Email。
-2. 選擇已有的專用日曆，或讓程式自動建立。主要日曆不能使用。
-3. 按「儲存並首次同步」，依 Google 畫面完成授權。
-4. 行程很多時，前 40 筆安全保存後會寄出「首批 40 筆同步完成｜T-SCHOOL Schedule Sync」通知，此時可關閉側欄，程式會在背景分批完成；基本行程全部寫入後會再寄「行程已開始同步｜T-SCHOOL Schedule Sync」通知。
-5. 第一次同步會先用獨立程序讀取未來 30 天課綱；若在 1 分鐘內完成，第一批行程會直接帶入課綱。超過 1 分鐘或暫時讀取失敗時，基本行程仍會先安全同步，再由背景工作補上課綱。
+1. 在 Google Sheet 上方選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」。
+2. 確認年級、課程、通知 Email 與即時通知偏好。
+3. 選擇已有的專用 Calendar，或讓程式建立一個新的專用 Calendar。
+4. 按下「儲存並首次同步」，依 Google 畫面完成授權。
+5. 保持側邊欄開啟，直到畫面明確表示可以關閉。
 
-## 使用與安全
+行程很多時，程式會先完成第一批，再繼續於背景分批處理。你可以從「T-SCHOOL Schedule Sync」→「查看同步狀態」確認目前進度。
 
-網頁本身沒有帳號系統、後端或資料庫，不會直接修改日曆。實際讀取 API、寫入日曆、儲存同步狀態與寄信的是使用者 Google 帳號內的 Apps Script。
+## 日常使用
 
-請務必：
+Google Sheet 上方的「T-SCHOOL Schedule Sync」選單提供：
 
-- 使用只供本工具管理的專用日曆。
-- 首次同步後人工對照學校資料，不要將本工具當成唯一課表來源。
-- 不要公開 Apps Script 專案、通知 Email、Calendar ID 或含個人設定的程式碼。
-- 在授權前確認 Google 帳號與權限範圍。
+| 操作 | 用途 |
+|---|---|
+| 開啟控制臺介面 | 修改年級、選課、Calendar、通知與自動同步設定 |
+| 立即同步 | 不等下一個固定檢查時間，現在就檢查課表並更新 Calendar |
+| 關閉 / 啟用自動同步 | 關閉或重新啟用每天的自動檢查 |
+| 查看同步狀態 | 查看最近結果、背景進度與需要處理的問題 |
+| 強制修復 | 重新套用今天以後的課表內容；可能覆蓋你手動修改過的受管理行程 |
+| 移除受管理事件 | 刪除這個工具建立且仍可辨識的 Calendar 行程 |
 
-完整的安全與使用限制說明請閱讀 [SECURITY.md](SECURITY.md)。
+一般同步會盡量保留你手動修改過的 Calendar 內容。只有需要修復同步結果時，才使用「強制修復」。
 
-完整同步流程、課綱、名稱防呆、續跑與故障處理請閱讀
-[SYNC_MECHANISM.md](SYNC_MECHANISM.md)。
+## 課表變動與通知
 
-## 設定後操作
+- 課表檢查與通知時間彼此獨立。
+- 每次固定檢查發現變動後，Calendar 會立即更新。
+- 同一天不同檢查時間發現的變動會累積，不會被後一次「沒有新變動」的檢查清除。
+- 即時通知開啟時，同步完成後會盡快寄出行程調整，每日摘要於 06:00 寄出。
+- 即時通知關閉時，尚未通知的變動會保留到你設定的下一個通知時間一起寄出。
+- Apps Script 的定時工作通常會在設定時間前後約 15 分鐘內開始，不保證精確到分鐘。
 
-Google Sheet 的「行程同步」選單提供：
+## 新學期與版本更新
 
-- 開啟設定
-- 立即同步
-- 暫停／恢復自動同步
-- 查看同步狀態
-- 強制修復
-- 移除受管理事件
+偵測到新學期時，程式會先停止自動改動 Calendar，保留原有行程，並要求你重新確認年級與選課。完成儲存後，才會繼續同步。
 
-產生程式仍保留 `syncMyScheduleToCalendar()`、`forceFullSyncMyScheduleToCalendar()`、`setupAutoSyncTriggers()` 與 `deleteAutoSyncTriggers()` 等公開函式，供進階操作或除錯使用。
+若要使用新版功能：
 
-## 修改 HTML Email 版型
+1. 回到線上設定器重新產生 `Code.gs`。
+2. 在原本的 Apps Script 專案中，以新版程式碼完整取代舊版。
+3. 儲存後回到 Google Sheet，重新整理並確認「查看同步狀態」。
 
-所有信件外框、文案、inline style 與通知種類設定集中在
-[`notification-email-templates.json`](notification-email-templates.json)：
+## 使用限制
 
-- `shell` 是所有通知共用的信件外框。
-- `notifications` 內含一套標準行程調整格式，以及設定完成、每日成功摘要、同步失敗、課綱失敗、新學期、新項目與同步停止等版型。
-- 一般 `{{value}}` 會先做 HTML 跳脫；`{{{content}}}`、`{{{changesHtml}}}` 與 `{{{itemsHtml}}}` 只用於插入由 manifest 本身產生的 HTML 區塊。
-- 產生的 `Code.gs` 固定讀取 commit `0131d6b8cf2b0f524e85bb8720d2e680458afea2` 中的版本，不會跟著主分支即時變動。
-- 修改版型時，先單獨提交 `notification-email-templates.json`，再把該 commit SHA 寫入 `code-template.js` 的 `EMAIL_TEMPLATE_MANIFEST_URL` 並更新 cache key。完成驗證後重新發布產生器；既有安裝者必須重新產生並替換 `Code.gs` 才會採用新版。
-- 渲染後只保留 `calendar.google.com/calendar/` 與 `docs.google.com/spreadsheets/` 的 HTTPS 連結；其他連結會移除但保留文字。遠端檔案無法讀取或驗證時仍會寄純文字。
+- 這不是學校官方系統，不能取代課表、課網或教師公告。
+- 課表來源、Google 服務或帳號額度異常時，同步可能延遲或停止。
+- 課綱補充只會在適用年級、學期與日期範圍內出現；沒有課綱時，基本課表行程仍可同步。
+- 第一次同步後，請人工對照幾筆 Calendar 行程，確認年級、日期、節次與地點正確。
 
-調整時應保留 `schemaVersion: 1`、既有通知 key 與所使用的變數名稱，並執行 `node tests/smoke-test.js`。
+## 安全、隱私與詳細說明
 
-## 資料來源與限制
+請閱讀 [安全與隱私說明](SECURITY.md)。其中包含 Google 授權、資料保存、專用 Calendar、停止使用與安全回報方式。
 
-- 課表執行階段使用固定的 Google Apps Script API 部署網址；不使用已停止更新的舊課表 Google Sheet。
-- HTML Email 版型由固定 commit 中公開的 `notification-email-templates.json` 提供，產生的 `Code.gs` 不內嵌 HTML，也不會盲目追蹤主分支；下載失敗時改寄純文字。
-- 課綱是獨立的補充來源。產生的 Apps Script 會讀取中央「課綱來源」索引，所以日後只要在索引新增或啟用新學期來源，不必重新產生既有 `Code.gs`。索引暫時失敗時沿用最後成功版本；成功讀到與上次不同的內容時，會寄送一次含摘要與新舊指紋的通知，寄送失敗則在下次成功讀取時重試。
-- 只有年級與日期符合已啟用來源組時，使用者自己的 Apps Script 才會讀取受校內帳號保護的課綱 Sheets；目前高一與高三不會觸發課綱讀取。
-- 課綱依工作表分頁名稱、日期與節次精確配對。純非同步課程、過去課程與沒有課表事件的未開課課程不會加入行事曆說明。
-- 課綱由獨立觸發器更新成最後成功快照，因此 Sheets 暫時失敗時仍可完成基本課表同步；第一次失敗會自動重試，重試仍失敗才寄信。
-- 課程選單由 API 即時解析、清理與去重，不依賴大型課程別名字典。
-- 課表格式、API 部署、Google 服務或帳號額度變更都可能使同步失敗。
-- 來源故障、資料格式異常、學期不明或可疑的大量刪除會中止自動寫入，以保留日曆現狀。
+想進一步了解課表解析、Calendar 更新與通知流程，可閱讀 [同步機制說明](SYNC_MECHANISM.md)。
 
-## 專案結構
-
-```text
-.
-├── index.html
-├── styles.css
-├── schedule-data.js
-├── sidebar-template.js
-├── code-template.js
-├── notification-email-templates.json
-├── app.js
-├── assets/
-│   └── t-school-control-panel-template.xlsx
-├── vendor/
-│   ├── lenis-1.3.25.min.js
-│   └── LENIS-LICENSE.txt
-├── README.md
-├── SECURITY.md
-├── AGENTS.md
-├── CURRENT_DIRECTION.md
-├── PROJECT_CONTEXT_FOR_AI.md
-├── SYNC_MECHANISM.md
-├── TESTING.md
-├── archive/
-│   ├── UI_EXPLORATION_BRIEF.md
-│   ├── MVP_IMPLEMENTATION_PLAN.md
-│   ├── 部署後設定介面方案構想.md
-│   └── visual-design-material3/
-└── tests/
-    └── smoke-test.js
-```
-
-`resources/1Campus/` 只是本地資料比對與逆向分析素材，不是執行階段資料來源，也不納入版本控制。
-
-`archive/` 保存過往規劃與視覺探索文件，目前不是執行階段的一部分。
-
-本機另使用兩個不納入版本控制的工作區：
-
-- `outputs/`：產生的 `Code.gs`、Email／介面預覽、檢查報告與暫存工作檔。
-- `resources/`：課綱原始檔、影片、逆向分析素材與其他本機參考資料。
-
-單次設計 QA 截圖與報告也放在 `outputs/`，不作為公開網站或專案文件的一部分。
-
-## 本地開發
-
-專案無 npm、無打包工具、無後端。由於設定器需讀取線上 API，建議用本地靜態伺服器開啟：
-
-```bash
-python3 -m http.server 8765
-```
-
-然後前往 <http://127.0.0.1:8765/>。
-
-執行完整煙霧測試：
-
-```bash
-node tests/smoke-test.js
-git diff --check
-```
-
-測試會檢查前端 JavaScript 語法、三個年級的 API 資料解析、設定器與 Apps Script 的解析結果一致性，以及最終產生的 `Code.gs` 語法。實際 Google Calendar 寫入、寄信、授權與觸發器仍需在 Google 帳號中進行整合測試。
-
-## 問題回報
-
-請在 GitHub repository 建立 issue，附上年級、課程或週次、執行動作與完整錯誤訊息。請勿公開 Calendar ID、私人 Email、授權畫面或其他可識別個人的資料。
+如果遇到問題，可在 [GitHub 專案頁面](https://github.com/artemas-hsieh/t-school-schedule-sync/issues) 回報。請附上年級、週次、執行的操作與錯誤訊息，但不要公開通知 Email、Calendar ID、授權畫面或完整 `Code.gs`。

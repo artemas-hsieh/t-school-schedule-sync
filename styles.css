@@ -349,18 +349,10 @@ h1 span {
   top: 48%;
   right: 39%;
   left: 39%;
-  display: flex;
-  justify-content: space-between;
   height: 1px;
   background: var(--ink);
   opacity: 0.38;
-}
-
-.path-tick {
-  width: 1px;
-  height: 10px;
-  background: var(--ink);
-  transform: translateY(-5px);
+  transform-origin: left center;
 }
 
 .transfer-tile {
@@ -1639,14 +1631,14 @@ textarea::placeholder {
   clip-path: polygon(0 0, 82% 48%, 50% 59%, 68% 100%, 50% 100%, 34% 64%, 0 82%);
   filter: none;
   transform-origin: 4px 4px;
-  transform: rotate(var(--cursor-angle, 0deg)) scale(var(--cursor-scale, 1));
+  transform: rotate(var(--cursor-pointer-angle, var(--cursor-angle, 0deg))) scale(var(--cursor-scale, 1));
   transition: width 180ms var(--ease-out), height 180ms var(--ease-out), background 180ms var(--ease-out), clip-path 180ms var(--ease-out), border-radius 180ms var(--ease-out), transform 90ms linear;
 }
 
 .cursor-caption {
   position: absolute;
-  top: 20px;
-  left: 20px;
+  top: var(--cursor-caption-y, 20px);
+  left: var(--cursor-caption-x, 20px);
   display: block;
   max-width: 140px;
   padding: 5px 8px;
@@ -2211,7 +2203,15 @@ textarea::placeholder {
 }
 
 .notification-grid {
-  gap: var(--space-4);
+  display: grid;
+  grid-template-columns: minmax(240px, 0.58fr) minmax(0, 2.42fr);
+  column-gap: var(--space-8);
+  row-gap: var(--space-7);
+  align-items: start;
+}
+
+.notification-grid #field-notification-email {
+  grid-column: 1 / -1;
 }
 
 .notification-grid .field {
@@ -2233,6 +2233,83 @@ textarea::placeholder {
 .notification-grid .field-hint {
   min-height: 0;
   font-size: 0.8rem;
+}
+
+.instant-notification-toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--space-3);
+  margin: 0;
+  min-height: 62px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.instant-notification-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.instant-notification-track {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius-control);
+  background: var(--paper-bright);
+}
+
+.instant-notification-track::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-control);
+  background: var(--line-dark);
+  transition: transform 180ms var(--ease-out), background 180ms var(--ease-out);
+}
+
+.instant-notification-toggle input:checked + .instant-notification-track {
+  border-color: var(--sync-dark);
+  background: var(--sync);
+}
+
+.instant-notification-toggle input:checked + .instant-notification-track::after {
+  background: var(--paper-bright);
+  transform: translateX(20px);
+}
+
+.instant-notification-copy {
+  max-width: 8.5em;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: var(--leading-small);
+  text-wrap: pretty;
+}
+
+.instant-notification-toggle input:focus-visible + .instant-notification-track {
+  outline: 3px solid var(--sync);
+  outline-offset: 4px;
+}
+
+.notification-time-field.is-instant .notification-time-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.notification-time-field.is-instant .notification-time-action {
+  display: none;
+}
+
+.notification-time-field.is-instant select:disabled {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+  opacity: 0.58;
 }
 
 .settings-summary {
@@ -2515,14 +2592,15 @@ textarea::placeholder {
   /*
    * Hero depth tuning:
    * negative rotate-y keeps the right side closer before pointer input;
-   * increasing the Z gaps strengthens parallax between paper, path and tiles.
+   * paper and path share one plane while the tiles stay in front.
    */
   --hero-depth-perspective: 800px;
   --hero-depth-base-rotate-x: -1deg;
   --hero-depth-base-rotate-y: -5deg;
-  --hero-schedule-depth: 0px;
-  --hero-calendar-depth: 10px;
-  --hero-path-depth: 18px;
+  --hero-paper-plane-depth: 0px;
+  --hero-schedule-depth: var(--hero-paper-plane-depth);
+  --hero-calendar-depth: var(--hero-paper-plane-depth);
+  --hero-path-depth: var(--hero-paper-plane-depth);
   --hero-tile-depth: 48px;
   --hero-visual-offset-x: -24px;
   --shadow-action-hover: 4px 4px 0 rgba(20, 33, 29, 0.2);
@@ -2984,8 +3062,8 @@ textarea:focus {
 }
 
 .cursor-caption {
-  top: 22px;
-  left: 18px;
+  top: var(--cursor-caption-y, 22px);
+  left: var(--cursor-caption-x, 18px);
   border-color: #fff;
   background: #fff;
   color: #000;
@@ -3933,7 +4011,6 @@ select,
   line-height: var(--leading-caption);
 }
 
-.stage-menu-trigger:hover,
 .stage-menu-trigger[aria-expanded="true"] {
   border-color: var(--line-dark);
   background: rgba(0, 166, 118, 0.08);
@@ -4990,6 +5067,7 @@ select,
 }
 
 .hero-paper-track .visual-board {
+  z-index: 2;
   width: 43%;
   height: min(58svh, 560px);
   min-height: 430px;
@@ -5005,13 +5083,17 @@ select,
 .hero-paper-track .schedule-board {
   top: 1%;
   left: 0;
-  transform: translateZ(var(--hero-schedule-depth)) rotate(-1.7deg);
+  transform:
+    translate3d(var(--hero-paper-motion-x, 0px), 0, var(--hero-schedule-depth))
+    rotate(calc(var(--hero-paper-base-rotation, -1.7deg) + var(--hero-paper-motion-rotate, 0deg)));
 }
 
 .hero-paper-track .calendar-board {
   top: 8%;
   right: 0;
-  transform: translateZ(var(--hero-calendar-depth)) rotate(1.2deg);
+  transform:
+    translate3d(var(--hero-paper-motion-x, 0px), 0, var(--hero-calendar-depth))
+    rotate(calc(var(--hero-paper-base-rotation, 1.2deg) + var(--hero-paper-motion-rotate, 0deg)));
 }
 
 .hero-paper-track .board-label {
@@ -5036,16 +5118,13 @@ select,
 }
 
 .hero-paper-track .transfer-path {
+  z-index: 1;
   top: 50%;
   right: 38.5%;
   left: 38.5%;
   height: 2px;
+  transform-origin: left center;
   transform: translateZ(var(--hero-path-depth));
-}
-
-.hero-paper-track .path-tick {
-  height: 16px;
-  transform: translateY(-7px);
 }
 
 .hero-paper-track .transfer-tile {
@@ -5298,8 +5377,6 @@ select,
     --hero-depth-perspective: 1000px;
     --hero-depth-base-rotate-x: -0.6deg;
     --hero-depth-base-rotate-y: -3deg;
-    --hero-calendar-depth: 6px;
-    --hero-path-depth: 12px;
     --hero-tile-depth: 30px;
     transform-origin: 47vw center;
   }
