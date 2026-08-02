@@ -203,7 +203,7 @@
     .switch input:checked + .switch-track { border-color: var(--sync-dark); background: var(--sync); }
     .switch input:checked + .switch-track::after { background: var(--paper-bright); transform: translateX(20px); }
     .switch-copy strong, .switch-copy span { display: block; }
-    .switch-copy strong { font-size: 12px; }
+    .switch-copy strong { color: var(--ink); font-size: 11px; font-weight: 640; line-height: 16px; }
     .switch-copy span { color: var(--ink-soft); font-size: 10px; line-height: 16px; }
 
     .course-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: var(--space-2); }
@@ -264,8 +264,8 @@
     .course-group { display: grid; gap: var(--space-2); }
     .course-group h3 {
       margin: 0;
-      color: var(--ink-soft);
-      font-size: 10px;
+      color: var(--ink);
+      font-size: 11px;
       font-weight: 640;
       line-height: 16px;
     }
@@ -500,7 +500,7 @@
   </div>
   <div class="app" id="app" hidden>
     <header class="topbar">
-      <p class="eyebrow">T-SCHOOL Schedule Sync · <span id="app-version">讀取版本中</span></p>
+      <p class="eyebrow">T-SCHOOL Schedule Sync</p>
       <h1>行程同步控制臺</h1>
       <p class="top-status" id="top-status" data-state="attention" role="status" aria-live="polite">待首次同步</p>
     </header>
@@ -708,7 +708,6 @@
       function render(data) {
         model = data;
         var settings = data.settings;
-        byId('app-version').textContent = 'v' + String(data.appVersion || '未知');
         selectedCourses = new Set(settings.selectedCourses || []);
         excludedActivities = new Set(settings.excludedActivities || []);
         includeActivities = settings.includeActivities !== false;

@@ -235,7 +235,7 @@ assert.equal(
   true
 );
 assert.equal(sidebarHtml.includes('id="source-updated"'), false);
-assert.equal(sidebarHtml.includes('id="app-version"'), true);
+assert.equal(sidebarHtml.includes('id="app-version"'), false);
 assert.equal(sidebarHtml.includes('class="sync-estimate"'), false);
 const sidebarSectionRule = sidebarHtml.match(/\.section \{([\s\S]*?)\}/);
 assert.equal(Boolean(sidebarSectionRule), true);
@@ -335,10 +335,10 @@ assert.equal(
 assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
 assert.equal(
-  sidebarHtml.includes('<p class="eyebrow">T-SCHOOL Schedule Sync · <span id="app-version">'),
+  sidebarHtml.includes('<p class="eyebrow">T-SCHOOL Schedule Sync</p>'),
   true
 );
-assert.equal(sidebarHtml.includes("byId('app-version').textContent = 'v' +"), true);
+assert.equal(sidebarHtml.includes("byId('app-version')"), false);
 assert.equal(sidebarHtml.includes('<p class="eyebrow">T-SCHOOL 行程同步</p>'), false);
 assert.equal(sidebarHtml.includes('grid-template-areas:'), true);
 assert.equal(
