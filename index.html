@@ -16,7 +16,7 @@
   </style>
   <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
   <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
-  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260730-09">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260802-01">
   <script>
     (function () {
       var stylesheet = document.getElementById('app-stylesheet');
@@ -27,10 +27,6 @@
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <div class="high-load-test-banner" id="high-load-test-banner" role="status" hidden>
-    測試版：Code.gs 會包含「T-SCHOOL Schedule Sync → 高負載測試」。
-  </div>
-
   <div class="kinetic-cursor" id="kinetic-cursor" aria-hidden="true">
     <span class="cursor-lens"></span>
     <span class="cursor-pointer"></span>
@@ -50,11 +46,11 @@
       </button>
       <nav class="stage-menu-panel" id="stage-menu-panel" aria-label="設定階段" hidden>
         <ol>
-          <li><button type="button" data-step-target="1"><span>01</span>選擇年級</button></li>
-          <li><button type="button" data-step-target="2"><span>02</span>選擇課程與活動</button></li>
-          <li><button type="button" data-step-target="3"><span>03</span>設定同步與通知</button></li>
+          <li><button type="button" data-step-target="1"><span>01</span>選年級</button></li>
+          <li><button type="button" data-step-target="2"><span>02</span>選課程和活動</button></li>
+          <li><button type="button" data-step-target="3"><span>03</span>設定通知偏好</button></li>
           <li><button type="button" data-step-target="4"><span>04</span>檢查設定</button></li>
-          <li><button type="button" data-step-target="5"><span>05</span>安裝控制臺</button></li>
+          <li><button type="button" data-step-target="5"><span>05</span>變出控制臺</button></li>
         </ol>
       </nav>
     </div>
@@ -217,9 +213,14 @@
                 <span>收通知的 Email</span>
                 <div class="input-wrap">
                   <input id="notification-email" name="notificationEmail" type="text" inputmode="email" autocomplete="email" required pattern="[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@tschool\.tp\.edu\.tw" maxlength="254" aria-describedby="notification-email-hint">
+                  <span class="field-state-border field-state-border-invalid" aria-hidden="true"></span>
+                  <span class="field-state-border field-state-border-valid" aria-hidden="true"></span>
                   <span class="field-icon" aria-hidden="true"></span>
                 </div>
-                <span class="field-hint" id="notification-email-hint" aria-live="polite">為了讓程式能存取課綱，請輸入校內 Email</span>
+                <span class="field-hint validation-hint-stack" id="notification-email-hint" aria-live="polite">
+                  <span class="validation-hint-default">為了讓程式能存取課綱，請輸入校內 Email</span>
+                  <span class="validation-hint-error" aria-hidden="true">請輸入有效的校內 Email，格式比如「學號/教師名/職位/組織名@tschool.tp.edu.tw」</span>
+                </span>
               </label>
             </div>
 
@@ -243,7 +244,7 @@
 
           </div>
           <div class="step-completion">
-            <button type="button" class="step-complete-button" data-complete-step="4" data-cursor-label="產生安裝程式碼" aria-keyshortcuts="Enter" aria-pressed="false">產生安裝程式碼 ↵</button>
+            <button type="button" class="step-complete-button" data-complete-step="4" data-cursor-label="產生安裝設定碼" aria-keyshortcuts="Enter" aria-pressed="false">產生安裝設定碼 ↵</button>
           </div>
         </section>
 
@@ -251,34 +252,26 @@
           <div class="step-card output-card control-panel-card">
             <header class="step-heading output-heading step-heading-component">
               <div>
-                <h2 id="output-title">變出控制臺！</h2>
-                <p>放心你不用看懂程式，只要跟著指引操作即可！（如果擔心有資安疑慮，可以將程式碼貼給 AI 檢查）</p>
+                <h2 id="output-title">變出控制臺</h2>
+                <p>設定碼包含你剛剛填寫的資訊，請勿隨意分享給他人！</p>
               </div>
               <span class="step-position" aria-label="步驟 5，共 5 步">步驟 5/5</span>
             </header>
 
             <div class="code-window" id="code-window">
-              <textarea id="generated-code" spellcheck="false" readonly aria-label="產生的 Code.gs" placeholder="按下「產生安裝程式碼」後，程式碼會顯示在這裡" data-cursor-mode="text"></textarea>
-              <button type="button" class="copy-button" id="copy-code" data-cursor-label="複製程式碼" aria-live="polite">複製程式碼 ↵</button>
+              <textarea id="setup-code" spellcheck="false" readonly aria-label="產生的安裝設定碼，內容已模糊遮蔽" placeholder="按下「產生安裝設定碼」後，設定碼會顯示在這裡" data-cursor-mode="text"></textarea>
+              <button type="button" class="copy-button" id="copy-setup-code" data-cursor-label="複製設定碼" aria-live="polite">複製設定碼 ↵</button>
             </div>
 
-            <section class="install-steps" aria-labelledby="steps-title">
-              <h3 class="visually-hidden" id="steps-title">安裝步驟</h3>
-              <ol class="steps-list">
-                <li>
-                  <div class="install-step-heading"><strong>建立控制臺試算表</strong><span>操作 1</span></div>
-                  <small>登入 <span id="output-email">！您未填寫收通知的 Email！</span> → 點擊 <a class="sheet-template-link" id="sheet-template-link" href="https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy" target="_blank" rel="noopener" data-cursor-label="開啟模板連結">模板連結</a> 並建立副本</small>
-                </li>
-                <li>
-                  <div class="install-step-heading"><strong>新增擴充功能</strong><span>操作 2</span></div>
-                  <small>複製<button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製程式碼" aria-label="複製程式碼">程式碼</button> → 回試算表，點選「擴充功能 → Apps Script」→ 貼上<button type="button" class="inline-code-button" data-copy-code-inline data-cursor-label="複製並貼上程式碼" aria-label="複製程式碼以便貼上">程式碼</button> → 按下 Ctrl/Cmd + S 儲存程式</small>
-                  <img class="apps-script-guide-image" src="assets/google-sheets-apps-script-menu.png" alt="在 Google 試算表的「擴充功能」選單中選擇「Apps Script」">
-                </li>
-                <li>
-                  <div class="install-step-heading"><strong>完成第一次同步設定</strong><span>操作 3</span></div>
-                  <small>回試算表 → 跟著試算表指引完成後續操作</small>
-                </li>
+            <section class="next-steps" aria-labelledby="steps-title">
+              <h3 id="steps-title">接下來怎麼做</h3>
+              <ol class="desktop-next-steps">
+                <li><button type="button" class="desktop-step-copy-button" id="copy-setup-code-step" data-cursor-label="複製設定碼" aria-live="polite">複製設定碼</button></li>
+                <li>登入 <span class="output-email" id="output-email">---@---.---</span></li>
+                <li>開啟<a class="docs-template-link is-disabled" id="docs-template-link" href="#" aria-disabled="true" data-cursor-label="Google Docs 母版準備中">行程同步控制臺母版</a>，並建立副本</li>
+                <li>依母版畫面指引完成設定！</li>
               </ol>
+              <p class="mobile-next-steps">在電腦上收信，依照信中指引完成後續操作</p>
             </section>
           </div>
         </section>
@@ -307,11 +300,8 @@
       var version = window.TSCHOOL_ASSET_VERSION || 'stable';
       var coreDependencies = [
         'vendor/lenis-1.3.25.min.js',
-        'schedule-data.js'
-      ];
-      var generationDependencies = [
-        'sidebar-template.js',
-        'code-template.js'
+        'schedule-data.js',
+        'setup-code.js'
       ];
 
       function loadScript(src) {
@@ -332,14 +322,6 @@
         }
         console.error(error);
       }
-
-      window.TSCHOOL_GENERATION_ASSETS_READY = Promise
-        .all(generationDependencies.map(loadScript))
-        .then(function () { return true; })
-        .catch(function (error) {
-          showLoadError(error);
-          return false;
-        });
 
       Promise.all(coreDependencies.map(loadScript))
         .then(function () { return loadScript('app.js'); })

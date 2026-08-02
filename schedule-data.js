@@ -20,6 +20,8 @@
   const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
   const MANUAL_MERGE_EXCEPTIONS = Object.freeze({});
   const MIN_COURSE_SCHEDULED_PERIODS = 5;
+  const SOURCE_FETCH_MAX_ATTEMPTS = 3;
+  const SOURCE_FETCH_RETRY_DELAY_MS = 750;
   const ACTIVITY_PATTERNS = [
     /全校(?:性)?活動/,
     /^高[一二三](?:導入期|全校活動)$/,
@@ -400,16 +402,32 @@
       throw new Error('目前環境無法讀取課表來源。');
     }
 
-    const response = await request(API_URL + '?grade=' + encodeURIComponent(apiGrade), {
-      redirect: 'follow',
-      cache: 'no-store'
-    });
-
-    if (!response.ok) {
-      throw new Error('課表來源回應失敗（HTTP ' + response.status + '）。');
+    let lastError = null;
+    for (let attempt = 1; attempt <= SOURCE_FETCH_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await request(API_URL + '?grade=' + encodeURIComponent(apiGrade), {
+          redirect: 'follow',
+          cache: 'no-store'
+        });
+        if (!response.ok) {
+          const error = new Error('課表來源回應失敗（HTTP ' + response.status + '）。');
+          error.status = Number(response.status) || 0;
+          throw error;
+        }
+        return assertPayload(await response.json());
+      } catch (error) {
+        lastError = error;
+        const status = Number(error && error.status) || 0;
+        const retryable = !status || status === 302 || status === 404 ||
+          status === 408 || status === 425 || status === 429 || status >= 500;
+        if (!retryable || attempt === SOURCE_FETCH_MAX_ATTEMPTS) throw error;
+        await new Promise(resolve => setTimeout(
+          resolve,
+          SOURCE_FETCH_RETRY_DELAY_MS * attempt
+        ));
+      }
     }
-
-    return assertPayload(await response.json());
+    throw lastError || new Error('目前無法讀取課表來源。');
   }
 
   return {

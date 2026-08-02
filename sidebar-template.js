@@ -360,6 +360,18 @@
       color: var(--ink-soft);
     }
     .instant-notification-switch { margin-top: 0; }
+    .reimport-setup {
+      width: 100%;
+      min-height: 42px;
+      margin-top: var(--space-3);
+      border: 1px solid var(--line-dark);
+      border-radius: var(--radius-control);
+      background: var(--paper-bright);
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 640;
+    }
     .notification-time-field.is-instant .notification-time-row { grid-template-columns: minmax(0, 1fr); }
     .notification-time-field.is-instant .notification-time-action { display: none; }
     .notification-time-field.is-instant select:disabled {
@@ -482,13 +494,13 @@
         <div class="sync-progress-head"><span>同步進度</span><strong id="sync-progress-value">0%</strong></div>
         <div class="sync-progress-track" aria-hidden="true"><span id="sync-progress-bar"></span></div>
         <span class="sync-progress-detail" id="sync-progress-detail">正在準備同步…</span>
-        <p class="sync-progress-warning" id="sync-progress-warning" role="status" hidden>請勿現在關閉側欄！</p>
+        <p class="sync-progress-warning" id="sync-progress-warning" role="status" hidden>請勿現在關閉控制臺！</p>
       </div>
     </div>
   </div>
   <div class="app" id="app" hidden>
     <header class="topbar">
-      <p class="eyebrow">T-SCHOOL Schedule Sync</p>
+      <p class="eyebrow">T-SCHOOL Schedule Sync · <span id="app-version">讀取版本中</span></p>
       <h1>行程同步控制臺</h1>
       <p class="top-status" id="top-status" data-state="attention" role="status" aria-live="polite">待首次同步</p>
     </header>
@@ -574,6 +586,7 @@
           <p class="hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動～</p>
         </div>
         <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email"><small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small></label>
+        <button type="button" class="reimport-setup" id="reimport-setup">重新匯入網站設定碼</button>
       </section>
 
     </main>
@@ -601,9 +614,12 @@
       var busy = false;
       var syncProgressTimer = null;
       var activeSyncJobId = '';
+      var lastSyncProgressPercent = 0;
       var termTransitionAnnounced = false;
       var MAX_NOTIFY_HOURS = 4;
       var customNotificationHours = [6];
+      var initialLoadRetryTimer = null;
+      var INITIAL_LOAD_RETRY_DELAY_MS = 1500;
 
       function byId(id) { return document.getElementById(id); }
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -638,9 +654,15 @@
       }
       function showToast(message) { var toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(function () { toast.classList.remove('show'); }, 2600); }
       function server(method, value) { return new Promise(function (resolve, reject) { var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (error) { reject(new Error(error && error.message ? error.message : String(error))); }); runner[method](value); }); }
+      function isTransientInitialLoadError(error) {
+        return String(error && error.message ? error.message : error)
+          .indexOf('背景同步正在保存行程') !== -1;
+      }
       function getCheckedGrade() { var input = document.querySelector('input[name="grade"]:checked'); return input ? input.value : '高一'; }
       function renderSyncProgress(progress) {
-        var value = Math.max(0, Math.min(100, Number(progress && progress.percent) || 0));
+        var reportedValue = Math.max(0, Math.min(100, Number(progress && progress.percent) || 0));
+        var value = Math.max(lastSyncProgressPercent, reportedValue);
+        lastSyncProgressPercent = value;
         byId('sync-progress').setAttribute('aria-valuenow', String(value));
         byId('sync-progress-value').textContent = value + '%';
         byId('sync-progress-bar').style.width = value + '%';
@@ -676,6 +698,7 @@
       }
       function startSyncProgress(label) {
         activeSyncJobId = '';
+        lastSyncProgressPercent = 0;
         renderSyncProgress({ percent: 1, message: label || '正在準備同步…' });
         setBusy(true, '正在同步行程', true, true);
         stopSyncProgressPolling();
@@ -685,6 +708,7 @@
       function render(data) {
         model = data;
         var settings = data.settings;
+        byId('app-version').textContent = 'v' + String(data.appVersion || '未知');
         selectedCourses = new Set(settings.selectedCourses || []);
         excludedActivities = new Set(settings.excludedActivities || []);
         includeActivities = settings.includeActivities !== false;
@@ -714,12 +738,13 @@
         byId('top-status').textContent = needsTermSelection
           ? '待重新選課'
           : (data.status && data.status.ok
-            ? '同步正常'
+            ? '狀態正常'
             : (settings.setupComplete ? '需檢查狀態' : '待首次同步'));
         byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
           ? '完成選課並同步'
           : (settings.setupComplete ? '儲存並同步' : '儲存並首次同步');
+        byId('reimport-setup').hidden = Boolean(settings.setupComplete);
         updateActionAvailability();
       }
 
@@ -1042,7 +1067,7 @@
           if (result.pending) {
             keepPolling = true;
             activeSyncJobId = result.jobId || '';
-            setBusy(true, '同步已在背景分批執行；現在可以關閉側欄', true, false);
+            setBusy(true, '同步已在背景分批執行；現在可以關閉控制臺', true, false);
             pollSyncProgress();
           }
         } catch (error) {
@@ -1067,7 +1092,7 @@
           if (result.pending) {
             keepPolling = true;
             activeSyncJobId = result.jobId || '';
-            setBusy(true, '同步已在背景分批執行；現在可以關閉側欄', true, false);
+            setBusy(true, '同步已在背景分批執行；現在可以關閉控制臺', true, false);
             pollSyncProgress();
           }
         } catch (error) {
@@ -1172,6 +1197,14 @@
       });
       byId('save').addEventListener('click', function () { save(false); });
       byId('save-sync').addEventListener('click', function () { save(true); });
+      byId('reimport-setup').addEventListener('click', function () {
+        if (busy) return;
+        server('showSetupImportDialog', null).then(function () {
+          google.script.host.close();
+        }).catch(function (error) {
+          showToast(error.message);
+        });
+      });
       byId('sync-menu-toggle').addEventListener('click', function () {
         setSyncMenuOpen(byId('sync-menu').hidden, true);
       });
@@ -1215,31 +1248,41 @@
       });
       byId('pending-list').addEventListener('click', async function (event) { var title = event.target.dataset.keep || event.target.dataset.remove; if (!title) return; setBusy(true, '正在更新項目…'); try { var method = event.target.dataset.keep ? 'confirmPendingTitleFromUi' : 'rejectPendingTitleFromUi'; var result = await server(method, title); render(result.uiData); showToast(result.message); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
 
-      setBusy(true, '正在讀取控制臺…');
-      server('getSettingsUiData', null).then(function (data) {
-        render(data);
-        byId('app').hidden = false;
-        requestAnimationFrame(function () {
-          byId('app').classList.add('is-ready');
-          if (data.termTransition && data.termTransition.required && !termTransitionAnnounced) {
-            termTransitionAnnounced = true;
-            byId('term-transition').focus({ preventScroll: true });
+      function loadInitialUi() {
+        clearTimeout(initialLoadRetryTimer);
+        setBusy(true, '正在讀取控制臺…');
+        server('getSettingsUiData', null).then(function (data) {
+          render(data);
+          byId('app').hidden = false;
+          requestAnimationFrame(function () {
+            byId('app').classList.add('is-ready');
+            if (data.termTransition && data.termTransition.required && !termTransitionAnnounced) {
+              termTransitionAnnounced = true;
+              byId('term-transition').focus({ preventScroll: true });
+            }
+          });
+          return server('getSyncProgressForUi', null);
+        }).then(function (progress) {
+          if (progress && ['running', 'queued', 'retry_pending'].indexOf(progress.state) !== -1) {
+            activeSyncJobId = progress.jobId || '';
+            renderSyncProgress(progress);
+            setBusy(true, '背景同步仍在執行；現在可以關閉控制臺', true, false);
+            pollSyncProgress();
+            return;
           }
+          setBusy(false);
+        }).catch(function (error) {
+          if (isTransientInitialLoadError(error)) {
+            setBusy(true, '正在等待控制臺完成資料保存…');
+            initialLoadRetryTimer = setTimeout(loadInitialUi, INITIAL_LOAD_RETRY_DELAY_MS);
+            return;
+          }
+          showToast(error.message);
+          setBusy(false);
         });
-        return server('getSyncProgressForUi', null);
-      }).then(function (progress) {
-        if (progress && ['running', 'queued', 'retry_pending'].indexOf(progress.state) !== -1) {
-          activeSyncJobId = progress.jobId || '';
-          renderSyncProgress(progress);
-          setBusy(true, '背景同步仍在執行；現在可以關閉側欄', true, false);
-          pollSyncProgress();
-          return;
-        }
-        setBusy(false);
-      }).catch(function (error) {
-        showToast(error.message);
-        setBusy(false);
-      });
+      }
+
+      loadInitialUi();
     })();
   </script>
 </body>

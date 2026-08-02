@@ -1,18 +1,43 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const scheduleData = require(path.join(root, 'schedule-data.js'));
+const setupCode = require(path.join(root, 'setup-code.js'));
+const controlPanelGenerator = require(path.join(
+  root,
+  'scripts',
+  'generate-google-docs-control-panel.js'
+));
+const immutableManifestUrl =
+  'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
+  '0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json';
+const expectedAppsScriptOAuthScopes = [
+  'https://www.googleapis.com/auth/documents.currentonly',
+  'https://www.googleapis.com/auth/spreadsheets.readonly',
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/script.send_mail',
+  'https://www.googleapis.com/auth/script.external_request',
+  'https://www.googleapis.com/auth/script.scriptapp',
+  'https://www.googleapis.com/auth/script.container.ui',
+  'https://www.googleapis.com/auth/userinfo.email'
+];
+const googleDocsTemplateCopyUrl =
+  'https://docs.google.com/document/d/1l4SCo0Z8cDgy1F0wvc74exuBIES4MHRO8F08GiqqZgA/copy';
 
 global.window = global;
 require(path.join(root, 'sidebar-template.js'));
+require(path.join(root, 'setup-dialog-template.js'));
 require(path.join(root, 'code-template.js'));
 
 const sidebarHtml = global.TSCHOOL_SIDEBAR_HTML;
+const setupDialogHtml = global.TSCHOOL_SETUP_DIALOG_HTML;
 const configuratorHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const configuratorAppSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const configuratorStylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
@@ -40,11 +65,131 @@ assert.equal(
 );
 assert.equal(configuratorHtml.includes('偵測到行程調整就盡快通知'), true);
 assert.equal(configuratorHtml.includes('Email 和通知偏好都沒錯 ↵'), true);
+assert.equal(configuratorAppSource.includes('你的即時通知：'), false);
+assert.equal(configuratorAppSource.includes("appVersion: '2.0.0-rc.2'"), true);
+assert.equal(configuratorAppSource.includes('每日摘要時間：'), false);
+assert.match(
+  configuratorAppSource,
+  /const notificationSummary = instantNotificationsEnabled[\s\S]*?\? \['行程有調整就盡快通知'\][\s\S]*?: getSelectedNotifyHours\(\)\.map/,
+  '第四步應依即時通知狀態顯示「盡快通知」或使用者選取的時段'
+);
+assert.match(
+  configuratorAppSource,
+  /\['你想收到通知的時間是：', notificationSummary\]/,
+  '第四步的通知摘要應只保留一個共用標題'
+);
+assert.equal(configuratorHtml.includes('class="field-state-border field-state-border-invalid"'), true);
+assert.equal(configuratorHtml.includes('class="field-state-border field-state-border-valid"'), true);
+assert.equal(configuratorHtml.includes('class="validation-hint-error"'), true);
+assert.equal(configuratorHtml.includes('id="copy-setup-code-fallback"'), false);
+assert.equal(configuratorHtml.includes('變出控制臺！'), false);
+assert.equal(configuratorHtml.includes('>變出控制臺<'), true);
+assert.equal(configuratorHtml.includes('設定碼包含你剛剛填寫的資訊，請勿隨意分享給他人！'), true);
+assert.equal(configuratorHtml.includes('class="desktop-next-steps"'), true);
+assert.equal(configuratorHtml.includes('class="mobile-next-steps"'), true);
+assert.match(
+  configuratorHtml,
+  /<ol class="desktop-next-steps">\s*<li><button[^>]*id="copy-setup-code-step"[^>]*>複製設定碼<\/button><\/li>\s*<li>登入/,
+  '電腦版後續指引應以可點擊的「複製設定碼」作為第一步，原三步依序後移'
+);
+assert.equal(configuratorHtml.includes('在電腦上收信，依照信中指引完成後續操作'), true);
+assert.equal(
+  configuratorAppSource.includes("elements.copyCodeStep?.addEventListener('click', copyGeneratedCode)"),
+  true,
+  '第一步複製按鈕應直接沿用現有的設定碼複製流程'
+);
+assert.equal(
+  configuratorAppSource.includes("elements.copyCodeStep.textContent = '再次複製設定碼'"),
+  false,
+  '步驟一完成複製後仍應保持「複製設定碼」，不得改寫步驟文字'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.control-panel-card \.desktop-step-copy-button,[\s\S]*?border: 0;[\s\S]*?text-decoration: underline;[\s\S]*?text-underline-offset: 0\.12em;/,
+  '第五步 inline action 應使用文字底線，不得以 border-bottom 假裝底線'
+);
+assert.match(
+  configuratorAppSource,
+  /function updateGeneratedCodeAvailability\(sourceReady\)[\s\S]*?elements\.copyCodeStep\.disabled = !enabled;/,
+  '後續指引的複製按鈕應與主要複製按鈕共用可用狀態'
+);
+assert.equal(setupDialogHtml.includes('貼上「行程同步設定碼」'), true);
+assert.equal(setupDialogHtml.includes('placeholder="貼在這邊"'), true);
+assert.equal(setupDialogHtml.includes('id="open-control-panel"'), true);
+assert.match(
+  setupDialogHtml,
+  /textarea\s*\{[^}]*\bresize:none;/,
+  '設定碼輸入框不得顯示可拖曳調整尺寸的把手'
+);
+assert.equal(setupDialogHtml.includes('請隨後在控制臺檢查設定，並完成首次同步'), true);
+assert.equal(
+  setupDialogHtml.includes('有時課表來源載入較慢，請耐心等待 1 分鐘'),
+  true
+);
+assert.equal(setupDialogHtml.includes("busy ? '正在匯入設定…' : '開啟控制臺'"), true);
+assert.equal(setupDialogHtml.includes('id="account-warning" role="alert" tabindex="-1" hidden'), true);
+assert.equal(setupDialogHtml.includes('確認匯入內容'), false);
+assert.equal(setupDialogHtml.includes('課表內容曾經變動'), false);
+assert.equal(setupDialogHtml.includes('id="preview-step"'), false);
+assert.match(
+  setupDialogHtml,
+  /importSetupCodeFromUi[\s\S]*?setTimeout\(function \(\) \{[\s\S]*?showSettingsSidebar\(\)[\s\S]*?\}, 800\)/,
+  '匯入設定後應延後開啟側欄，避免立即撞上尚未釋放的 Script Lock'
+);
+assert.equal(
+  setupDialogHtml.includes("'用錯 Google 帳號了喔，請改成設定時填寫的 ' + email"),
+  true,
+  'Google 帳號不符警告應使用指定文案與設定碼中的 Email'
+);
 assert.equal(configuratorStylesSource.includes('.notification-grid #field-notification-email'), true);
 assert.equal(configuratorStylesSource.includes('grid-column: 1 / -1'), true);
 assert.equal(configuratorHtml.includes('class="instant-notification-track"'), true);
 assert.equal(configuratorHtml.includes('class="instant-notification-copy"'), true);
 assert.equal(configuratorStylesSource.includes('width: 44px;'), true);
+assert.equal(
+  configuratorAppSource.includes(`'${googleDocsTemplateCopyUrl}'`),
+  true,
+  '網站應使用正式 Google Docs 母版 /copy URL'
+);
+assert.match(
+  configuratorAppSource,
+  /function shouldOfferEmailSetupTransfer\(\)[\s\S]*?userAgentData\?\.mobile[\s\S]*?pointer: coarse/,
+  '手機與只有粗指標的裝置應改以寄送設定信為主要動作'
+);
+assert.equal(configuratorAppSource.includes("? '寄送設定信 ↵'"), true);
+assert.equal(
+  configuratorAppSource.includes("const SETUP_CODE_EMAIL_SUBJECT = '設定指引｜T-SCHOOL Schedule Sync';"),
+  true
+);
+assert.match(
+  configuratorAppSource,
+  /function buildSetupCodeMailtoUrl\(\)[\s\S]*?mailto:[\s\S]*?SETUP_CODE_EMAIL_SUBJECT[\s\S]*?buildSetupCodeTransferText/,
+  '寄送設定信應預填收件者、主旨、操作指引、母版連結與設定碼'
+);
+assert.match(
+  configuratorAppSource,
+  /if \(mailtoUrl\.length > MAX_MAILTO_URL_LENGTH\) \{[\s\S]*?shareLongSetupCode/,
+  '設定碼過長時不得強行塞入 mailto URL'
+);
+assert.equal(
+  configuratorAppSource.includes('請在「電腦」上完成以下步驟：'),
+  true
+);
+assert.equal(configuratorAppSource.includes('1. 完整複製設定碼：'), true);
+assert.equal(
+  configuratorAppSource.includes('2. 用 ${recipient} 開啟行程同步控制臺母版，並建立副本：'),
+  true
+);
+assert.equal(configuratorAppSource.includes('3. 依畫面指引完成設定！'), true);
+assert.equal(
+  configuratorAppSource.includes('＊設定碼包含你在網站填寫的資訊，請勿隨意分享給他人！'),
+  true
+);
+assert.equal(
+  configuratorAppSource.includes("elements.outputStep.dataset.transferMode = state.emailSetupTransferEnabled"),
+  true,
+  '手機與桌機第五步應由同一裝置判定切換寄信或複製版面'
+);
 const kineticCursorSource = configuratorAppSource.slice(
   configuratorAppSource.indexOf('function initKineticCursor()'),
   configuratorAppSource.indexOf('function prefersReducedMotion()')
@@ -54,7 +199,7 @@ assert.equal(kineticCursorSource.includes('cursorSwayMaxAngle'), true);
 assert.equal(kineticCursorSource.includes('targetAngle *= MOTION_CONFIG.cursorSwayReturn'), true);
 assert.equal(kineticCursorSource.includes('cursorBaseAngle + currentAngle'), true);
 
-assert.equal(sidebarIdSet.size, sidebarIds.length, 'Google Sheet 控制臺不應出現重複 id');
+assert.equal(sidebarIdSet.size, sidebarIds.length, 'Google Docs 控制臺不應出現重複 id');
 assert.deepEqual(
   sidebarByIdReferences.filter(id => !sidebarIdSet.has(id)),
   [],
@@ -74,7 +219,8 @@ assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
 assert.equal(sidebarHtml.includes('function pollSyncProgress()'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress-warning"'), true);
-assert.equal(sidebarHtml.includes('請勿現在關閉側欄！'), true);
+assert.equal(sidebarHtml.includes('請勿現在關閉控制臺！'), true);
+assert.equal(sidebarHtml.includes('側欄'), false, '控制臺內的使用者提示不應再稱為側欄');
 assert.equal(sidebarHtml.includes('overscroll-behavior-y: auto'), true);
 assert.equal(sidebarHtml.includes('overscroll-behavior: contain'), false);
 assert.equal(sidebarHtml.includes('id="course-list-shell"'), true);
@@ -89,7 +235,7 @@ assert.equal(
   true
 );
 assert.equal(sidebarHtml.includes('id="source-updated"'), false);
-assert.equal(sidebarHtml.includes('id="app-version"'), false);
+assert.equal(sidebarHtml.includes('id="app-version"'), true);
 assert.equal(sidebarHtml.includes('class="sync-estimate"'), false);
 const sidebarSectionRule = sidebarHtml.match(/\.section \{([\s\S]*?)\}/);
 assert.equal(Boolean(sidebarSectionRule), true);
@@ -180,19 +326,30 @@ assert.equal(sidebarHtml.includes('content: "✓"'), false);
 assert.equal(sidebarHtml.includes('id="term-transition" role="alert"'), true);
 assert.equal(sidebarHtml.includes('id="term-transition-action"'), true);
 assert.equal(sidebarHtml.includes('function updateActionAvailability()'), true);
+assert.equal(sidebarHtml.includes('var lastSyncProgressPercent = 0;'), true);
+assert.equal(
+  sidebarHtml.includes('var value = Math.max(lastSyncProgressPercent, reportedValue);'),
+  true,
+  '同一同步工作顯示過的百分比不得因後端輪詢尚未建立進度而倒退'
+);
 assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
-assert.equal(sidebarHtml.includes('<p class="eyebrow">T-SCHOOL Schedule Sync</p>'), true);
+assert.equal(
+  sidebarHtml.includes('<p class="eyebrow">T-SCHOOL Schedule Sync · <span id="app-version">'),
+  true
+);
+assert.equal(sidebarHtml.includes("byId('app-version').textContent = 'v' +"), true);
 assert.equal(sidebarHtml.includes('<p class="eyebrow">T-SCHOOL 行程同步</p>'), false);
 assert.equal(sidebarHtml.includes('grid-template-areas:'), true);
 assert.equal(
   sidebarHtml.includes('data-state="attention" role="status" aria-live="polite">待首次同步</p>'),
   true
 );
-['待首次同步', '需檢查狀態', '待重新選課', '同步正常'].forEach(statusLabel => {
+['待首次同步', '需檢查狀態', '待重新選課', '狀態正常'].forEach(statusLabel => {
   assert.equal(sidebarHtml.includes(statusLabel), true);
 });
 assert.equal(sidebarHtml.includes('同步功能正常'), false);
+assert.equal(sidebarHtml.includes("? '同步正常'"), false);
 assert.equal(sidebarHtml.includes('需要檢查同步狀態'), false);
 assert.equal(sidebarHtml.includes('尚未完成第一次同步'), false);
 assert.equal(sidebarHtml.includes('<h2>課程與活動</h2>'), true);
@@ -241,8 +398,20 @@ assert.equal(
 );
 assert.equal(sidebarHtml.includes('<span>每日成功摘要</span>'), false);
 assert.equal(sidebarHtml.includes('id="include-activities"'), false);
-assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), true);
-assert.equal(configuratorHtml.includes('id="high-load-test-banner" role="status" hidden'), true);
+assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), false);
+[
+  ['1', '選年級'],
+  ['2', '選課程和活動'],
+  ['3', '設定通知偏好'],
+  ['4', '檢查設定'],
+  ['5', '變出控制臺']
+].forEach(([step, title]) => {
+  assert.match(
+    configuratorHtml,
+    new RegExp('data-step-target="' + step + '"><span>0' + step + '</span>' + title),
+    '步驟選單名稱必須與第 ' + step + ' 張卡片標題相同'
+  );
+});
 assert.equal(
   configuratorHtml.includes('cloudflareinsights.com'),
   false,
@@ -275,8 +444,8 @@ assert.match(
 );
 assert.doesNotMatch(
   configuratorHtml,
-  /id="generated-code"[^>]*\sdata-lenis-prevent(?:\s|>)/,
-  '程式碼預覽沒有內嵌捲動，不得繞過頁面的 Lenis 捲動'
+  /id="setup-code"[^>]*\sdata-lenis-prevent(?:\s|>)/,
+  '設定碼預覽沒有內嵌捲動，不得繞過頁面的 Lenis 捲動'
 );
 assert.match(
   configuratorAppSource,
@@ -290,8 +459,8 @@ assert.match(
 );
 assert.match(
   configuratorHtml,
-  /<textarea id="generated-code"[^>]*\sreadonly(?:\s|>)/,
-  '程式碼預覽應維持唯讀並允許使用者選取文字'
+  /<textarea id="setup-code"[^>]*\sreadonly(?:\s|>)/,
+  '設定碼預覽應維持唯讀並允許使用者選取文字'
 );
 assert.equal(
   configuratorHtml.includes("document.getElementById('app-stylesheet').href ="),
@@ -303,7 +472,7 @@ assert.equal(
   false,
   '每次載入不得產生全新的資產版本，否則瀏覽器無法沿用快取'
 );
-assert.equal(configuratorAppSource.includes('const ENABLE_HIGH_LOAD_TEST_FEATURE = true;'), true);
+assert.equal(configuratorAppSource.includes('ENABLE_HIGH_LOAD_TEST_FEATURE'), false);
 assert.equal(emailTemplateManifest.schemaVersion, 1);
 assert.deepEqual(
   Object.keys(emailTemplateManifest.notifications).sort(),
@@ -398,10 +567,10 @@ assert.equal(
 );
 assert.equal(emailTemplateManifest.notifications.action_required.lede, '');
 assert.equal(
-  (emailTemplateManifestText.match(/>開啟控制臺試算表<\/a>/g) || []).length,
+  (emailTemplateManifestText.match(/>開啟行程同步控制臺<\/a>/g) || []).length,
   5
 );
-assert.equal(emailTemplateManifestText.includes('>開啟行程同步控制臺</a>'), false);
+assert.equal(emailTemplateManifestText.includes('>開啟控制臺試算表</a>'), false);
 assert.equal(emailTemplateManifestText.includes('>前往重新選課</a>'), false);
 assert.equal(emailTemplateManifestText.includes('>檢查課程與活動</a>'), false);
 assert.equal(/<(script|iframe)\b/i.test(emailTemplateManifestText), false);
@@ -412,11 +581,7 @@ assert.equal(
   true
 );
 assert.equal(emailTemplateManifestText.includes('課表異動'), false);
-assert.equal(
-  configuratorAppSource.includes(".get(HIGH_LOAD_TEST_QUERY_PARAMETER) === '1'"),
-  true,
-  '測試版程式碼必須同時受到專用 URL 參數保護'
-);
+assert.equal(configuratorAppSource.includes('HIGH_LOAD_TEST_QUERY_PARAMETER'), false);
 assert.equal(
   configuratorAppSource.includes("'寒暑假期間課程 / 活動'"),
   true,
@@ -441,6 +606,20 @@ assert.equal(
   false,
   '第三步 Email 錯誤應使用卡片內提示，不得開啟會重組 backdrop-filter 的原生驗證浮窗'
 );
+const focusEmailBeforeDomainSource = configuratorAppSource.slice(
+  configuratorAppSource.indexOf('function focusEmailBeforeDomain()'),
+  configuratorAppSource.indexOf('function setFieldState(')
+);
+assert.equal(
+  focusEmailBeforeDomainSource.includes('focus({ preventScroll: true })'),
+  false,
+  '由下一步按鈕聚焦 Email 時應允許瀏覽器在鍵盤開啟前自動顯示欄位'
+);
+assert.equal(
+  focusEmailBeforeDomainSource.includes('elements.notificationEmail.focus();'),
+  true,
+  '由下一步按鈕聚焦 Email 時應使用原生 focus 捲動'
+);
 assert.equal(
   configuratorAppSource.includes(
     "input.setAttribute('aria-errormessage', 'notification-email-hint');"
@@ -459,22 +638,22 @@ const generateOutputSource = configuratorAppSource.slice(
 assert.equal(
   updateOutputSource.includes('buildAppsScriptCode'),
   false,
-  '一般設定更新不得即時重建 Code.gs'
+  '一般設定更新不得即時重建輸出'
 );
 assert.equal(
-  generateOutputSource.includes('window.buildAppsScriptCode(getSettings())'),
+  generateOutputSource.includes('window.TSchoolSetupCode.encode(getSettings())'),
   true,
-  'Code.gs 應只由明確的產生動作建立'
+  '設定碼應只由明確的產生動作建立'
 );
 assert.match(
   configuratorAppSource,
   /if \(completedStep === 4\) \{[\s\S]*?generateOutput\(\)[\s\S]*?scheduleGeneratedCodeTransition\(\)/,
-  '第四步完成按鈕應先產生 Code.gs，再排程切換至第五步'
+  '第四步完成按鈕應先產生設定碼，再排程切換至第五步'
 );
 assert.equal(
   configuratorAppSource.includes('generatedCodeTransitionDelay: 48'),
   true,
-  '產生 Code.gs 後應保留短暫繪製間隔再啟動卡片切換'
+  '產生設定碼後應保留短暫繪製間隔再啟動卡片切換'
 );
 assert.match(
   configuratorAppSource,
@@ -488,8 +667,53 @@ assert.match(
 );
 assert.match(
   configuratorStylesSource,
+  /\.summary-line \{[\s\S]*?gap: var\(--space-3\);[\s\S]*?\}/,
+  '設定摘要的小標題與內容應沿用表單標題與互動元素的 12px 間距'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.progressive-blur \{[\s\S]*?right: calc\(-1 \* var\(--fog-layer-bleed\)\);[\s\S]*?left: calc\(-1 \* var\(--fog-layer-bleed\)\);[\s\S]*?\}/,
+  '預覽霧層容器應橫向超出區段邊界，避免卡片側邊出現斷層'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.progressive-blur-layer \{[\s\S]*?inset: calc\(-1 \* var\(--fog-layer-bleed\)\);[\s\S]*?\}/,
+  '每層 backdrop-filter 取樣面應向四側延伸，不得在左右邊緣被裁斷'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.journey-step \{[\s\S]*?isolation: isolate;/,
+  '每張流程卡應使用獨立 Backdrop Root，避免 Email 驗證重繪使相鄰預覽濾鏡失效'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.field-state-border \{[\s\S]*?transform: translateZ\(0\);[\s\S]*?will-change: opacity;/,
+  'Email 驗證外框應預先保留在固定合成層，只切換透明度'
+);
+assert.equal(
+  configuratorStylesSource.includes('.validated-field[data-field-state="valid"] input'),
+  false,
+  'Email 有效狀態不得重新繪製 input border'
+);
+assert.equal(
+  configuratorAppSource.includes('hintElement.textContent = hint'),
+  false,
+  'Email 驗證狀態不得替換可見提示文字'
+);
+assert.match(
+  configuratorStylesSource,
   /#step-5 \{[\s\S]*?--preview-fog-start-opacity: 0\.002;[\s\S]*?--preview-fog-end-opacity: 0\.07;[\s\S]*?--preview-fog-layer-opacity: 0\.006;[\s\S]*?--section-reveal-start-opacity: 1;[\s\S]*?\}/,
   '第五張深色卡片應能獨立降低預覽霧層濃度並提高進場起始不透明度'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.control-panel-card \.code-window::before \{[\s\S]*?backdrop-filter: blur\(6px\);[\s\S]*?-webkit-backdrop-filter: blur\(6px\);/,
+  '設定碼表面應使用真正的 backdrop blur 遮罩，不得只降低文字透明度'
+);
+assert.match(
+  configuratorStylesSource,
+  /#step-5\[data-transfer-mode="email"\] \.desktop-next-steps \{[\s\S]*?display: none;[\s\S]*?#step-5\[data-transfer-mode="email"\] \.mobile-next-steps \{[\s\S]*?display: block;/,
+  '寄信模式只應顯示手機後續指引，不得顯示桌機母版連結'
 );
 assert.equal(
   configuratorStylesSource.includes(
@@ -573,10 +797,40 @@ assert.equal(
   true,
   '第一個鎖定邊界應依畫面與目標的距離平滑混合收斂速度'
 );
+assert.equal(
+  configuratorAppSource.includes('homeEntryHeroTimeRatio: 2 / 3'),
+  true,
+  '首頁開始設定捲動應讓 Hero 動畫約占總時間三分之二'
+);
+assert.match(
+  configuratorAppSource,
+  /function runHomeEntryVirtualScroll\([\s\S]*?heroProgress = elapsedMs \/ heroDurationMs[\s\S]*?cardProgress = \(elapsedMs - heroDurationMs\)[\s\S]*?programmatic: false,[\s\S]*?lerp: homeEntryLerp/,
+  '首頁開始設定應以兩段線性虛擬目標推動 Lenis，可視平滑僅由 lerp 處理'
+);
+assert.equal(
+  configuratorAppSource.includes('createHomeEntryScrollEasing'),
+  false,
+  '首頁按鈕不得再以位置 easing 主動減速'
+);
+assert.match(
+  configuratorAppSource,
+  /function enterFirstStepWithPageScroll\(\)[\s\S]*?heroAnimationEndTarget[\s\S]*?runHomeEntryVirtualScroll\(\{[\s\S]*?heroAnimationEndTarget,[\s\S]*?scrollTarget/,
+  '首頁開始設定應以 Hero 動畫完成位置作為兩段勻速目標的距離分界'
+);
+assert.match(
+  configuratorAppSource,
+  /virtualScroll: payload => \{[\s\S]*?tschoolCancelHomeEntryScroll\?\.\(\{ resetMomentum: true \}\)/,
+  '使用者主動捲動時應取消首頁按鈕的虛擬捲動並交還控制權'
+);
 assert.match(
   configuratorHtml,
   /class="hero-paper-track">[\s\S]*?class="hero-depth-scene">[\s\S]*?class="hero-progressive-fog"/,
   'Hero 紙張與行程卡應位於 3D 場景，模糊層則維持為場景外的上層兄弟節點'
+);
+assert.match(
+  configuratorStylesSource,
+  /--hero-fog-vertical-mask:\s*linear-gradient\([\s\S]*?#000 calc\(100% - var\(--hero-fog-vertical-bleed\) - 48px\),[\s\S]*?transparent calc\(100% - var\(--hero-fog-vertical-bleed\) \+ 16px\),[\s\S]*?transparent 100%/,
+  'Hero 模糊層底部應在視覺區邊緣淡出，不得跨越 Hero 與設定區的背景交界'
 );
 assert.match(
   configuratorHtml,
@@ -745,9 +999,34 @@ assert.equal(
   true,
   '鍵盤尺寸連續變化後應等待 viewport 穩定再校正聚焦欄位'
 );
+assert.equal(
+  configuratorAppSource.includes('window.innerHeight - height - offsetTop'),
+  false,
+  '鍵盤高度不得扣除會隨 caret 移動的 visualViewport.offsetTop'
+);
 assert.match(
   configuratorAppSource,
-  /const viewportGeometryChanged =[\s\S]*?if \(viewportGeometryChanged\) \{\s*scheduleFocusedControlVisibility\(\{ afterViewportSettles: true \}\);/,
+  /const keyboardHeight = Math\.max\(0, window\.innerHeight - height\);/,
+  '鍵盤狀態應只由 layout viewport 與 visual viewport 的高度差判斷'
+);
+assert.equal(
+  configuratorAppSource.includes("window.visualViewport?.addEventListener('scroll', requestUpdate"),
+  false,
+  'caret 造成的 visualViewport scroll 不得啟動第二套頁面捲動控制'
+);
+assert.match(
+  configuratorAppSource,
+  /function nativeViewportManagesEditingScroll[\s\S]*?if \(nativeViewportManagesEditingScroll\(metrics\)\) \{[\s\S]*?extendEditingBoundaryToCurrentScroll\(\);[\s\S]*?return;/,
+  '手機鍵盤開啟時應只放寬目前步驟邊界，並交由瀏覽器維持 caret 可見'
+);
+assert.match(
+  configuratorAppSource,
+  /if \(editingControl && window\.visualViewport\) \{[\s\S]*?requestUpdate\(\{ preserveActiveStep: true \}\);[\s\S]*?return;/,
+  '輸入期間的 window.resize 不得繞過 visual viewport 的合併處理再校正一次'
+);
+assert.match(
+  configuratorAppSource,
+  /if \(heightChanged \|\| widthChanged \|\| keyboardStateChanged\) \{[\s\S]*?scheduleFocusedControlVisibility\(\{ afterViewportSettles: true \}\);/,
   'Safari offset-only visual viewport 位移不得反覆觸發頁面捲動校正'
 );
 assert.match(
@@ -756,20 +1035,49 @@ assert.match(
   '輸入期間應停用 scroll anchoring，避免搜尋結果重建讓頁面跳動'
 );
 assert.match(
-  configuratorHtml,
-  /TSCHOOL_GENERATION_ASSETS_READY = Promise[\s\S]*?all\(generationDependencies\.map\(loadScript\)\)[\s\S]*?Promise\.all\(coreDependencies\.map\(loadScript\)\)[\s\S]*?loadScript\('app\.js'\)/,
-  '核心與程式碼產生資產應平行下載，主應用程式不得等待最後一步才使用的模板'
+  configuratorStylesSource,
+  /html\[data-input-active\] \{[\s\S]*?scroll-padding-bottom: var\(--space-4\);/,
+  '輸入期間的 root scroll padding 不得重複加入鍵盤高度'
 );
+assert.match(
+  configuratorStylesSource,
+  /\.hero-stage\.is-rendering-paused \.hero-visual \{\s*visibility: hidden;/,
+  'Hero 離屏時應停止整個視覺場景的繪製'
+);
+assert.match(
+  configuratorAppSource,
+  /const toast = document\.getElementById\('toast'\);[\s\S]*?\(toast \|\| document\.documentElement\)\.style\.setProperty\(\s*'--keyboard-inset'/,
+  '鍵盤 inset 應只更新實際使用它的 toast，不得讓整份文件重新計算繼承樣式'
+);
+assert.match(
+  configuratorAppSource,
+  /function setFieldState\(field, stateValue\)[\s\S]*?if \(previousState === nextState\) \{\s*return;/,
+  'Email 有效性未跨狀態時不得重寫 DOM 與 ARIA 屬性'
+);
+const courseSelectionChangeSource = configuratorAppSource.slice(
+  configuratorAppSource.indexOf('function handleCourseSelectionChange(event)'),
+  configuratorAppSource.indexOf('function renderCourses()')
+);
+assert.equal(
+  courseSelectionChangeSource.includes('renderCourses()'),
+  false,
+  '勾選單一課程或活動時不得重建整份課程清單'
+);
+assert.equal(
+  courseSelectionChangeSource.includes('renderSelectionCounts()'),
+  true,
+  '清單不重建時仍應原地更新選取統計'
+);
+assert.equal(configuratorHtml.includes('TSCHOOL_GENERATION_ASSETS_READY'), false);
+assert.equal(configuratorHtml.includes("'setup-code.js'"), true);
+assert.equal(configuratorHtml.includes("'sidebar-template.js'"), false);
+assert.equal(configuratorHtml.includes("'code-template.js'"), false);
 assert.equal(
   configuratorHtml.includes('assets.reduce(function'),
   false,
   '啟動資產不得逐一串行下載'
 );
-assert.match(
-  configuratorAppSource,
-  /async function generateOutput\(\)[\s\S]*?await window\.TSCHOOL_GENERATION_ASSETS_READY/,
-  '使用者比模板下載更早完成設定時，產生 Code.gs 必須等待模板就緒'
-);
+assert.match(configuratorAppSource, /async function generateOutput\(\)[\s\S]*?TSchoolSetupCode\.encode/);
 const codeMaskStyles = configuratorStylesSource.match(
   /\.control-panel-card \.code-window::after \{([\s\S]*?)\n\}/
 )?.[1] || '';
@@ -871,9 +1179,61 @@ assert.deepEqual(
   '剛好 5 節的正式課程不得被節數邊界誤判為活動'
 );
 
+const roundTripSetupCode = setupCode.encode({
+  appVersion: '2.0.0-rc.1',
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  sourceFingerprint: '來源-😀-指紋',
+  setupSourceSnapshot: {
+    firstDateKey: '2026-02-23',
+    lastDateKey: '2026-08-30',
+    sourceUpdatedLabel: '更新時間\n08011200',
+    items: [
+      { title: '公民／社會探究', type: 'course', period: 'term' },
+      { title: '全校活動（上午）', type: 'activity', period: 'term' }
+    ]
+  },
+  selectedCourses: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
+  includeActivities: true,
+  excludedActivities: ['全校活動（上午）'],
+  notificationEmail: 'student+sync@example.com',
+  instantNotificationsEnabled: false,
+  notificationHours: [22, 6, 12, 18]
+}, { createdAt: '2026-08-01T00:00:00.000Z' });
+const decodedSetupCode = setupCode.decode(roundTripSetupCode);
+assert.equal(roundTripSetupCode.startsWith('TSCHOOL_SETUP_V1.'), true);
+assert.deepEqual(decodedSetupCode, {
+  schemaVersion: 1,
+  createdAt: '2026-08-01T00:00:00.000Z',
+  generatorVersion: '2.0.0-rc.1',
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  sourceFingerprint: '來源-😀-指紋',
+  selectedCourses: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
+  includeActivities: true,
+  excludedActivities: ['全校活動（上午）'],
+  notificationEmail: 'student+sync@example.com',
+  instantNotificationsEnabled: false,
+  notificationHours: [6, 12, 18, 22],
+  sourceSnapshot: {
+    firstDateKey: '2026-02-23',
+    lastDateKey: '2026-08-30',
+    sourceUpdatedLabel: '更新時間\n08011200',
+    items: [
+      { title: '公民／社會探究', type: 'course', period: 'term' },
+      { title: '全校活動（上午）', type: 'activity', period: 'term' }
+    ]
+  }
+});
+assert.throws(() => setupCode.decode(''), /請貼上設定碼/);
+assert.throws(() => setupCode.decode('WRONG.abc.123'), /不是可用/);
+assert.throws(() => setupCode.decode(roundTripSetupCode.slice(0, -1) + 'x'), /不完整/);
+assert.throws(() => setupCode.decode('x'.repeat(setupCode.MAX_CODE_LENGTH + 1)), /過長/);
+
 const generatedCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-rc.1',
   sourceApiUrl: scheduleData.API_URL,
+  emailTemplateManifestUrl: immutableManifestUrl,
   gradeName: '高一',
   calendarName: 'T-SCHOOL 課表',
   notificationEmail: 'test@example.com',
@@ -892,7 +1252,100 @@ const generatedCode = global.buildAppsScriptCode({
   initialKnownTitles: []
 });
 
+assert.throws(
+  () => global.buildAppsScriptCode({
+    sourceApiUrl: 'https://script.googleusercontent.com/macros/echo?user_content_key=secret',
+    emailTemplateManifestUrl: immutableManifestUrl
+  }),
+  /published Apps Script \/exec sourceApiUrl/,
+  '通用程式不得保存重新導向後的 tokenized 課表網址'
+);
 assert.doesNotThrow(() => new Function(generatedCode));
+assert.match(
+  generatedCode,
+  /^\/\*\*[\s\S]*?@OnlyCurrentDoc[\s\S]*?\*\//,
+  '產生的 Code.gs 應將 Google Docs 權限限制在目前控制臺文件'
+);
+const appsScriptManifest = controlPanelGenerator.buildAppsScriptManifest();
+assert.equal(controlPanelGenerator.parseArguments([]).appVersion, '2.0.0-rc.2');
+assert.deepEqual(
+  appsScriptManifest.oauthScopes.slice().sort(),
+  expectedAppsScriptOAuthScopes.slice().sort(),
+  'Apps Script manifest 必須精確維持目前功能所需的 8 項最小權限'
+);
+assert.equal(
+  new Set(appsScriptManifest.oauthScopes).size,
+  appsScriptManifest.oauthScopes.length,
+  'Apps Script manifest 不得重複要求同一項權限'
+);
+const generatorTempDirectory = fs.mkdtempSync(
+  path.join(os.tmpdir(), 'tschool-control-panel-generator-')
+);
+try {
+  const generatedArtifactPath = path.join(generatorTempDirectory, 'Code.gs');
+  const generatedManifestPath = path.join(generatorTempDirectory, 'appsscript.json');
+  const generatorResult = childProcess.spawnSync(
+    process.execPath,
+    [
+      path.join(root, 'scripts', 'generate-google-docs-control-panel.js'),
+      '--manifest-url',
+      immutableManifestUrl,
+      '--output',
+      generatedArtifactPath
+    ],
+    { cwd: root, encoding: 'utf8' }
+  );
+  assert.equal(
+    generatorResult.status,
+    0,
+    '正式產生器應成功輸出 Code.gs 與 appsscript.json：' + generatorResult.stderr
+  );
+  assert.equal(fs.existsSync(generatedArtifactPath), true);
+  assert.equal(fs.existsSync(generatedManifestPath), true);
+  const generatedArtifact = fs.readFileSync(generatedArtifactPath, 'utf8');
+  const generatedManifest = JSON.parse(fs.readFileSync(generatedManifestPath, 'utf8'));
+  assert.doesNotThrow(() => new Function(generatedArtifact));
+  assert.match(generatedArtifact, /^\/\*\*[\s\S]*?@OnlyCurrentDoc[\s\S]*?\*\//);
+  assert.equal(generatedArtifact.includes('const HIGH_LOAD_TEST_CONFIG_STORE'), false);
+  assert.deepEqual(
+    generatedManifest.oauthScopes.slice().sort(),
+    expectedAppsScriptOAuthScopes.slice().sort(),
+    '實際寫出的 appsscript.json 也必須維持精確權限集合'
+  );
+  assert.deepEqual(
+    generatedManifest.dependencies,
+    appsScriptManifest.dependencies,
+    '實際寫出的 appsscript.json 必須啟用 Sheets v4 唯讀資料服務'
+  );
+
+  const missingManifestUrlResult = childProcess.spawnSync(
+    process.execPath,
+    [
+      path.join(root, 'scripts', 'generate-google-docs-control-panel.js'),
+      '--output',
+      path.join(generatorTempDirectory, 'missing-url.gs')
+    ],
+    { cwd: root, encoding: 'utf8' }
+  );
+  assert.notEqual(missingManifestUrlResult.status, 0);
+  assert.match(missingManifestUrlResult.stderr, /requires --manifest-url/);
+
+  const mutableManifestUrlResult = childProcess.spawnSync(
+    process.execPath,
+    [
+      path.join(root, 'scripts', 'generate-google-docs-control-panel.js'),
+      '--manifest-url',
+      'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/main/notification-email-templates.json',
+      '--output',
+      path.join(generatorTempDirectory, 'mutable-url.gs')
+    ],
+    { cwd: root, encoding: 'utf8' }
+  );
+  assert.notEqual(mutableManifestUrlResult.status, 0);
+  assert.match(mutableManifestUrlResult.stderr, /immutable emailTemplateManifestUrl/);
+} finally {
+  fs.rmSync(generatorTempDirectory, { recursive: true, force: true });
+}
 assert.equal(
   generatedCode.includes('const APP_VERSION = "2.0.0-rc.1";'),
   true,
@@ -900,6 +1353,7 @@ assert.equal(
 );
 [
   'getSettingsUiData',
+  'importSetupCodeFromUi',
   'getSourceCatalogForUi',
   'getSyncProgressForUi',
   'previewSettingsImpactFromUi',
@@ -926,8 +1380,120 @@ assert.equal(
   );
 });
 assert.equal(generatedCode.includes('COURSE_DICTIONARY'), false);
+assert.match(
+  generatedCode,
+  /function createDedicatedCalendarForUi\(input\)[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{ selected: true \}\)/,
+  '控制臺手動建立的專用 Calendar 應預設顯示'
+);
+assert.match(
+  generatedCode,
+  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?CalendarApp\.createCalendar\(buildDedicatedCalendarName_\(settings\), \{\s*selected: true\s*\}\)/,
+  '首次同步自動建立的專用 Calendar 應預設顯示'
+);
 assert.equal(generatedCode.includes('function previewSettingsImpactFromUi('), true);
 assert.equal(generatedCode.includes('function showSettingsSidebar('), true);
+assert.equal(generatedCode.includes('function showSetupImportDialog('), true);
+assert.equal(generatedCode.includes('function previewSetupCodeForUi('), true);
+assert.equal(generatedCode.includes('function activeGoogleAccountDoesNotMatch_('), true);
+assert.equal(generatedCode.includes('function importSetupCodeFromUi('), true);
+assert.equal(generatedCode.includes('function applySetupCodeFromUi('), true);
+assert.match(
+  generatedCode,
+  /function showSettingsSidebar\(\) \{\s*ScriptApp\.requireAllScopes\(ScriptApp\.AuthMode\.FULL\);\s*const settings = loadSettings_\(\);/,
+  '第一次開啟控制臺時必須先要求完整的既定 OAuth 權限，再讀取設定或顯示介面'
+);
+assert.equal(generatedCode.includes('lock.tryLock(3000)'), true);
+const quickDeleteFunctionSource = generatedCode.slice(
+  generatedCode.indexOf('function quickDeleteSyncedCalendarEvents()'),
+  generatedCode.indexOf('function removeManagedEventsFromCalendar_(')
+);
+assert.match(quickDeleteFunctionSource, /LockService\.getScriptLock\(\)/);
+assert.match(quickDeleteFunctionSource, /tryLock\(15000\)/);
+assert.match(
+  quickDeleteFunctionSource,
+  /try \{[\s\S]*?isActiveSyncJob_\(loadSyncJob_\(\)\)[\s\S]*?removeManagedEventsFromCalendar_[\s\S]*?finally \{\s*lock\.releaseLock\(\)/,
+  '移除事件的背景工作檢查與刪除必須位於同一把 Script Lock 內'
+);
+assert.equal(
+  (quickDeleteFunctionSource.match(/clearChunkedStore_\(/g) || []).length,
+  0,
+  '快速移除不得在 removeManagedEventsFromCalendar_ 已清除狀態後重複清除'
+);
+const resetSyncStateFunctionSource = generatedCode.slice(
+  generatedCode.indexOf('function resetSyncState()'),
+  generatedCode.indexOf('function sendScheduledNotifications()')
+);
+assert.match(resetSyncStateFunctionSource, /LockService\.getScriptLock\(\)/);
+assert.match(
+  resetSyncStateFunctionSource,
+  /try \{[\s\S]*?isActiveSyncJob_\(loadSyncJob_\(\)\)[\s\S]*?clearChunkedStore_\(SYNC_STATE_STORE\)[\s\S]*?finally \{\s*lock\.releaseLock\(\)/,
+  '重設狀態的背景工作檢查與清除必須位於同一把 Script Lock 內'
+);
+assert.equal(generatedCode.includes(".setTitle('行程同步控制臺')"), true);
+assert.equal(generatedCode.includes("showModalDialog(output, '匯入設定')"), true);
+assert.match(
+  generatedCode,
+  /function showSettingsSidebar\(\)[\s\S]*?!settings\.setupComplete && !hasSetupSourceContext_\(settings\)/,
+  '舊測試母版缺少初次載入快照時應回到匯入頁，不得再次卡在控制臺讀取'
+);
+assert.equal(generatedCode.includes('function loadCourseOutlineSourceIndexForUi_('), true);
+assert.match(
+  generatedCode,
+  /function buildUiData_\([\s\S]*?loadCourseOutlineSourceIndexForUi_\(\)/,
+  '控制臺初次顯示不得同步開啟中央課綱索引試算表'
+);
+assert.equal(generatedCode.includes('function isTransientInitialLoadError(error)'), true);
+assert.match(
+  generatedCode,
+  /function loadInitialUi\(\)[\s\S]*?isTransientInitialLoadError\(error\)[\s\S]*?setTimeout\(loadInitialUi, INITIAL_LOAD_RETRY_DELAY_MS\)/,
+  '控制臺初次讀取碰到暫時鎖定時應自動重試，不得停在空白畫面'
+);
+assert.equal(generatedCode.includes('function getControlPanelUi_('), true);
+assert.equal(generatedCode.includes('function getControlPanelUrl_('), true);
+assert.equal(generatedCode.includes('SpreadsheetApp.getUi('), false);
+assert.equal(generatedCode.includes('SpreadsheetApp.getActiveSpreadsheet('), false);
+assert.equal(generatedCode.includes('DocumentApp.getUi('), true);
+assert.equal(generatedCode.includes('DocumentApp.getActiveDocument('), true);
+assert.equal(generatedCode.includes('SpreadsheetApp.openById('), false);
+assert.equal(generatedCode.includes('Sheets.Spreadsheets.get('), true);
+assert.equal(generatedCode.includes('Sheets.Spreadsheets.Values.batchGet('), true);
+[
+  'DriveApp.',
+  'GmailApp.',
+  'Sheets.Spreadsheets.batchUpdate(',
+  'Sheets.Spreadsheets.Values.append(',
+  'Sheets.Spreadsheets.Values.batchUpdate(',
+  'Sheets.Spreadsheets.Values.clear(',
+  'Sheets.Spreadsheets.Values.update(',
+  '.appendRow(',
+  '.clearContent(',
+  '.clearContents(',
+  '.deleteSheet(',
+  '.insertSheet(',
+  '.setFormula(',
+  '.setFormulas(',
+  '.setValue(',
+  '.setValues('
+].forEach(forbiddenToken => {
+  assert.equal(
+    generatedCode.includes(forbiddenToken),
+    false,
+    '唯讀課綱程式不得出現未核准服務或試算表寫入 API：' + forbiddenToken
+  );
+});
+assert.deepEqual(
+  controlPanelGenerator.buildAppsScriptManifest().dependencies,
+  {
+    enabledAdvancedServices: [{
+      userSymbol: 'Sheets',
+      version: 'v4',
+      serviceId: 'sheets'
+    }]
+  },
+  '母版 manifest 應只啟用 Sheets v4 進階服務，以唯讀 API 取代 SpreadsheetApp.openById'
+);
+assert.equal(generatedCode.includes('test@example.com'), false);
+assert.equal(generatedCode.includes('const HIGH_LOAD_TEST_CONFIG_STORE'), false);
 assert.equal(generatedCode.includes('function getNotificationTemplate_('), true);
 assert.equal(generatedCode.includes('function buildEmailHtmlSafe_('), true);
 assert.equal(generatedCode.includes('function getVacationWeekNumbersFromPayload_('), true);
@@ -1005,12 +1571,13 @@ assert.equal(
   true,
   '通知時間與背景同步重疊時應能延後重試，不得遺失待寄異動'
 );
-assert.equal(generatedCode.includes("ui.createMenu('高負載測試')"), true);
+assert.equal(generatedCode.includes("ui.createMenu('高負載測試')"), false);
 assert.equal(generatedCode.includes('function setupHighLoadTestEnvironment('), false);
 
 const highLoadGeneratedCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-rc.1',
   sourceApiUrl: scheduleData.API_URL,
+  emailTemplateManifestUrl: immutableManifestUrl,
   gradeName: '高二',
   notificationEmail: 'test@example.com',
   notificationHours: [6],
@@ -1039,11 +1606,9 @@ assert.equal(
   true,
   '高負載情境應沿用控制臺的儲存並首次同步入口'
 );
-assert.equal(
-  highLoadGeneratedCode.includes(
-    'return parseSchedulePayload_(payload, gradeName, scheduleBusinessNow_());'
-  ),
-  true,
+assert.match(
+  highLoadGeneratedCode,
+  /const source = parseSchedulePayload_\(payload, cleanGrade, scheduleBusinessNow_\(\)\);/,
   '首次同步及背景續跑應持續使用模擬的開學日期'
 );
 assert.equal(
@@ -1116,11 +1681,229 @@ const context = vm.createContext({
     formatDate(dateValue, timezone, pattern) {
       assert.equal(timezone, 'Asia/Taipei');
       return formatDate(dateValue, pattern);
+    },
+    sleep() {},
+    base64DecodeWebSafe(value) {
+      return Array.from(Buffer.from(String(value).replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
+    },
+    newBlob(bytes) {
+      return {
+        getDataAsString(encoding) {
+          assert.equal(encoding, 'UTF-8');
+          return Buffer.from(bytes).toString('utf8');
+        }
+      };
     }
   }
 });
 
 vm.runInContext(generatedCode, context);
+
+function makeOwnedCalendarForListTest(id, name) {
+  const calls = { getId: 0, getName: 0 };
+  return {
+    calls,
+    getId() {
+      calls.getId += 1;
+      return id;
+    },
+    getName() {
+      calls.getName += 1;
+      return name;
+    }
+  };
+}
+const defaultCalendarForListTest = makeOwnedCalendarForListTest('default', '主要日曆');
+const calendarBForListTest = makeOwnedCalendarForListTest('calendar-b', 'B 日曆');
+const calendarAForListTest = makeOwnedCalendarForListTest('calendar-a', 'A 日曆');
+context.CalendarApp = {
+  getDefaultCalendar() {
+    return defaultCalendarForListTest;
+  },
+  getAllOwnedCalendars() {
+    return [
+      defaultCalendarForListTest,
+      calendarBForListTest,
+      calendarAForListTest
+    ];
+  }
+};
+assert.deepEqual(
+  JSON.parse(JSON.stringify(context.listOwnedCalendars_())),
+  [
+    { id: 'calendar-a', name: 'A 日曆' },
+    { id: 'calendar-b', name: 'B 日曆' }
+  ]
+);
+assert.equal(calendarAForListTest.calls.getId, 1);
+assert.equal(calendarBForListTest.calls.getId, 1);
+assert.equal(defaultCalendarForListTest.calls.getName, 0);
+delete context.CalendarApp;
+assert.throws(
+  () => context.assertSheetsReadonlyServiceAvailable_(),
+  /更新 appsscript\.json/,
+  '母版漏裝 Sheets v4 進階服務時應顯示可操作的修正方式'
+);
+
+let scheduleFetchStatus = 200;
+let scheduleFetchBody = JSON.stringify(vacationCatalogPayload);
+let scheduleFetchCallCount = 0;
+context.UrlFetchApp = {
+  fetch(url, options) {
+    scheduleFetchCallCount += 1;
+    assert.equal(
+      url,
+      scheduleData.API_URL + '?grade=' + encodeURIComponent('一年級'),
+      'Apps Script 應只向正式課表端點要求指定年級'
+    );
+    assert.equal(options.followRedirects, true);
+    assert.equal(options.muteHttpExceptions, true);
+    const responseStatus = Array.isArray(scheduleFetchStatus)
+      ? scheduleFetchStatus.shift()
+      : scheduleFetchStatus;
+    return {
+      getResponseCode() {
+        return responseStatus;
+      },
+      getContentText(encoding) {
+        assert.equal(encoding, 'UTF-8');
+        return scheduleFetchBody;
+      }
+    };
+  }
+};
+assert.equal(context.fetchSchedulePayload_('高一').currentGrade, '一年級');
+assert.equal(scheduleFetchCallCount, 1);
+scheduleFetchStatus = [302, 404, 200];
+assert.equal(
+  context.fetchSchedulePayload_('高一').currentGrade,
+  '一年級',
+  '正式 /exec 短暫回傳 302 或 404 時應重新要求同一正式網址'
+);
+assert.equal(scheduleFetchCallCount, 4);
+scheduleFetchStatus = 503;
+assert.throws(() => context.fetchSchedulePayload_('高一'), /HTTP 503/);
+assert.equal(scheduleFetchCallCount, 7, '暫時性 5xx 應有界重試三次');
+scheduleFetchStatus = 200;
+scheduleFetchBody = '{not-json';
+assert.throws(() => context.fetchSchedulePayload_('高一'), /不是有效的 JSON/);
+scheduleFetchBody = JSON.stringify(Object.assign({}, vacationCatalogPayload, {
+  currentGrade: '二年級'
+}));
+assert.throws(() => context.fetchSchedulePayload_('高一'), /錯誤的年級/);
+
+const originalFetchSchedulePayload = context.fetchSchedulePayload_;
+const originalParseSchedulePayload = context.parseSchedulePayload_;
+let executionLocalSourceFetches = 0;
+let executionLocalSourceParses = 0;
+context.fetchSchedulePayload_ = gradeName => {
+  executionLocalSourceFetches += 1;
+  return { gradeName };
+};
+context.parseSchedulePayload_ = (payload, gradeName) => {
+  executionLocalSourceParses += 1;
+  return { gradeName, payload, marker: executionLocalSourceParses };
+};
+context.resetScheduleSourceRuntimeCache_();
+const firstExecutionSource = context.loadSourceContext_('高一');
+const repeatedExecutionSource = context.loadSourceContext_('高一');
+assert.equal(repeatedExecutionSource, firstExecutionSource);
+assert.equal(executionLocalSourceFetches, 1, '同一次執行、同一年級只應下載一次課表');
+assert.equal(executionLocalSourceParses, 1, '同一次執行、同一年級只應解析一次課表');
+context.loadSourceContext_('高二');
+assert.equal(executionLocalSourceFetches, 2, '不同年級必須使用各自的課表快取項目');
+context.resetScheduleSourceRuntimeCache_();
+context.loadSourceContext_('高一');
+assert.equal(executionLocalSourceFetches, 3, '下一次執行的等價重設必須重新取得課表');
+context.fetchSchedulePayload_ = originalFetchSchedulePayload;
+context.parseSchedulePayload_ = originalParseSchedulePayload;
+context.resetScheduleSourceRuntimeCache_();
+
+const currentSetupSource = {
+  termKey: '二年級|2026-02-23',
+  fingerprint: 'current-source-fingerprint',
+  catalog: {
+    courses: [{ title: '公民／社會探究' }],
+    activities: [{ title: '全校活動（上午）' }],
+    all: [{ title: '公民／社會探究' }, { title: '全校活動（上午）' }]
+  }
+};
+let setupPreviewLiveFetchCount = 0;
+context.loadSourceContext_ = () => {
+  setupPreviewLiveFetchCount += 1;
+  return currentSetupSource;
+};
+const setupPreview = context.buildSetupImportPreview_(roundTripSetupCode, {});
+assert.equal(
+  setupPreviewLiveFetchCount,
+  0,
+  '新版設定碼應直接使用內嵌的唯讀課表摘要，匯入時不得等待課表端點'
+);
+assert.deepEqual(Array.from(setupPreview.selectedCourses), ['公民／社會探究']);
+assert.deepEqual(
+  Array.from(setupPreview.missingItems),
+  ['從巴士底到車諾比：歷史', '程式設計 & AI']
+);
+assert.equal(setupPreview.sourceChanged, true);
+const legacySetupCode = setupCode.encode({
+  appVersion: '2.0.0-rc.1',
+  gradeName: '高二',
+  termKey: currentSetupSource.termKey,
+  sourceFingerprint: currentSetupSource.fingerprint,
+  selectedCourses: ['公民／社會探究'],
+  includeActivities: true,
+  excludedActivities: ['全校活動（上午）'],
+  notificationEmail: 'student+sync@example.com',
+  instantNotificationsEnabled: false,
+  notificationHours: [6, 12, 18, 22]
+});
+const firstConfirmationToken = context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken;
+context.loadSourceContext_ = () => Object.assign({}, currentSetupSource, {
+  fingerprint: 'newer-source-fingerprint'
+});
+assert.notEqual(
+  context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken,
+  firstConfirmationToken,
+  '來源再次變動後，既有 confirmationToken 必須失效'
+);
+context.loadSourceContext_ = () => currentSetupSource;
+const crossTermCode = setupCode.encode({
+  gradeName: '高二',
+  termKey: '二年級|2025-09-01',
+  sourceFingerprint: 'old',
+  selectedCourses: ['公民／社會探究'],
+  includeActivities: true,
+  excludedActivities: [],
+  notificationEmail: 'student@example.com',
+  instantNotificationsEnabled: true,
+  notificationHours: [6]
+});
+assert.throws(
+  () => context.buildSetupImportPreview_(crossTermCode, {}),
+  /不同學期/,
+  '跨學期設定碼必須拒絕匯入'
+);
+const invalidEmailCode = setupCode.encode({
+  gradeName: '高二',
+  termKey: currentSetupSource.termKey,
+  sourceFingerprint: currentSetupSource.fingerprint,
+  selectedCourses: ['公民／社會探究'],
+  includeActivities: true,
+  excludedActivities: [],
+  notificationEmail: 'not-an-email',
+  instantNotificationsEnabled: true,
+  notificationHours: [6]
+});
+assert.throws(() => context.buildSetupImportPreview_(invalidEmailCode, {}), /Email/);
+const unsupportedPayload = Object.assign({}, decodedSetupCode, { schemaVersion: 99 });
+const unsupportedEncoded = Buffer.from(JSON.stringify(unsupportedPayload), 'utf8')
+  .toString('base64url');
+const unsupportedCode = [
+  setupCode.PREFIX,
+  unsupportedEncoded,
+  setupCode.hashText(unsupportedEncoded)
+].join('.');
+assert.throws(() => context.decodeSetupCode_(unsupportedCode), /版本不受支援/);
 
 assert.equal(
   context.describeCourseOutlineStatusForUser_({
@@ -1294,13 +2077,14 @@ function recordGeneratedMenus(generatedAppsScriptCode) {
   const menuContext = vm.createContext({
     console,
     Intl,
-    SpreadsheetApp: {
+    DocumentApp: {
       getUi() {
         return { createMenu };
       }
     }
   });
   vm.runInContext(generatedAppsScriptCode, menuContext);
+  menuContext.loadSettings_ = () => ({ setupImportedAt: '2026-08-01T00:00:00.000Z', setupCodeVersion: 1 });
   menuContext.onOpen();
   return menuNames;
 }
@@ -1403,6 +2187,7 @@ if (fs.existsSync('/tmp/tschool-requirements-grade2.json')) {
 const noActivityCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-rc.1',
   sourceApiUrl: scheduleData.API_URL,
+  emailTemplateManifestUrl: immutableManifestUrl,
   gradeName: '高二',
   notificationEmail: 'test@example.com',
   notificationHours: [6],
@@ -1417,25 +2202,14 @@ vm.runInContext(noActivityCode, noActivityContext);
 const noActivitySettings = vm.runInContext('DEFAULT_SETTINGS', noActivityContext);
 assert.equal(
   noActivitySettings.calendarName,
-  '高二行程｜T-SCHOOL Schedule Sync',
-  '新程式碼應使用隨年級變動的專用日曆名稱'
+  '',
+  '通用程式在匯入前不得預設個人日曆名稱'
 );
-assert.equal(
-  noActivityContext.shouldIncludeEvent_({ type: 'activity', originalTitle: '高二全校活動' }, noActivitySettings),
-  false,
-  '取消所有活動後不應同步已知活動'
-);
-assert.equal(
-  noActivityContext.shouldIncludeEvent_({ type: 'activity', originalTitle: '新發現活動' }, noActivitySettings),
-  false,
-  '取消所有活動後不應自動同步新活動'
-);
-noActivitySettings.pendingTitles = ['新發現活動'];
-assert.equal(
-  noActivityContext.shouldIncludeEvent_({ type: 'activity', originalTitle: '新發現活動' }, noActivitySettings),
-  false,
-  '取消所有活動後，待確認清單也不得繞過活動總開關'
-);
+assert.equal(noActivitySettings.gradeName, '');
+assert.equal(noActivitySettings.notificationEmail, '');
+assert.deepEqual(Array.from(noActivitySettings.selectedCourses), []);
+assert.equal(noActivityCode.includes('test@example.com'), false);
+assert.equal(noActivityCode.includes('高二全校活動'), false);
 
 assert.equal(context.getConfiguredCourseOutlineSourceSets_('高一').length, 0);
 assert.equal(context.getConfiguredCourseOutlineSourceSets_('高三').length, 0);
@@ -1486,6 +2260,32 @@ assert.equal(parsedOutline.records[0].dateKey, '2026-07-27');
 assert.equal(parsedOutline.records[0].periodStart, 5);
 assert.equal(parsedOutline.records[0].periodEnd, 6);
 assert.equal(parsedOutline.records[1].topic, '跨節主題');
+assert.equal(
+  context.resolveCourseOutlineDateKey_(
+    '7/27',
+    ['2026-07-27', '2026-07-27']
+  ),
+  '2026-07-27',
+  '直接解析重複日期候選時仍須先去重，不能改變原本的唯一命中規則'
+);
+const originalUniqueExactStrings = context.uniqueExactStrings_;
+let outlineCandidateDedupeCalls = 0;
+context.uniqueExactStrings_ = values => {
+  outlineCandidateDedupeCalls += 1;
+  return originalUniqueExactStrings(values);
+};
+context.parseCourseOutlineSheetValues_(
+  outlineValues,
+  '測試課程',
+  outlineDesiredEvents,
+  { sourceSetKey: '114-2-high2', spreadsheetId: 'sheet-id', spreadsheetName: '課綱' }
+);
+context.uniqueExactStrings_ = originalUniqueExactStrings;
+assert.equal(
+  outlineCandidateDedupeCalls,
+  1,
+  '同一課綱分頁的日期候選只應去重一次，不得每列重做'
+);
 
 const mergedTopicValues = [
   ['日期', '節次', '實體課程教室', '單元主題', '課程內容'],
@@ -1503,6 +2303,20 @@ const expandedMergedTopicValues = context.expandVerticalMergedCourseOutlineValue
   }]
 );
 assert.equal(expandedMergedTopicValues[2][3], '合併單元主題');
+const expandedSheetsApiMergedValues = context.expandVerticalMergedCourseOutlineValues_(
+  mergedTopicValues,
+  [{
+    startRowIndex: 1,
+    endRowIndex: 3,
+    startColumnIndex: 3,
+    endColumnIndex: 4
+  }]
+);
+assert.equal(
+  expandedSheetsApiMergedValues[2][3],
+  '合併單元主題',
+  'Sheets API 的零起算 merge GridRange 必須與既有 SpreadsheetApp 合併範圍等價'
+);
 const parsedMergedTopicOutline = context.parseCourseOutlineSheetValues_(
   expandedMergedTopicValues,
   '測試課程',
@@ -1563,6 +2377,251 @@ const outlineStateKey = context.makeOccurrenceKey_(outlineBaseItem);
 assert.equal(context.makeOccurrenceKey_(oldOutlineItem), context.makeOccurrenceKey_(newOutlineItem));
 assert.equal(context.normalizeTitle_(' 國 語 文　'), '國語文');
 assert.equal(context.normalizeTitle_('數學Ａ'), context.normalizeTitle_('數學A'));
+
+function buildSyncPlanReference(oldState, desiredEvents, todayKey) {
+  const oldFuture = Object.keys(oldState)
+    .map(key => Object.assign({ stateKey: key }, oldState[key]))
+    .filter(item => item.dateKey >= todayKey);
+  const oldPast = Object.keys(oldState)
+    .filter(key => oldState[key].dateKey < todayKey)
+    .reduce((result, key) => {
+      result[key] = oldState[key];
+      return result;
+    }, {});
+  const oldByKey = {};
+  oldFuture.forEach(item => {
+    oldByKey[item.stateKey] = item;
+  });
+
+  const exact = [];
+  const unmatchedNew = [];
+  const matchedOld = {};
+  desiredEvents.forEach(event => {
+    const key = context.makeOccurrenceKey_(event);
+    if (oldByKey[key]) {
+      exact.push({ oldItem: oldByKey[key], newItem: event, newKey: key });
+      matchedOld[key] = true;
+    } else {
+      unmatchedNew.push(event);
+    }
+  });
+
+  const unmatchedOld = oldFuture.filter(item => !matchedOld[item.stateKey]);
+  const moved = [];
+  const usedOld = {};
+  const stillNew = [];
+  unmatchedNew.forEach(newItem => {
+    const candidates = unmatchedOld
+      .filter(oldItem =>
+        !usedOld[oldItem.stateKey] &&
+        context.normalizeTitle_(oldItem.originalTitle) ===
+          context.normalizeTitle_(newItem.originalTitle)
+      )
+      .map(oldItem => ({
+        oldItem,
+        distance: Math.abs(new Date(oldItem.start).getTime() - newItem.start.getTime())
+      }))
+      .filter(candidate => candidate.distance <= 21 * 24 * 60 * 60 * 1000)
+      .sort((left, right) => left.distance - right.distance);
+    const best = candidates.length &&
+      (candidates.length === 1 || candidates[0].distance < candidates[1].distance)
+      ? candidates[0]
+      : null;
+    if (best) {
+      usedOld[best.oldItem.stateKey] = true;
+      moved.push({
+        oldItem: best.oldItem,
+        newItem,
+        newKey: context.makeOccurrenceKey_(newItem)
+      });
+    } else {
+      stillNew.push(newItem);
+    }
+  });
+
+  return {
+    oldPast,
+    oldFutureCount: oldFuture.length,
+    exact,
+    moved,
+    additions: stillNew,
+    deletions: unmatchedOld.filter(item => !usedOld[item.stateKey])
+  };
+}
+
+function summarizeSyncPlan(plan) {
+  return JSON.parse(JSON.stringify({
+    oldPast: plan.oldPast,
+    oldFutureCount: plan.oldFutureCount,
+    exact: plan.exact.map(pair => [
+      pair.oldItem.stateKey,
+      pair.newItem.testId,
+      pair.newKey
+    ]),
+    moved: plan.moved.map(pair => [
+      pair.oldItem.stateKey,
+      pair.newItem.testId,
+      pair.newKey
+    ]),
+    additions: plan.additions.map(item => item.testId),
+    deletions: plan.deletions.map(item => item.stateKey)
+  }));
+}
+
+function makePlanTestItem(title, date, location, period, testId) {
+  return {
+    testId,
+    originalTitle: title,
+    dateKey: date.toISOString().slice(0, 10),
+    isAllDay: false,
+    periodStart: period,
+    periodEnd: period,
+    location,
+    start: new Date(date.getTime()),
+    end: new Date(date.getTime() + 50 * 60 * 1000)
+  };
+}
+
+const planTieCenter = new Date('2026-08-15T09:00:00.000Z');
+const planTieOldBefore = makePlanTestItem(
+  '同名課程',
+  new Date(planTieCenter.getTime() - 24 * 60 * 60 * 1000),
+  'A',
+  1,
+  'old-before'
+);
+const planTieOldAfter = makePlanTestItem(
+  '同名課程',
+  new Date(planTieCenter.getTime() + 24 * 60 * 60 * 1000),
+  'B',
+  1,
+  'old-after'
+);
+const planTieState = {
+  [context.makeOccurrenceKey_(planTieOldBefore)]: Object.assign({}, planTieOldBefore, {
+    start: planTieOldBefore.start.toISOString()
+  }),
+  [context.makeOccurrenceKey_(planTieOldAfter)]: Object.assign({}, planTieOldAfter, {
+    start: planTieOldAfter.start.toISOString()
+  })
+};
+const tiedMovePlan = context.buildSyncPlan_(
+  planTieState,
+  [makePlanTestItem('同名課程', planTieCenter, 'C', 1, 'new-tied')],
+  '2026-08-01'
+);
+assert.equal(tiedMovePlan.moved.length, 0);
+assert.equal(tiedMovePlan.additions.length, 1);
+assert.equal(tiedMovePlan.deletions.length, 2);
+
+const moveBoundaryOld = makePlanTestItem(
+  '__proto__',
+  new Date('2026-08-02T09:00:00.000Z'),
+  '舊地點',
+  1,
+  'boundary-old'
+);
+const moveBoundaryState = {
+  [context.makeOccurrenceKey_(moveBoundaryOld)]: Object.assign({}, moveBoundaryOld, {
+    start: moveBoundaryOld.start.toISOString()
+  })
+};
+assert.equal(
+  context.buildSyncPlan_(
+    moveBoundaryState,
+    [makePlanTestItem(
+      '__proto__',
+      new Date(moveBoundaryOld.start.getTime() + 21 * 24 * 60 * 60 * 1000),
+      '新地點',
+      2,
+      'boundary-new'
+    )],
+    '2026-08-01'
+  ).moved.length,
+  1,
+  '移動配對必須包含恰好 21 日的邊界，且特殊標題不得碰撞物件原型'
+);
+assert.equal(
+  context.buildSyncPlan_(
+    moveBoundaryState,
+    [makePlanTestItem(
+      '__proto__',
+      new Date(moveBoundaryOld.start.getTime() + 21 * 24 * 60 * 60 * 1000 + 1),
+      '新地點',
+      2,
+      'outside-boundary-new'
+    )],
+    '2026-08-01'
+  ).moved.length,
+  0,
+  '超過 21 日一毫秒不得誤判為移動'
+);
+
+let planRandomState = 0x6d2b79f5;
+function nextPlanRandom() {
+  planRandomState = (Math.imul(planRandomState, 1664525) + 1013904223) >>> 0;
+  return planRandomState / 0x100000000;
+}
+function nextPlanInteger(limit) {
+  return Math.floor(nextPlanRandom() * limit);
+}
+const planTitles = ['Alpha', ' ALPHA ', 'Ｂeta', 'Beta', '__proto__', '課 程'];
+const planBaseMs = Date.parse('2026-08-01T09:00:00.000Z');
+for (let caseIndex = 0; caseIndex < 1500; caseIndex += 1) {
+  const oldState = {};
+  const oldItems = [];
+  const oldCount = nextPlanInteger(13);
+  for (let oldIndex = 0; oldIndex < oldCount; oldIndex += 1) {
+    const dayOffset = nextPlanInteger(46) - 5;
+    const date = new Date(
+      planBaseMs + dayOffset * 24 * 60 * 60 * 1000 +
+      nextPlanInteger(4) * 30 * 60 * 1000
+    );
+    const item = makePlanTestItem(
+      planTitles[nextPlanInteger(planTitles.length)],
+      date,
+      'old-' + caseIndex + '-' + oldIndex,
+      oldIndex % 8 + 1,
+      'old-' + oldIndex
+    );
+    const stateKey = context.makeOccurrenceKey_(item);
+    oldState[stateKey] = Object.assign({}, item, { start: item.start.toISOString() });
+    oldItems.push(item);
+  }
+
+  const desiredEvents = [];
+  const desiredCount = nextPlanInteger(13);
+  for (let newIndex = 0; newIndex < desiredCount; newIndex += 1) {
+    if (oldItems.length && nextPlanRandom() < 0.3) {
+      const source = oldItems[nextPlanInteger(oldItems.length)];
+      desiredEvents.push(Object.assign({}, source, {
+        testId: 'new-' + newIndex,
+        start: new Date(source.start.getTime()),
+        end: new Date(source.end.getTime())
+      }));
+      continue;
+    }
+    const dayOffset = nextPlanInteger(46);
+    const date = new Date(
+      planBaseMs + dayOffset * 24 * 60 * 60 * 1000 +
+      nextPlanInteger(4) * 30 * 60 * 1000
+    );
+    desiredEvents.push(makePlanTestItem(
+      planTitles[nextPlanInteger(planTitles.length)],
+      date,
+      'new-' + caseIndex + '-' + newIndex,
+      newIndex % 8 + 1,
+      'new-' + newIndex
+    ));
+  }
+
+  assert.deepEqual(
+    summarizeSyncPlan(context.buildSyncPlan_(oldState, desiredEvents, '2026-08-01')),
+    summarizeSyncPlan(buildSyncPlanReference(oldState, desiredEvents, '2026-08-01')),
+    '標題分桶最佳化必須與原配對演算法逐項等價，隨機案例 ' + caseIndex
+  );
+}
+
 assert.equal(
   context.makeBaseEventSignature_(oldOutlineItem, outlineSettings),
   context.makeBaseEventSignature_(newOutlineItem, outlineSettings)
@@ -1759,8 +2818,10 @@ assert.equal(outlineOnlyResult.outlineUpdated, 1);
 assert.equal(outlineOnlyResult.changes.length, 0, '純課綱更新不應列入行程調整通知');
 
 const scriptPropertiesData = {};
+const scriptPropertyGetCounts = {};
 const scriptProperties = {
   getProperty(key) {
+    scriptPropertyGetCounts[key] = (scriptPropertyGetCounts[key] || 0) + 1;
     return Object.prototype.hasOwnProperty.call(scriptPropertiesData, key)
       ? scriptPropertiesData[key]
       : null;
@@ -1791,11 +2852,22 @@ const sentEmailSubjects = [];
 const sentEmailMessages = [];
 let cachedEmailTemplateManifest = '';
 let emailTemplateFetchShouldFail = false;
+let emailTemplateFetchBody = emailTemplateManifestText;
+let emailTemplateCacheReadCount = 0;
+let emailTemplateFetchCount = 0;
 context.PropertiesService = {
   getScriptProperties() {
     return scriptProperties;
   }
 };
+const propertyCountReadsBeforeWrite = scriptPropertyGetCounts.PROPERTY_RPC_TEST_COUNT || 0;
+context.writeChunkedJson_('PROPERTY_RPC_TEST', { ok: true });
+assert.equal(
+  scriptPropertyGetCounts.PROPERTY_RPC_TEST_COUNT || 0,
+  propertyCountReadsBeforeWrite,
+  '已有 getProperties() 快照時，分塊寫入不應再單獨讀取舊 COUNT'
+);
+context.clearChunkedStore_('PROPERTY_RPC_TEST');
 const initialGeneratedSettings = context.loadSettings_();
 assert.deepEqual(
   Array.from(initialGeneratedSettings.autoSyncHours),
@@ -1804,13 +2876,13 @@ assert.deepEqual(
 );
 assert.deepEqual(
   Array.from(initialGeneratedSettings.notificationHours),
-  [5, 12, 18, 22],
-  '使用者選擇的時段應只控制通知寄送'
+  [6],
+  '通用程式在匯入前只保留無個人資料的通知預設'
 );
 assert.equal(
   initialGeneratedSettings.notifySyncHour,
-  22,
-  '自訂時間應保留最後一個時段，供關閉即時通知後恢復'
+  6,
+  '通用程式在匯入前不得注入網站使用者的通知時段'
 );
 assert.equal(initialGeneratedSettings.instantNotificationsEnabled, true);
 assert.deepEqual(
@@ -1854,16 +2926,53 @@ assert.deepEqual(
   'UTF-8 分塊重新組合後內容必須完全相同'
 );
 context.clearChunkedStore_('UTF8_CHUNK_TEST');
+let scriptLockHeld = false;
+let scriptLockAttempts = 0;
+let scriptLockReleases = 0;
 context.LockService = {
   getScriptLock() {
     return {
       tryLock() {
+        scriptLockAttempts += 1;
+        assert.equal(scriptLockHeld, false, '測試中不得重複取得同一把 Script Lock');
+        scriptLockHeld = true;
         return true;
       },
-      releaseLock() {}
+      releaseLock() {
+        assert.equal(scriptLockHeld, true, '釋放前必須持有 Script Lock');
+        scriptLockHeld = false;
+        scriptLockReleases += 1;
+      }
     };
   }
 };
+context.writeChunkedJson_('TSCHOOL_SETTINGS', {
+  setupComplete: true,
+  setupImportedAt: '2026-08-01T00:00:00.000Z',
+  setupCodeVersion: 1
+});
+const lockAttemptsBeforeDelete = scriptLockAttempts;
+const lockReleasesBeforeDelete = scriptLockReleases;
+assert.equal(context.quickDeleteSyncedCalendarEvents(), 0);
+assert.equal(scriptLockAttempts, lockAttemptsBeforeDelete + 1);
+assert.equal(scriptLockReleases, lockReleasesBeforeDelete + 1);
+assert.equal(scriptLockHeld, false);
+context.writeChunkedJson_('TSCHOOL_SYNC_STATE', { stale: { calendarEventId: 'old' } });
+context.writeChunkedJson_('TSCHOOL_STATUS', { message: 'stale' });
+const lockAttemptsBeforeReset = scriptLockAttempts;
+const lockReleasesBeforeReset = scriptLockReleases;
+context.resetSyncState();
+assert.equal(scriptLockAttempts, lockAttemptsBeforeReset + 1);
+assert.equal(scriptLockReleases, lockReleasesBeforeReset + 1);
+assert.equal(scriptLockHeld, false);
+assert.equal(context.readChunkedJson_('TSCHOOL_SYNC_STATE', null), null);
+assert.equal(context.readChunkedJson_('TSCHOOL_STATUS', null), null);
+assert.throws(
+  () => context.previewSetupCodeForUi(roundTripSetupCode),
+  /不能再匯入/,
+  '首次同步完成後不得用設定碼覆寫既有狀態'
+);
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
 context.ScriptApp = {
   getProjectTriggers() {
     return projectTriggers.slice();
@@ -1915,10 +3024,56 @@ context.ScriptApp = {
     return builder;
   }
 };
+let activeSetupAccountEmail = 'student+sync@example.com';
+context.Session = {
+  getActiveUser() {
+    return { getEmail: () => activeSetupAccountEmail };
+  },
+  getEffectiveUser() {
+    return { getEmail: () => activeSetupAccountEmail };
+  }
+};
+const validImportPreview = context.previewSetupCodeForUi(roundTripSetupCode);
+assert.equal(validImportPreview.accountMismatch, false);
+activeSetupAccountEmail = 'other@example.com';
+assert.equal(
+  context.previewSetupCodeForUi(roundTripSetupCode).accountMismatch,
+  true,
+  'Google Docs 執行帳號與設定 Email 不同時應回傳警告狀態'
+);
+const mismatchedImportResult = context.importSetupCodeFromUi(roundTripSetupCode);
+assert.equal(mismatchedImportResult.applied, false);
+assert.equal(mismatchedImportResult.accountMismatch, true);
+assert.equal(mismatchedImportResult.notificationEmail, 'student+sync@example.com');
+assert.equal(
+  context.hasImportedSetup_(context.loadSettings_()),
+  false,
+  'Google 帳號不同時應停留在貼上設定碼頁，不得先保存設定'
+);
+activeSetupAccountEmail = 'student+sync@example.com';
+const importResult = context.importSetupCodeFromUi(roundTripSetupCode);
+assert.equal(importResult.applied, true);
+assert.equal(importResult.accountMismatch, false);
+assert.equal(importResult.message, '網站設定已匯入');
+const importedSettings = context.loadSettings_();
+assert.equal(importedSettings.setupComplete, false);
+assert.equal(importedSettings.setupCodeVersion, 1);
+assert.notEqual(importedSettings.setupImportedAt, '');
+assert.equal(importedSettings.calendarId, '');
+assert.deepEqual(Array.from(importedSettings.selectedCourses), ['公民／社會探究']);
+assert.deepEqual(Array.from(importedSettings.notificationHours), [6, 12, 18, 22]);
+const importedSourceContext = context.readChunkedJson_('TSCHOOL_SETUP_SOURCE_CONTEXT', null);
+assert.equal(importedSourceContext.gradeName, '高二');
+assert.equal(importedSourceContext.initialSetupSnapshot, true);
+assert.equal(importedSourceContext.events.length, 0);
+assert.equal(context.hasSetupSourceContext_(importedSettings), true);
+assert.equal(projectTriggers.length, 0, '匯入設定碼時不得建立觸發器');
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
 context.CacheService = {
   getScriptCache() {
     return {
       get(key) {
+        emailTemplateCacheReadCount += 1;
         assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8');
         return cachedEmailTemplateManifest;
       },
@@ -1932,6 +3087,7 @@ context.CacheService = {
 };
 context.UrlFetchApp = {
   fetch(url, options) {
+    emailTemplateFetchCount += 1;
     assert.equal(
       url,
       'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
@@ -1945,7 +3101,7 @@ context.UrlFetchApp = {
       },
       getContentText(encoding) {
         assert.equal(encoding, 'UTF-8');
-        return emailTemplateManifestText;
+        return emailTemplateFetchBody;
       }
     };
   }
@@ -1981,12 +3137,20 @@ context.Logger = { log() {} };
 assert.doesNotThrow(() =>
   context.assertEmailTemplateManifest_(JSON.parse(emailTemplateManifestText))
 );
+assert.doesNotThrow(() =>
+  context.assertEmailTemplateManifestTextSize_('a'.repeat(100 * 1024))
+);
+assert.throws(
+  () => context.assertEmailTemplateManifestTextSize_('中'.repeat(35 * 1024)),
+  /超過大小限制/,
+  'Email 版型上限必須按 UTF-8 位元組計算，不能把中文字誤算成單一 byte'
+);
 const renderedFailureEmail = context.buildEmailHtmlSafe_(
   'sync_failure',
   '[T-SCHOOL] 行程同步失敗',
   {
     sentAt: '2026/07/26 12:00',
-    controlUrl: 'https://docs.google.com/spreadsheets/d/test/edit',
+    controlUrl: 'https://docs.google.com/document/d/test/edit',
     calendarUrl: 'https://calendar.google.com/calendar/u/0/r',
     message: '<script>alert("x")</script> 權限不足'
   }
@@ -1997,13 +3161,38 @@ assert.equal(renderedFailureEmail.includes('<script>alert("x")</script>'), false
 assert.match(renderedFailureEmail, /行程同步失敗/);
 assert.match(
   renderedFailureEmail,
-  /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/test\/edit"/,
-  '核准的 Google Sheets 連結應保留'
+  /href="https:\/\/docs\.google\.com\/document\/d\/test\/edit"/,
+  '核准的 Google Docs 連結應保留'
+);
+const emailTemplateCacheReadsAfterFirstRender = emailTemplateCacheReadCount;
+const emailTemplateFetchesAfterFirstRender = emailTemplateFetchCount;
+assert.match(
+  context.buildEmailHtmlSafe_(
+    'sync_failure',
+    '第二封測試通知',
+    {
+      sentAt: '2026/07/26 12:01',
+      controlUrl: 'https://docs.google.com/document/d/test/edit',
+      calendarUrl: 'https://calendar.google.com/calendar/u/0/r',
+      message: '相同執行中的第二封通知'
+    }
+  ),
+  /第二封測試通知/
+);
+assert.equal(
+  emailTemplateCacheReadCount,
+  emailTemplateCacheReadsAfterFirstRender,
+  '同一次執行成功載入 Email 版型後，不應再次讀取 CacheService'
+);
+assert.equal(
+  emailTemplateFetchCount,
+  emailTemplateFetchesAfterFirstRender,
+  '同一次執行成功載入 Email 版型後，不應再次下載固定 manifest'
 );
 const sanitizedEmailLinks = context.sanitizeEmailHtmlLinks_(
   '<p>' +
   '<a href="https://calendar.google.com/calendar/u/0/r">日曆</a>' +
-  '<a href="https://docs.google.com/spreadsheets/d/test/edit?usp=sharing">控制臺</a>' +
+  '<a href="https://docs.google.com/document/d/test/edit?usp=sharing">控制臺</a>' +
   '<a href="https://calendar.google.com.evil.example/phish"><strong>假日曆</strong></a>' +
   '<a href="https://docs.google.com/url?q=https://evil.example">假控制臺</a>' +
   '<a href="javascript:alert(1)">危險連結</a>' +
@@ -2012,7 +3201,7 @@ const sanitizedEmailLinks = context.sanitizeEmailHtmlLinks_(
 assert.match(sanitizedEmailLinks, /href="https:\/\/calendar\.google\.com\/calendar\/u\/0\/r"/);
 assert.match(
   sanitizedEmailLinks,
-  /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/test\/edit\?usp=sharing"/
+  /href="https:\/\/docs\.google\.com\/document\/d\/test\/edit\?usp=sharing"/
 );
 assert.equal(sanitizedEmailLinks.includes('calendar.google.com.evil.example'), false);
 assert.equal(sanitizedEmailLinks.includes('docs.google.com/url'), false);
@@ -2021,10 +3210,21 @@ assert.match(sanitizedEmailLinks, /假日曆/);
 assert.match(sanitizedEmailLinks, /假控制臺/);
 assert.match(sanitizedEmailLinks, /危險連結/);
 assert.equal(/<strong>假日曆<\/strong>/.test(sanitizedEmailLinks), false);
+const collidingEmailLinkToken = 'TSCHOOL_SAFE_EMAIL_LINK_0_END';
+const sanitizedCollidingEmailLink = context.sanitizeEmailHtmlLinks_(
+  '<p>' + collidingEmailLinkToken +
+  '<a href="https://calendar.google.com/calendar/u/0/r">日曆</a></p>'
+);
+assert.equal(
+  (sanitizedCollidingEmailLink.match(/<a\b/g) || []).length,
+  1,
+  '原始文字與舊佔位格式相同時，不得被誤替換成第二個連結'
+);
+assert.match(sanitizedCollidingEmailLink, new RegExp(collidingEmailLinkToken));
 
 const sampleEmailData = {
   sentAt: '2026/07/26 12:00',
-  controlUrl: 'https://docs.google.com/spreadsheets/d/test/edit',
+  controlUrl: 'https://docs.google.com/document/d/test/edit',
   calendarUrl: 'https://calendar.google.com/calendar/u/0/r',
   summary: '新增 1、更新 2、移除 0、未變更 8',
   message: '測試訊息',
@@ -2172,7 +3372,21 @@ assert.match(
 );
 
 cachedEmailTemplateManifest = '';
+emailTemplateFetchBody = '中'.repeat(35 * 1024);
+context.resetEmailTemplateManifestRuntimeCache_();
+assert.equal(
+  context.buildEmailHtmlSafe_(
+    'sync_failure',
+    '[T-SCHOOL] 行程同步失敗',
+    { message: '版型超過大小上限' }
+  ),
+  '',
+  '遠端版型超過 UTF-8 100 KiB 時應退回純文字寄送'
+);
+emailTemplateFetchBody = emailTemplateManifestText;
+cachedEmailTemplateManifest = '';
 emailTemplateFetchShouldFail = true;
+context.resetEmailTemplateManifestRuntimeCache_();
 assert.equal(
   context.buildEmailHtmlSafe_(
     'sync_failure',
@@ -2182,7 +3396,19 @@ assert.equal(
   '',
   '遠端版型失效時應退回純文字寄送'
 );
+const failedTemplateFetchCount = emailTemplateFetchCount;
+assert.equal(
+  context.buildEmailHtmlSafe_('sync_failure', '第二封失敗備援', { message: '同一次執行' }),
+  '',
+  '同一次執行下載失敗後仍應使用純文字備援'
+);
+assert.equal(
+  emailTemplateFetchCount,
+  failedTemplateFetchCount,
+  '同一次執行已確認版型下載失敗後不得反覆等待網路重試'
+);
 emailTemplateFetchShouldFail = false;
+context.resetEmailTemplateManifestRuntimeCache_();
 
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
 const notificationTimingSettings = {
@@ -2301,6 +3527,16 @@ context.writeChunkedJson_('TSCHOOL_SYNC_JOB', {
   schemaVersion: 1,
   status: 'running'
 });
+assert.throws(
+  () => context.requestScheduledNotificationDelivery_(true),
+  /貼上網站產生的設定碼/,
+  '尚未匯入設定碼時不得啟動通知工作'
+);
+context.writeChunkedJson_('TSCHOOL_SETTINGS', {
+  setupImportedAt: '2026-08-01T00:00:00.000Z',
+  setupCodeVersion: 1,
+  notificationEmail: 'test@example.com'
+});
 context.requestScheduledNotificationDelivery_(true);
 assert.equal(
   sentEmailMessages.length,
@@ -2314,6 +3550,41 @@ assert.equal(
   true,
   '通知 Trigger 與背景同步重疊時應建立待寄重試'
 );
+const pendingNotificationRetryId = projectTriggers.find(trigger =>
+  trigger.getHandlerFunction() === 'retryScheduledNotificationDelivery'
+).getUniqueId();
+context.refreshAutoSyncTriggers_({
+  gradeName: '高一',
+  autoSyncEnabled: true,
+  instantNotificationsEnabled: true,
+  notificationHours: [6],
+  notifySyncHour: 6
+});
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger =>
+      trigger.getHandlerFunction() === 'retryScheduledNotificationDelivery'
+    )
+    .map(trigger => trigger.getUniqueId()),
+  [pendingNotificationRetryId],
+  '重新整理已啟用的每日排程時，不得刪除或重建既有通知重試'
+);
+context.refreshAutoSyncTriggers_({
+  gradeName: '高一',
+  autoSyncEnabled: false,
+  instantNotificationsEnabled: true,
+  notificationHours: [6],
+  notifySyncHour: 6
+});
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger =>
+      trigger.getHandlerFunction() === 'retryScheduledNotificationDelivery'
+    )
+    .map(trigger => trigger.getUniqueId()),
+  [pendingNotificationRetryId],
+  '關閉自動同步時仍須讓已保存的待寄通知完成，不能永久失去執行入口'
+);
 context.clearChunkedStore_('TSCHOOL_SYNC_JOB');
 context.retryScheduledNotificationDelivery();
 assert.equal(sentEmailMessages.length, emailsBeforeQueuedDelivery + 1);
@@ -2325,6 +3596,13 @@ assert.equal(
   context.loadNotificationQueueState_().pendingChangeData,
   null,
   '通知時間應寄出並清除已排程的行程調整'
+);
+assert.equal(
+  projectTriggers.some(trigger =>
+    trigger.getHandlerFunction() === 'retryScheduledNotificationDelivery'
+  ),
+  false,
+  '通知成功後應清除一次性重試 Trigger'
 );
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
 context.writeChunkedJson_('TSCHOOL_STATUS', {
@@ -2485,34 +3763,47 @@ const liveOutlineIndexValues = [
     'https://docs.google.com/spreadsheets/d/live-index-required-sheet/edit'
   ]
 ];
-context.SpreadsheetApp = {
-  openById(id) {
-    assert.equal(id, '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY');
-    return {
-      getSheetByName(name) {
-        assert.equal(name, '課綱來源');
+let liveOutlineIndexEmpty = false;
+let liveOutlineIndexMetadataCalls = 0;
+let liveOutlineIndexValuesCalls = 0;
+context.Sheets = {
+  Spreadsheets: {
+    get(id, options) {
+      liveOutlineIndexMetadataCalls += 1;
+      assert.equal(id, '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY');
+      assert.equal(options.includeGridData, false);
+      assert.match(options.fields, /sheets/);
+      return {
+        properties: { title: '課綱來源索引' },
+        sheets: [{ properties: { sheetId: 1, title: '課綱來源' }, merges: [] }]
+      };
+    },
+    Values: {
+      batchGet(id, options) {
+        liveOutlineIndexValuesCalls += 1;
+        assert.equal(id, '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY');
+        assert.deepEqual(Array.from(options.ranges), ["'課綱來源'"]);
+        assert.equal(options.valueRenderOption, 'FORMATTED_VALUE');
         return {
-          getLastRow() {
-            return liveOutlineIndexValues.length;
-          },
-          getLastColumn() {
-            return liveOutlineIndexValues[0].length;
-          },
-          getRange() {
-            return {
-              getDisplayValues() {
-                return liveOutlineIndexValues;
-              }
-            };
-          }
+          valueRanges: [{ values: liveOutlineIndexEmpty ? [] : liveOutlineIndexValues }]
         };
       }
-    };
+    }
   }
 };
+liveOutlineIndexEmpty = true;
+assert.throws(
+  () => context.readCourseOutlineSourceIndexSpreadsheet_(),
+  /課綱來源索引沒有可讀取的資料/,
+  '改用 Sheets API 批次讀取後，空白索引仍須保留原本的明確錯誤'
+);
+assert.equal(liveOutlineIndexValuesCalls, 1, '空白索引只應發出一次唯讀 values 請求');
+liveOutlineIndexEmpty = false;
 context.resetCourseOutlineSourceIndexRuntimeCache_();
 const emailsBeforeInitialOutlineIndex = sentEmailMessages.length;
 const liveOutlineIndex = context.loadCourseOutlineSourceIndex_();
+assert.equal(liveOutlineIndexMetadataCalls, 2);
+assert.equal(liveOutlineIndexValuesCalls, 2);
 assert.equal(liveOutlineIndex.source, 'live');
 assert.equal(liveOutlineIndex.setsByGrade['高一'][0].key, '115-1-high1');
 assert.equal(
@@ -2647,9 +3938,16 @@ assert.equal(
 );
 context.clearChunkedStore_('TSCHOOL_SETTINGS');
 
-context.SpreadsheetApp = {
-  openById() {
-    throw new Error('模擬中央索引暫時無法讀取');
+context.Sheets = {
+  Spreadsheets: {
+    get() {
+      throw new Error('模擬中央索引暫時無法讀取');
+    },
+    Values: {
+      batchGet() {
+        throw new Error('模擬中央索引暫時無法讀取');
+      }
+    }
   }
 };
 context.resetCourseOutlineSourceIndexRuntimeCache_();
@@ -3242,7 +4540,7 @@ assert.match(
 );
 assert.match(
   sentEmailMessages.at(-1).htmlBody,
-  /在控制臺試算表選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」/
+  /在行程同步控制臺選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」/
 );
 assert.match(sentEmailMessages.at(-1).htmlBody, /2026-09-01–2027-01-31/);
 context.deliverTermTransitionNotice_(transitionedSettings, newTermSource);
@@ -3398,24 +4696,13 @@ projectTriggers = projectTriggers.filter(trigger =>
 );
 sentOutlineFailureEmails = 0;
 
-function makeOutlineSheet(name, values) {
+let outlineSheetValuesCalls = 0;
+let nextOutlineSheetId = 10;
+function makeOutlineSheet(name, values, mergedRanges) {
   return {
-    getName() {
-      return name;
-    },
-    getLastRow() {
-      return values.length;
-    },
-    getLastColumn() {
-      return Math.max(...values.map(row => row.length));
-    },
-    getRange() {
-      return {
-        getDisplayValues() {
-          return values;
-        }
-      };
-    }
+    properties: { sheetId: nextOutlineSheetId++, title: name },
+    merges: mergedRanges || [],
+    testValues: values
   };
 }
 
@@ -3427,17 +4714,29 @@ let outlineWorkbookSheets = {
   [configuredHigh2OutlineSet.spreadsheetIds[3]]: []
 };
 const openedOutlineWorkbookIds = [];
-context.SpreadsheetApp = {
-  openById(id) {
-    openedOutlineWorkbookIds.push(id);
-    return {
-      getName() {
-        return `課綱-${id.slice(0, 4)}`;
+context.Sheets = {
+  Spreadsheets: {
+    get(id, options) {
+      openedOutlineWorkbookIds.push(id);
+      assert.equal(options.includeGridData, false);
+      return {
+        properties: { title: `課綱-${id.slice(0, 4)}` },
+        sheets: outlineWorkbookSheets[id] || []
+      };
+    },
+    Values: {
+      batchGet(id, options) {
+        outlineSheetValuesCalls += 1;
+        const sheets = outlineWorkbookSheets[id] || [];
+        return {
+          valueRanges: Array.from(options.ranges, quotedTitle => {
+            const title = String(quotedTitle).slice(1, -1).replace(/''/g, "'");
+            const sheet = sheets.find(item => item.properties.title === title);
+            return { values: sheet ? sheet.testValues : [] };
+          })
+        };
       },
-      getSheets() {
-        return outlineWorkbookSheets[id] || [];
-      }
-    };
+    }
   }
 };
 const collectedOutlineSnapshot = context.collectCourseOutlineSnapshot_(
@@ -3446,6 +4745,7 @@ const collectedOutlineSnapshot = context.collectCourseOutlineSnapshot_(
   [Object.assign({}, outlineBaseItem)],
   [configuredHigh2OutlineSet]
 );
+assert.equal(outlineSheetValuesCalls, 1);
 assert.equal(openedOutlineWorkbookIds.length, 4, '相關高二來源組應批次檢查四份課綱');
 assert.equal(collectedOutlineSnapshot.diagnostics.matchedRecordCount, 1);
 assert.deepEqual(

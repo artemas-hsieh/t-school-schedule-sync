@@ -22,27 +22,23 @@ const DEFAULTS = {
 // Temporary feature switch: set to true to restore Lenis and animated page scrolling.
 const ENABLE_SMOOTH_SCROLL = true;
 
-// Developer-only high-load test generator.
-// Set this to false before publishing if the dedicated test build should be completely unavailable.
-// Even while true, regular visitors do not receive test code unless the URL contains ?highLoadTest=1.
-const ENABLE_HIGH_LOAD_TEST_FEATURE = true;
-const HIGH_LOAD_TEST_QUERY_PARAMETER = 'highLoadTest';
 const KNOWN_ACADEMIC_TERM_STARTS = Object.freeze([
   { term: '114-2', year: 2026, monthIndex: 1, day: 23 },
   { term: '115-1', year: 2026, monthIndex: 7, day: 31 },
   { term: '115-2', year: 2027, monthIndex: 1, day: 11 }
 ]);
 
-const GOOGLE_SHEETS_TEMPLATE_COPY_URL =
-  'https://docs.google.com/spreadsheets/d/1MdSMBUNxl8ctdK-q7pO9Sz40Oo-qVPCUKmFssHbs0Ls/copy';
-const LOCAL_SHEETS_TEMPLATE_URL = 'assets/t-school-control-panel-template.xlsx';
+const GOOGLE_DOCS_TEMPLATE_COPY_URL =
+  'https://docs.google.com/document/d/1l4SCo0Z8cDgy1F0wvc74exuBIES4MHRO8F08GiqqZgA/copy';
 const COURSE_SEARCH_ICON_URL = 'assets/icon-search.svg';
 const COURSE_SEARCH_CANCEL_ICON_URL = 'assets/icon-x.svg';
 const MAX_NOTIFY_HOURS = 4;
+const MAX_MAILTO_URL_LENGTH = 12000;
+const SETUP_CODE_EMAIL_SUBJECT = '設定指引｜T-SCHOOL Schedule Sync';
+const SETUP_CODE_FILE_NAME = 'T-SCHOOL-Schedule-Sync-設定碼.txt';
 const SCHOOL_EMAIL_DOMAIN = '@tschool.tp.edu.tw';
 const SCHOOL_EMAIL_PATTERN =
   /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@tschool\.tp\.edu\.tw$/;
-const SCHOOL_EMAIL_HINT = '請輸入有效的校內 Email，格式比如「學號/教師名/職位/組織名@tschool.tp.edu.tw」';
 const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
   try {
     return new Intl.Collator('zh-Hant-u-co-stroke', {
@@ -78,6 +74,7 @@ const MOTION_CONFIG = Object.freeze({
   focusSwitchHysteresisBackward: 96,
   generatedCodeTransitionDelay: 48,
   homeEntryScrollDuration: 1.6,
+  homeEntryHeroTimeRatio: 2 / 3,
   footerReturnScrollDuration: 3.25,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
@@ -136,6 +133,7 @@ const state = {
   sourceError: null,
   requestId: 0,
   generatedCodeReady: false,
+  emailSetupTransferEnabled: false,
   customNotificationHours: DEFAULTS.syncHours.slice()
 };
 
@@ -143,7 +141,6 @@ let notificationEmailCommitTimer = 0;
 
 const elements = {
   form: document.querySelector('#config-form'),
-  highLoadTestBanner: document.querySelector('#high-load-test-banner'),
   notificationEmail: document.querySelector('#notification-email'),
   instantNotifications: document.querySelector('#instant-notifications'),
   notifyHoursList: document.querySelector('#notify-hours-list'),
@@ -153,9 +150,10 @@ const elements = {
   courseList: document.querySelector('#course-list'),
   courseCount: document.querySelector('#course-count'),
   notificationSelectionCount: document.querySelector('#notification-selection-count'),
-  generatedCode: document.querySelector('#generated-code'),
-  copyCode: document.querySelector('#copy-code'),
-  copyCodeInline: Array.from(document.querySelectorAll('[data-copy-code-inline]')),
+  generatedCode: document.querySelector('#setup-code'),
+  copyCode: document.querySelector('#copy-setup-code'),
+  copyCodeStep: document.querySelector('#copy-setup-code-step'),
+  outputStep: document.querySelector('#step-5'),
   outputEmail: document.querySelector('#output-email'),
   sourceStatus: document.querySelector('#source-status'),
   sourceStatusTitle: document.querySelector('#source-status-title'),
@@ -168,22 +166,17 @@ const elements = {
   stageMenuItems: Array.from(document.querySelectorAll('#stage-menu-panel [data-step-target]')),
   codeWindow: document.querySelector('#code-window'),
   fullCodeToggle: document.querySelector('#full-code-toggle'),
-  sheetTemplateLink: document.querySelector('#sheet-template-link'),
-  sheetTemplateNote: document.querySelector('#sheet-template-note')
+  docsTemplateLink: document.querySelector('#docs-template-link')
 };
 
 function init() {
   initViewportMetrics();
-  const highLoadTestGenerationEnabled = isHighLoadTestGenerationEnabled();
-  document.body.classList.toggle('is-high-load-test-build', highLoadTestGenerationEnabled);
-  if (elements.highLoadTestBanner) {
-    elements.highLoadTestBanner.hidden = !highLoadTestGenerationEnabled;
-  }
   elements.notificationEmail.value = DEFAULTS.notificationEmail;
   renderNotifyHours(DEFAULTS.syncHours);
   updateInstantNotificationState();
   updateNotifyHourState();
-  configureSheetTemplateLink();
+  configureDocsTemplateLink();
+  configureSetupCodeTransfer();
   bindEvents();
   updateCourseSearchAction();
   setupValidation();
@@ -195,22 +188,55 @@ function init() {
 
 function initViewportMetrics() {
   let frameId = 0;
+  let previousRoundedMetrics = null;
+  const heroStage = document.getElementById('hero-stage');
+  const toast = document.getElementById('toast');
 
   const update = () => {
     frameId = 0;
     const metrics = readVisualViewportMetrics();
-    document.documentElement.style.setProperty(
-      '--visual-viewport-height',
-      `${Math.round(metrics.height)}px`
-    );
-    document.documentElement.style.setProperty(
-      '--visual-viewport-offset-top',
-      `${Math.round(metrics.offsetTop)}px`
-    );
-    document.documentElement.style.setProperty(
-      '--keyboard-inset',
-      `${Math.round(metrics.keyboardInset)}px`
-    );
+    const roundedMetrics = {
+      height: Math.round(metrics.height),
+      keyboardHeight: Math.round(metrics.keyboardHeight),
+      width: Math.round(metrics.width)
+    };
+    const heightChanged =
+      !previousRoundedMetrics ||
+      previousRoundedMetrics.height !== roundedMetrics.height;
+    const keyboardHeightChanged =
+      !previousRoundedMetrics ||
+      previousRoundedMetrics.keyboardHeight !== roundedMetrics.keyboardHeight;
+    const metricsChanged =
+      heightChanged ||
+      keyboardHeightChanged ||
+      !previousRoundedMetrics ||
+      previousRoundedMetrics.width !== roundedMetrics.width;
+
+    if (!metricsChanged) {
+      return;
+    }
+
+    // This value is consumed only by the Hero. Keep the inherited invalidation
+    // inside that subtree instead of restyling the whole page for every mobile
+    // keyboard / browser-toolbar viewport update.
+    if (heightChanged) {
+      (heroStage || document.documentElement).style.setProperty(
+        '--visual-viewport-height',
+        `${roundedMetrics.height}px`
+      );
+    }
+
+    if (keyboardHeightChanged) {
+      // Only the toast consumes this value. Keeping it off :root prevents an
+      // inherited custom-property invalidation across the entire document when
+      // the iOS candidate bar changes the visual viewport height.
+      (toast || document.documentElement).style.setProperty(
+        '--keyboard-inset',
+        `${roundedMetrics.keyboardHeight}px`
+      );
+    }
+
+    previousRoundedMetrics = roundedMetrics;
     document.dispatchEvent(new CustomEvent('tschool:visual-viewport-change', {
       detail: metrics
     }));
@@ -225,45 +251,65 @@ function initViewportMetrics() {
   update();
   window.addEventListener('resize', requestUpdate, { passive: true });
   window.visualViewport?.addEventListener('resize', requestUpdate, { passive: true });
-  window.visualViewport?.addEventListener('scroll', requestUpdate, { passive: true });
 }
 
 function readVisualViewportMetrics() {
   const viewport = window.visualViewport;
   const height = viewport?.height || window.innerHeight;
   const offsetTop = viewport?.offsetTop || 0;
-  const keyboardInset = Math.max(0, window.innerHeight - height - offsetTop);
+  // offsetTop changes when WebKit pans the visual viewport to follow the caret.
+  // It is not part of the keyboard height and must not drive keyboard-open state.
+  const keyboardHeight = Math.max(0, window.innerHeight - height);
 
   return {
     height,
-    keyboardInset,
+    keyboardHeight,
     offsetTop,
     width: viewport?.width || window.innerWidth
   };
 }
 
-function configureSheetTemplateLink() {
-  if (!elements.sheetTemplateLink) return;
+function configureDocsTemplateLink() {
+  if (!elements.docsTemplateLink) return;
 
-  const isGoogleCopyUrl = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[^/]+\/copy(?:[?#].*)?$/i
-    .test(GOOGLE_SHEETS_TEMPLATE_COPY_URL);
+  const isGoogleCopyUrl = /^https:\/\/docs\.google\.com\/document\/d\/[^/]+\/copy(?:[?#].*)?$/i
+    .test(GOOGLE_DOCS_TEMPLATE_COPY_URL);
 
-  if (isGoogleCopyUrl) {
-    elements.sheetTemplateLink.href = GOOGLE_SHEETS_TEMPLATE_COPY_URL;
-    elements.sheetTemplateLink.textContent = '模板連結';
-    elements.sheetTemplateLink.target = '_blank';
-    elements.sheetTemplateLink.rel = 'noopener';
-    elements.sheetTemplateLink.removeAttribute('download');
-    elements.sheetTemplateLink.dataset.cursorLabel = '開啟模板連結';
+  if (!isGoogleCopyUrl) {
+    elements.docsTemplateLink.href = '#';
+    elements.docsTemplateLink.textContent = 'Google Docs 母版準備中';
+    elements.docsTemplateLink.classList.add('is-disabled');
+    elements.docsTemplateLink.setAttribute('aria-disabled', 'true');
+    elements.docsTemplateLink.dataset.cursorLabel = 'Google Docs 母版準備中';
+    elements.docsTemplateLink.addEventListener('click', event => event.preventDefault());
     return;
   }
 
-  elements.sheetTemplateLink.href = LOCAL_SHEETS_TEMPLATE_URL;
-  elements.sheetTemplateLink.textContent = '模板連結';
-  elements.sheetTemplateLink.download = 't-school-control-panel-template.xlsx';
-  elements.sheetTemplateLink.removeAttribute('target');
-  elements.sheetTemplateLink.removeAttribute('rel');
-  elements.sheetTemplateLink.dataset.cursorLabel = '下載模板連結';
+  elements.docsTemplateLink.href = GOOGLE_DOCS_TEMPLATE_COPY_URL;
+  elements.docsTemplateLink.textContent = '行程同步控制臺母版';
+  elements.docsTemplateLink.target = '_blank';
+  elements.docsTemplateLink.rel = 'noopener';
+  elements.docsTemplateLink.classList.remove('is-disabled');
+  elements.docsTemplateLink.removeAttribute('aria-disabled');
+  elements.docsTemplateLink.dataset.cursorLabel = '開啟控制臺母版';
+}
+
+function shouldOfferEmailSetupTransfer() {
+  const userAgentDataMobile = navigator.userAgentData?.mobile === true;
+  const mobileUserAgent = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  const coarseOnlyPointer = window.matchMedia('(pointer: coarse)').matches &&
+    !window.matchMedia('(any-pointer: fine)').matches;
+  return userAgentDataMobile || mobileUserAgent || coarseOnlyPointer;
+}
+
+function configureSetupCodeTransfer() {
+  state.emailSetupTransferEnabled = shouldOfferEmailSetupTransfer();
+  if (elements.outputStep) {
+    elements.outputStep.dataset.transferMode = state.emailSetupTransferEnabled
+      ? 'email'
+      : 'copy';
+  }
+  resetSetupTransferControls();
 }
 
 function bindEvents() {
@@ -292,7 +338,7 @@ function bindEvents() {
       document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
         detail: { step: 3 }
       }));
-      // Keep the lightweight inline validation immediate. Code.gs and the
+      // Keep the lightweight inline validation immediate. The setup code and
       // summary card are committed separately so typing does not rebuild either.
       return;
     }
@@ -347,16 +393,11 @@ function bindEvents() {
   });
   elements.notifyHoursList?.addEventListener('click', handleNotifyHourAction);
 
-  [elements.copyCode, ...elements.copyCodeInline].forEach(button => {
-    if (!button) return;
-    button.dataset.cursorDefaultLabel = button.dataset.cursorLabel || '複製程式碼';
-  });
+  elements.copyCode.dataset.cursorDefaultLabel =
+    elements.copyCode.dataset.cursorLabel || '複製設定碼';
 
-  elements.copyCode.addEventListener('click', copyGeneratedCode);
-
-  elements.copyCodeInline.forEach(button => {
-    button.addEventListener('click', copyGeneratedCode);
-  });
+  elements.copyCode.addEventListener('click', handlePrimarySetupCodeAction);
+  elements.copyCodeStep?.addEventListener('click', copyGeneratedCode);
 
   elements.sourceRefresh.addEventListener('click', () => {
     const grade = getCurrentGrade();
@@ -484,7 +525,7 @@ function initMobileOutput() {
 
   if (button) {
     button.setAttribute('aria-expanded', 'true');
-    button.setAttribute('aria-label', '收合程式碼');
+    button.setAttribute('aria-label', '收合設定碼');
   }
 }
 
@@ -499,7 +540,7 @@ function bindMobileOutputToggle() {
     const pane = document.querySelector('.output-pane');
     const collapsed = pane.classList.toggle('mobile-collapsed');
     button.setAttribute('aria-expanded', String(!collapsed));
-    button.setAttribute('aria-label', collapsed ? '展開程式碼' : '收合程式碼');
+    button.setAttribute('aria-label', collapsed ? '展開設定碼' : '收合設定碼');
   });
 }
 
@@ -528,18 +569,20 @@ function commitNotificationEmailChange() {
 function validateNotificationEmail() {
   const value = elements.notificationEmail.value.trim();
   const field = document.getElementById('field-notification-email');
+  const valid = isValidNotificationEmail(value);
+  const nextState = valid ? 'valid' : 'invalid';
 
-  if (isValidNotificationEmail(value)) {
-    elements.notificationEmail.setCustomValidity('');
-    setFieldState(field, 'valid', '為了讓程式能存取課綱，請輸入校內 Email');
-    return true;
+  // A keypress that keeps the same validity must not rewrite ARIA attributes or
+  // validation layers. Besides doing unnecessary work, those mutations can
+  // invalidate the large backdrop-filter surface beside this card.
+  if (field?.dataset.fieldState !== nextState) {
+    elements.notificationEmail.setCustomValidity(
+      valid ? '' : '請輸入有效的校內 Email'
+    );
+    setFieldState(field, nextState);
   }
 
-  elements.notificationEmail.setCustomValidity(
-    '請輸入有效的校內 Email'
-  );
-  setFieldState(field, 'invalid', SCHOOL_EMAIL_HINT);
-  return false;
+  return valid;
 }
 
 function isValidNotificationEmail(value) {
@@ -564,12 +607,23 @@ function focusEmailBeforeDomain() {
       ? atSign
       : value.length;
 
-  elements.notificationEmail.focus({ preventScroll: true });
+  // This focus is triggered by the user's completion-button click. Allow the
+  // browser to perform its normal focus scroll so the field is already visible
+  // when the on-screen keyboard opens. Using preventScroll here left the field
+  // under the keyboard until the first caret movement.
+  elements.notificationEmail.focus();
   elements.notificationEmail.setSelectionRange(caretPosition, caretPosition);
 }
 
-function setFieldState(field, stateValue, hint) {
+function setFieldState(field, stateValue) {
   if (!field) {
+    return;
+  }
+
+  const previousState = field.dataset.fieldState || '';
+  const nextState = stateValue || '';
+
+  if (previousState === nextState) {
     return;
   }
 
@@ -595,11 +649,10 @@ function setFieldState(field, stateValue, hint) {
     }
   }
 
-  const hintElement = field.querySelector('.field-hint');
-
-  if (hintElement && hint !== undefined && hintElement.textContent !== hint) {
-    hintElement.textContent = hint;
-  }
+  const defaultHint = field.querySelector('.validation-hint-default');
+  const errorHint = field.querySelector('.validation-hint-error');
+  defaultHint?.setAttribute('aria-hidden', String(stateValue === 'invalid'));
+  errorHint?.setAttribute('aria-hidden', String(stateValue !== 'invalid'));
 }
 
 function renderNotifyHours(hours) {
@@ -797,7 +850,11 @@ function handleCourseSelectionChange(event) {
     document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
       detail: { step: 2 }
     }));
-    renderCourses();
+    const card = input.closest('.course-card');
+    if (card) {
+      card.dataset.cursorLabel = input.checked ? '取消活動' : '選取活動';
+    }
+    renderSelectionCounts();
     updateOutput();
     renderSettingsSummary();
     return;
@@ -814,7 +871,10 @@ function handleCourseSelectionChange(event) {
   document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
     detail: { step: 2 }
   }));
-  renderCourses();
+  // The checkbox already reflects the new selection. Replacing the whole
+  // course grid here destroys and rebuilds every card, which is especially
+  // expensive on lower-end phones and also discards the current focus node.
+  renderSelectionCounts();
   updateOutput();
   renderSettingsSummary();
 }
@@ -936,17 +996,6 @@ function getDefaultCalendarName(gradeName) {
   return `${gradeName || '高一'}${DEFAULTS.calendarNameSuffix}`;
 }
 
-function isHighLoadTestGenerationEnabled() {
-  if (!ENABLE_HIGH_LOAD_TEST_FEATURE) return false;
-
-  try {
-    return new URLSearchParams(window.location.search)
-      .get(HIGH_LOAD_TEST_QUERY_PARAMETER) === '1';
-  } catch (error) {
-    return false;
-  }
-}
-
 function getSettings() {
   const instantNotificationsEnabled = elements.instantNotifications?.checked !== false;
   const notificationHours = instantNotificationsEnabled
@@ -962,7 +1011,7 @@ function getSettings() {
   const includeActivities = activityTitles.some(title => !excludedActivities.has(title));
 
   return {
-    appVersion: '2.0.0-rc.1',
+    appVersion: '2.0.0-rc.2',
     sourceApiUrl: window.TSchoolScheduleData.API_URL,
     gradeName: getCurrentGrade(),
     calendarName: getDefaultCalendarName(getCurrentGrade()),
@@ -981,10 +1030,15 @@ function getSettings() {
     customDescription: DEFAULTS.customDescription,
     reminderMode: DEFAULTS.reminderMode,
     reminderMinutes: DEFAULTS.reminderMinutes,
-    highLoadTestingEnabled: isHighLoadTestGenerationEnabled(),
     initialTermKey: summary ? summary.termKey : '',
     initialSourceFingerprint: summary ? summary.fingerprint : '',
-    initialKnownTitles: summary ? summary.catalog.all.map(item => item.title) : []
+    initialKnownTitles: summary ? summary.catalog.all.map(item => item.title) : [],
+    setupSourceSnapshot: summary ? {
+      firstDateKey: summary.firstDateKey,
+      lastDateKey: summary.lastDateKey,
+      sourceUpdatedLabel: summary.updateValues[summary.updateValues.length - 1] || '',
+      items: summary.catalog.all
+    } : null
   };
 }
 
@@ -1014,17 +1068,12 @@ async function generateOutput() {
     return false;
   }
 
-  const generationAssetsReady = await window.TSCHOOL_GENERATION_ASSETS_READY;
-
-  if (
-    generationAssetsReady === false ||
-    typeof window.buildAppsScriptCode !== 'function'
-  ) {
+  if (!window.TSchoolSetupCode || typeof window.TSchoolSetupCode.encode !== 'function') {
     updateGeneratedCodeAvailability(false);
     return false;
   }
 
-  setGeneratedCode(window.buildAppsScriptCode(getSettings()));
+  setGeneratedCode(window.TSchoolSetupCode.encode(getSettings()));
   state.generatedCodeReady = true;
   updateGeneratedCodeAvailability(true);
   return true;
@@ -1033,9 +1082,35 @@ async function generateOutput() {
 function updateGeneratedCodeAvailability(sourceReady) {
   const enabled = Boolean(sourceReady && state.generatedCodeReady);
   elements.copyCode.disabled = !enabled;
-  elements.copyCodeInline.forEach(button => {
-    button.disabled = !enabled;
-  });
+  if (elements.copyCodeStep) {
+    elements.copyCodeStep.disabled = !enabled;
+  }
+}
+
+function resetSetupTransferControls() {
+  if (!elements.copyCode) return;
+
+  const primaryLabel = state.emailSetupTransferEnabled
+    ? '寄送設定信 ↵'
+    : '複製設定碼 ↵';
+  const primaryAccessibleLabel = state.emailSetupTransferEnabled
+    ? '寄送設定信'
+    : '複製設定碼';
+
+  elements.copyCode.classList.remove('is-copied');
+  elements.copyCode.textContent = primaryLabel;
+  elements.copyCode.setAttribute('aria-label', primaryAccessibleLabel);
+  elements.copyCode.dataset.cursorLabel = primaryAccessibleLabel;
+  elements.copyCode.dataset.cursorDefaultLabel = primaryAccessibleLabel;
+  delete elements.copyCode.dataset.cursorTone;
+
+  if (elements.copyCodeStep) {
+    elements.copyCodeStep.textContent = '複製設定碼';
+    elements.copyCodeStep.setAttribute('aria-label', '複製設定碼');
+    elements.copyCodeStep.dataset.cursorLabel = '複製設定碼';
+    elements.copyCodeStep.dataset.cursorDefaultLabel = '複製設定碼';
+    delete elements.copyCodeStep.dataset.cursorTone;
+  }
 }
 
 function setGeneratedCode(nextCode) {
@@ -1043,14 +1118,7 @@ function setGeneratedCode(nextCode) {
     return;
   }
 
-  elements.copyCode.classList.remove('is-copied');
-  elements.copyCode.textContent = '複製程式碼 ↵';
-  elements.copyCode.setAttribute('aria-label', '複製程式碼');
-  [elements.copyCode, ...elements.copyCodeInline].forEach(button => {
-    if (!button) return;
-    button.dataset.cursorLabel = button.dataset.cursorDefaultLabel || '複製程式碼';
-    delete button.dataset.cursorTone;
-  });
+  resetSetupTransferControls();
   elements.generatedCode.value = nextCode;
 }
 
@@ -1103,15 +1171,12 @@ function copyGeneratedCodeWithLegacyFallback() {
   }
 
   if (!copied) {
-    throw new Error('瀏覽器無法複製程式碼。');
+    throw new Error('瀏覽器無法複製設定碼。');
   }
 }
 
 async function copyGeneratedCode(event) {
-  if (!state.generatedCodeReady || !state.sourceSummary || !validateNotificationEmail()) {
-    elements.notificationEmail.reportValidity();
-    return;
-  }
+  if (!setupCodeTransferIsReady()) return;
 
   const trigger = event?.currentTarget || elements.copyCode;
 
@@ -1121,10 +1186,102 @@ async function copyGeneratedCode(event) {
     copyGeneratedCodeWithLegacyFallback();
   }
 
-  elements.copyCode.classList.add('is-copied');
-  elements.copyCode.textContent = '再次複製 ↵';
-  elements.copyCode.setAttribute('aria-label', '程式碼已複製，再次複製');
+  if (trigger === elements.copyCode && !state.emailSetupTransferEnabled) {
+    elements.copyCode.classList.add('is-copied');
+    elements.copyCode.textContent = '再次複製 ↵';
+    elements.copyCode.setAttribute('aria-label', '設定碼已複製，再次複製');
+  }
   updateCopyCursorSuccess(trigger);
+}
+
+function setupCodeTransferIsReady() {
+  if (!state.generatedCodeReady || !state.sourceSummary || !validateNotificationEmail()) {
+    elements.notificationEmail.reportValidity();
+    return false;
+  }
+  return true;
+}
+
+function buildSetupCodeTransferText() {
+  const recipient = elements.notificationEmail.value.trim();
+  return [
+    '請在「電腦」上完成以下步驟：',
+    '',
+    '1. 完整複製設定碼：',
+    elements.generatedCode.value,
+    '',
+    `2. 用 ${recipient} 開啟行程同步控制臺母版，並建立副本：`,
+    GOOGLE_DOCS_TEMPLATE_COPY_URL,
+    '',
+    '3. 依畫面指引完成設定！',
+    '',
+    '',
+    '＊設定碼包含你在網站填寫的資訊，請勿隨意分享給他人！'
+  ].join('\r\n');
+}
+
+function buildSetupCodeMailtoUrl() {
+  const recipient = elements.notificationEmail.value.trim();
+  return `mailto:${encodeURIComponent(recipient)}` +
+    `?subject=${encodeURIComponent(SETUP_CODE_EMAIL_SUBJECT)}` +
+    `&body=${encodeURIComponent(buildSetupCodeTransferText())}`;
+}
+
+function downloadSetupCodeTransferFile(content) {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = SETUP_CODE_FILE_NAME;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  showToast('設定碼較長，已下載設定檔');
+}
+
+async function shareLongSetupCode(content) {
+  if (typeof File === 'function') {
+    const file = new File([content], SETUP_CODE_FILE_NAME, {
+      type: 'text/plain;charset=utf-8'
+    });
+    const shareData = {
+      files: [file],
+      title: SETUP_CODE_EMAIL_SUBJECT,
+      text: '請把這份設定碼寄給自己，再到電腦完成安裝'
+    };
+
+    if (navigator.share && navigator.canShare?.(shareData)) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+      }
+    }
+  }
+
+  downloadSetupCodeTransferFile(content);
+}
+
+async function sendGeneratedCodeByEmail() {
+  if (!setupCodeTransferIsReady()) return;
+
+  const mailtoUrl = buildSetupCodeMailtoUrl();
+  if (mailtoUrl.length > MAX_MAILTO_URL_LENGTH) {
+    await shareLongSetupCode(buildSetupCodeTransferText());
+    return;
+  }
+
+  window.location.href = mailtoUrl;
+}
+
+function handlePrimarySetupCodeAction(event) {
+  if (state.emailSetupTransferEnabled) {
+    sendGeneratedCodeByEmail();
+    return;
+  }
+  copyGeneratedCode(event);
 }
 
 function showToast(message) {
@@ -1326,6 +1483,7 @@ function initSmoothScroll() {
     anchors: true,
     autoRaf: true,
     virtualScroll: payload => {
+      window.tschoolCancelHomeEntryScroll?.({ resetMomentum: true });
       const boundaryHandler = window.tschoolBoundaryVirtualScroll;
       return typeof boundaryHandler === 'function' ? boundaryHandler(payload) : true;
     }
@@ -2016,6 +2174,8 @@ function initStepJourney() {
   let ensureControlFrame = 0;
   let ensureControlTimer = 0;
   let generatedCodeTransitionId = 0;
+  let homeEntryScrollFrameId = 0;
+  let homeEntryScrollActive = false;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -2033,8 +2193,8 @@ function initStepJourney() {
       confirmed: 'Email 和通知時間都沒錯 ↵'
     },
     4: {
-      initial: '產生安裝程式碼 ↵',
-      confirmed: '產生安裝程式碼 ↵'
+      initial: '產生安裝設定碼 ↵',
+      confirmed: '產生安裝設定碼 ↵'
     }
   };
 
@@ -2088,7 +2248,7 @@ function initStepJourney() {
           ? '確認選課'
           : stepNumber === 3
             ? '確認通知設定'
-            : '產生安裝程式碼';
+            : '產生安裝設定碼';
   }
 
   async function activateCompletionButton(button) {
@@ -2132,7 +2292,7 @@ function initStepJourney() {
       }
 
       if (!generated) {
-        showToast(state.sourceError ? '請先重新讀取課表' : '控制臺程式碼尚未準備完成');
+        showToast(state.sourceError ? '請先重新讀取課表' : '安裝設定碼尚未準備完成');
         return;
       }
 
@@ -2312,12 +2472,99 @@ function initStepJourney() {
     const scrollTarget = getStepScrollTarget(target, 1);
 
     if (window.tschoolLenis && smoothScrollEnabled()) {
-      window.tschoolLenis.scrollTo(scrollTarget, {
-        duration: MOTION_CONFIG.homeEntryScrollDuration
+      const currentScroll = window.tschoolLenis.animatedScroll;
+      const heroStage = document.getElementById('hero-stage');
+      const heroTiles = heroStage?.querySelectorAll('.transfer-tile').length || 0;
+      const heroAnimationEndProgress = Math.min(
+        1,
+        MOTION_CONFIG.heroTileTravel +
+          MOTION_CONFIG.heroTileStagger * Math.max(0, heroTiles - 1)
+      );
+      const heroViewportHeight = window.visualViewport?.height || window.innerHeight;
+      const heroAnimationEndTarget = heroStage
+        ? getDocumentLayoutTop(heroStage) +
+          Math.max(0, heroStage.offsetHeight - heroViewportHeight) * heroAnimationEndProgress
+        : currentScroll;
+
+      runHomeEntryVirtualScroll({
+        currentScroll,
+        heroAnimationEndTarget,
+        scrollTarget
       });
     } else {
       window.scrollTo({ top: scrollTarget, behavior: smoothScrollEnabled() ? 'smooth' : 'auto' });
     }
+  }
+
+  function cancelHomeEntryVirtualScroll(options = {}) {
+    if (!homeEntryScrollActive && !homeEntryScrollFrameId) return false;
+
+    homeEntryScrollActive = false;
+    if (homeEntryScrollFrameId) {
+      window.cancelAnimationFrame(homeEntryScrollFrameId);
+      homeEntryScrollFrameId = 0;
+    }
+    if (options.resetMomentum === true) {
+      resetScrollMomentum();
+    }
+    return true;
+  }
+
+  function runHomeEntryVirtualScroll({ currentScroll, heroAnimationEndTarget, scrollTarget }) {
+    const lenis = window.tschoolLenis;
+    if (!lenis || scrollTarget <= currentScroll + 1) return;
+
+    cancelHomeEntryVirtualScroll();
+
+    const totalDurationMs = Math.max(1, MOTION_CONFIG.homeEntryScrollDuration * 1000);
+    const heroTimeRatio = clamp(MOTION_CONFIG.homeEntryHeroTimeRatio, 0.05, 0.95);
+    const heroDurationMs = totalDurationMs * heroTimeRatio;
+    const heroTarget = clamp(heroAnimationEndTarget, currentScroll, scrollTarget);
+    const homeEntryLerp = window.matchMedia('(pointer: coarse)').matches
+      ? MOTION_CONFIG.scrollTouchLerp
+      : MOTION_CONFIG.scrollLerp;
+    let startedAt = Number.NaN;
+
+    homeEntryScrollActive = true;
+
+    const advanceVirtualScroll = timestamp => {
+      if (!homeEntryScrollActive) return;
+      if (!Number.isFinite(startedAt)) startedAt = timestamp;
+
+      const elapsedMs = Math.min(Math.max(0, timestamp - startedAt), totalDurationMs);
+      let nextTarget;
+
+      if (elapsedMs <= heroDurationMs) {
+        const heroProgress = elapsedMs / heroDurationMs;
+        nextTarget = currentScroll + (heroTarget - currentScroll) * heroProgress;
+      } else {
+        const cardProgress = (elapsedMs - heroDurationMs) /
+          (totalDurationMs - heroDurationMs);
+        nextTarget = heroTarget + (scrollTarget - heroTarget) * cardProgress;
+      }
+
+      const inputComplete = elapsedMs >= totalDurationMs;
+      lenis.scrollTo(nextTarget, {
+        // Match Lenis' own wheel path: the target advances linearly while its
+        // lerp remains solely responsible for visible smoothing and settling.
+        programmatic: false,
+        lerp: homeEntryLerp,
+        onComplete: inputComplete
+          ? () => {
+              homeEntryScrollActive = false;
+            }
+          : undefined
+      });
+
+      if (inputComplete) {
+        homeEntryScrollFrameId = 0;
+        return;
+      }
+
+      homeEntryScrollFrameId = window.requestAnimationFrame(advanceVirtualScroll);
+    };
+
+    homeEntryScrollFrameId = window.requestAnimationFrame(advanceVirtualScroll);
   }
 
   function setActiveStep(stepNumber) {
@@ -2416,14 +2663,16 @@ function initStepJourney() {
   function updateFromScroll() {
     frameRequested = false;
     const geometry = getJourneyGeometry();
-    const maximumScrollY = getMaximumScrollY(geometry);
-
-    if (clampToCurrentBoundary({}, maximumScrollY)) return;
 
     if (editingControl) {
+      extendEditingBoundaryToCurrentScroll(geometry);
       setActiveStep(activeStep);
       return;
     }
+
+    const maximumScrollY = getMaximumScrollY(geometry);
+
+    if (clampToCurrentBoundary({}, maximumScrollY)) return;
 
     if (automatedTargetStep) {
       setActiveStep(automatedTargetStep);
@@ -2645,7 +2894,34 @@ function initStepJourney() {
 
   function keyboardIsOpen(metrics = readVisualViewportMetrics()) {
     const threshold = Math.max(120, window.innerHeight * 0.15);
-    return Boolean(editingControl) && metrics.keyboardInset >= threshold;
+    return Boolean(editingControl) && metrics.keyboardHeight >= threshold;
+  }
+
+  function nativeViewportManagesEditingScroll(metrics = readVisualViewportMetrics()) {
+    return Boolean(
+      window.visualViewport &&
+      editingControl &&
+      keyboardIsOpen(metrics) &&
+      window.matchMedia('(pointer: coarse), (max-width: 760px)').matches
+    );
+  }
+
+  function extendEditingBoundaryToCurrentScroll(geometry = getJourneyGeometry()) {
+    const lenis = window.tschoolLenis;
+    const scrollPositions = [window.scrollY];
+
+    if (Number.isFinite(lenis?.animatedScroll)) {
+      scrollPositions.push(lenis.animatedScroll);
+    }
+    if (Number.isFinite(lenis?.targetScroll)) {
+      scrollPositions.push(lenis.targetScroll);
+    }
+
+    editingBoundaryY = Math.max(
+      geometry.maximumScrollY,
+      Number.isFinite(editingBoundaryY) ? editingBoundaryY : 0,
+      ...scrollPositions
+    );
   }
 
   function updateEditingViewportState(metrics = readVisualViewportMetrics()) {
@@ -2683,6 +2959,17 @@ function initStepJourney() {
 
     const metrics = readVisualViewportMetrics();
     updateEditingViewportState(metrics);
+
+    // Mobile browsers already pan the visual viewport after every caret move.
+    // A second layout-viewport scroll from here makes WebKit and Lenis pull the
+    // page in opposite directions. Keep the step boundary open, then let the
+    // browser own caret visibility until the keyboard closes.
+    if (nativeViewportManagesEditingScroll(metrics)) {
+      extendEditingBoundaryToCurrentScroll();
+      requestUpdate({ preserveActiveStep: true });
+      return;
+    }
+
     invalidateJourneyGeometry();
 
     const headerHeight = document.querySelector('.site-header')?.getBoundingClientRect().height || 0;
@@ -2877,6 +3164,11 @@ function initStepJourney() {
     const event = payload?.event;
     const deltaY = Number(payload?.deltaY) || 0;
 
+    if (editingControl) {
+      extendEditingBoundaryToCurrentScroll();
+      return true;
+    }
+
     if (deltaY !== 0) {
       focusInputDirection = Math.sign(deltaY);
       preserveActiveStepAfterLayout = false;
@@ -3010,28 +3302,42 @@ function initStepJourney() {
     const nextMetrics = event.detail;
     editingViewportMetrics = nextMetrics;
     updateEditingViewportState(event.detail);
-    invalidateJourneyGeometry();
     const keyboardIsNowOpen =
       document.documentElement.hasAttribute('data-keyboard-open');
-    const viewportGeometryChanged =
+    const heightChanged =
       !previousMetrics ||
-      Math.abs(previousMetrics.height - nextMetrics.height) >= 2 ||
-      Math.abs(previousMetrics.width - nextMetrics.width) >= 2 ||
-      keyboardWasOpen !== keyboardIsNowOpen;
+      Math.abs(previousMetrics.height - nextMetrics.height) >= 2;
+    const widthChanged =
+      !previousMetrics ||
+      Math.abs(previousMetrics.width - nextMetrics.width) >= 2;
+    const keyboardStateChanged = keyboardWasOpen !== keyboardIsNowOpen;
 
-    if (
-      keyboardWasOpen &&
-      !keyboardIsNowOpen
-    ) {
+    if (keyboardWasOpen && !keyboardIsNowOpen) {
+      invalidateJourneyGeometry();
       editingBoundaryY = getJourneyGeometry().maximumScrollY;
       clampToCurrentBoundary({ immediate: true });
+      requestUpdate({ preserveActiveStep: true });
+      return;
     }
 
-    // Safari can pan only the visual viewport while typing. Its offset-only
-    // scroll events already keep the caret visible, so reacting with a second
-    // layout-viewport scroll makes the page oscillate. Reposition only when
-    // the usable viewport size or keyboard state actually changes.
-    if (viewportGeometryChanged) {
+    if (keyboardIsNowOpen && nativeViewportManagesEditingScroll(nextMetrics)) {
+      extendEditingBoundaryToCurrentScroll();
+
+      // A width change means rotation or split view rather than caret panning.
+      // Re-measure for that case, but still avoid imperative vertical scrolling
+      // while WebKit owns the on-screen keyboard viewport.
+      if (widthChanged) {
+        invalidateJourneyGeometry();
+      }
+
+      requestUpdate({ preserveActiveStep: true });
+      return;
+    }
+
+    // Offset-only events are the browser following the caret. When there is no
+    // mobile keyboard, genuine size/state changes can still need one correction.
+    if (heightChanged || widthChanged || keyboardStateChanged) {
+      invalidateJourneyGeometry();
       scheduleFocusedControlVisibility({ afterViewportSettles: true });
     }
   });
@@ -3139,6 +3445,7 @@ function initStepJourney() {
   };
   const releaseLayoutFocusOnScrollKey = event => {
     if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+      cancelHomeEntryVirtualScroll({ resetMomentum: true });
       clearNavigationFocusLock();
       if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
         focusInputDirection = -1;
@@ -3152,17 +3459,20 @@ function initStepJourney() {
   window.addEventListener('wheel', releaseLayoutFocusOnScrollInput, { passive: true });
   window.addEventListener('touchmove', releaseLayoutFocusOnScrollInput, { passive: true });
   window.addEventListener('keydown', releaseLayoutFocusOnScrollKey, { passive: true });
+  window.tschoolCancelHomeEntryScroll = cancelHomeEntryVirtualScroll;
   window.addEventListener('scroll', requestUpdate, { passive: true });
   window.addEventListener('resize', () => {
-    invalidateJourneyGeometry();
-
-    if (editingControl) {
-      scheduleFocusedControlVisibility({ afterViewportSettles: true });
-    } else {
-      window.tschoolLenis?.resize?.();
-      clampToCurrentBoundary({ immediate: true });
+    if (editingControl && window.visualViewport) {
+      // initViewportMetrics dispatches the coalesced visual-viewport event.
+      // Scheduling another correction here lets a keyboard resize bypass its
+      // offset/size guards and was the remaining second scroll controller.
+      requestUpdate({ preserveActiveStep: true });
+      return;
     }
 
+    invalidateJourneyGeometry();
+    window.tschoolLenis?.resize?.();
+    clampToCurrentBoundary({ immediate: true });
     requestUpdate({ preserveActiveStep: true });
   });
   window.addEventListener('orientationchange', () => {
@@ -3181,7 +3491,24 @@ function initStepJourney() {
   });
 
   if ('ResizeObserver' in window) {
-    const resizeObserver = new ResizeObserver(() => {
+    let previousBodyBlockSize = 0;
+    const resizeObserver = new ResizeObserver(entries => {
+      const boxSize = entries[0]?.borderBoxSize;
+      const nextBodyBlockSize = Array.isArray(boxSize)
+        ? boxSize[0]?.blockSize
+        : boxSize?.blockSize;
+
+      if (
+        Number.isFinite(nextBodyBlockSize) &&
+        Math.abs(nextBodyBlockSize - previousBodyBlockSize) < 0.5
+      ) {
+        return;
+      }
+
+      if (Number.isFinite(nextBodyBlockSize)) {
+        previousBodyBlockSize = nextBodyBlockSize;
+      }
+
       invalidateJourneyGeometry();
       requestUpdate({ preserveActiveStep: true });
     });
@@ -3199,7 +3526,7 @@ function initCodeDisclosure() {
 
   elements.fullCodeToggle.addEventListener('click', () => {
     const expanded = elements.codeWindow.classList.toggle('is-expanded');
-    const label = expanded ? '收合完整程式碼' : '查看完整程式碼';
+    const label = expanded ? '收合完整設定碼' : '查看完整設定碼';
     elements.fullCodeToggle.textContent = label;
     elements.fullCodeToggle.dataset.cursorLabel = label;
     elements.fullCodeToggle.setAttribute('aria-expanded', String(expanded));
@@ -3234,10 +3561,9 @@ function renderSettingsSummary() {
   const email = elements.notificationEmail.value.trim();
   const hasValidEmail = isValidNotificationEmail(email);
   const instantNotificationsEnabled = elements.instantNotifications?.checked !== false;
-  const notificationTimes = (instantNotificationsEnabled
-    ? [DEFAULTS.notifyHour]
-    : getSelectedNotifyHours())
-    .map(hour => `${pad2(hour)}:00`);
+  const notificationSummary = instantNotificationsEnabled
+    ? ['行程有調整就盡快通知']
+    : getSelectedNotifyHours().map(hour => `${pad2(hour)}:00`);
   const grade = getCurrentGrade();
 
   elements.settingsSummary.innerHTML = [
@@ -3250,8 +3576,7 @@ function renderSettingsSummary() {
     ], 2, '修改課程與活動'),
     renderSummaryRow([
       ['你想用來收通知的 Email 是：', [email || '未填寫'], hasValidEmail ? '' : 'is-error'],
-      ['你的即時通知：', [instantNotificationsEnabled ? '已開啟' : '已關閉']],
-      [instantNotificationsEnabled ? '每日摘要時間：' : '你想收到通知的時間是：', notificationTimes]
+      ['你想收到通知的時間是：', notificationSummary]
     ], 3, '修改通知偏好')
   ].join('');
 }

@@ -78,20 +78,20 @@ const HIGH_LOAD_TEST_EXPECTED = {
 
 function showHighLoadTestGuide() {
   assertHighLoadTestingEnabled_();
-  SpreadsheetApp.getUi().alert(
+  getControlPanelUi_().alert(
     '高負載測試',
     '這是開發者測試工具，只能安裝在全新的控制臺副本。\\n\\n' +
     '執行「模擬控制臺首次同步」後，程式會以 2026/02/23 的高二開學資料，' +
     '一次完成來源檢查、30 天課綱讀取、建立 [TEST] 專用日曆，' +
     '並沿用正式控制臺的 40 筆分批與背景續跑機制同步全部 422 筆行程。\\n\\n' +
     '不需要另外執行分段測試。完成後可查看進度或開啟測試日曆。',
-    SpreadsheetApp.getUi().ButtonSet.OK
+    getControlPanelUi_().ButtonSet.OK
   );
 }
 
 function runHighLoadFirstSyncTest() {
   assertHighLoadTestingEnabled_();
-  const ui = SpreadsheetApp.getUi();
+  const ui = getControlPanelUi_();
   const regularSettings = loadSettings_();
   const regularState = loadSyncState_();
   if (regularSettings.setupComplete ||
@@ -219,7 +219,7 @@ function runHighLoadFirstSyncTest() {
 
 function setupHighLoadTestEnvironment() {
   assertHighLoadTestingEnabled_();
-  const ui = SpreadsheetApp.getUi();
+  const ui = getControlPanelUi_();
   const regularSettings = loadSettings_();
   const regularState = loadSyncState_();
   if (regularSettings.setupComplete || Object.keys(regularState).length > 0) {
@@ -241,7 +241,7 @@ function setupHighLoadTestEnvironment() {
   const source = parseSchedulePayload_(payload, '高二', highLoadTestBusinessNow_());
   const calendarName = HIGH_LOAD_TEST_CALENDAR_PREFIX + ' 114-2 開學高負載 ' +
     Utilities.formatDate(new Date(), TIMEZONE, 'MMdd-HHmm');
-  const calendar = CalendarApp.createCalendar(calendarName);
+  const calendar = CalendarApp.createCalendar(calendarName, { selected: true });
   if (typeof calendar.setTimeZone === 'function') calendar.setTimeZone(TIMEZONE);
   assertHighLoadTestCalendar_(calendar);
 
@@ -324,7 +324,7 @@ function runHighLoadCourseOutlineReadTest() {
     elapsedMs: Date.now() - startedAt
   };
   saveHighLoadTestReport_('outline_read_30_days', report);
-  SpreadsheetApp.getUi().alert(
+  getControlPanelUi_().alert(
     '30 天課綱讀取',
     '課程節次：' + report.courseEvents +
     '\\n課程名稱：' + report.courseNames +
@@ -344,7 +344,7 @@ function runHighLoadCourseOutlineReadTest() {
     '\\n耗時：' + Math.round(report.elapsedMs / 100) / 10 + ' 秒' +
     '\\n\\n結果：完成。這份課綱資料將套用至後續 Calendar 寫入測試。' +
     '若「找不到分頁」有內容，請停止並回報；疑似名稱不會自動配對。',
-    SpreadsheetApp.getUi().ButtonSet.OK
+    getControlPanelUi_().ButtonSet.OK
   );
   return report;
 }
@@ -358,7 +358,7 @@ function runHighLoadCalendarTest422() { return runHighLoadCalendarStage_(422); }
 
 function runHighLoadCalendarStage_(limit) {
   assertHighLoadTestingEnabled_();
-  const ui = SpreadsheetApp.getUi();
+  const ui = getControlPanelUi_();
   const config = loadHighLoadTestConfig_();
   const source = loadHighLoadTestSource_();
   const desired = getHighLoadTestDesiredEvents_(source).slice(0, Number(limit) || 0);
@@ -548,10 +548,10 @@ function showHighLoadTestStatus() {
   const eventCount = Object.keys(loadSyncState_()).length;
   const reports = readChunkedJson_(HIGH_LOAD_TEST_REPORT_STORE, []);
   if (!config) {
-    SpreadsheetApp.getUi().alert(
+    getControlPanelUi_().alert(
       '高負載測試',
       '尚未執行「模擬控制臺首次同步」。',
-      SpreadsheetApp.getUi().ButtonSet.OK
+      getControlPanelUi_().ButtonSet.OK
     );
     return { ready: false };
   }
@@ -576,7 +576,7 @@ function showHighLoadTestStatus() {
       : Math.max(0, HIGH_LOAD_TEST_EXPECTED.totalFuture - eventCount),
     latestReport: latest
   };
-  SpreadsheetApp.getUi().alert(
+  getControlPanelUi_().alert(
     '首次同步進度',
     '測試日曆：' + config.calendarName +
     '\\n模擬日期：2026/02/23' +
@@ -591,7 +591,7 @@ function showHighLoadTestStatus() {
         ' / ' + latest.report.outlineCandidates +
         ' 筆；含實體課程教室：' + latest.report.classroomEvents + ' 筆'
       : ''),
-    SpreadsheetApp.getUi().ButtonSet.OK
+    getControlPanelUi_().ButtonSet.OK
   );
   return result;
 }
@@ -609,7 +609,7 @@ function openHighLoadTestCalendar() {
     'style="display:inline-block;padding:10px 14px;background:#007c59;color:white;text-decoration:none">' +
     '開啟測試日曆</a></p></div>'
   ).setWidth(360).setHeight(170);
-  SpreadsheetApp.getUi().showModalDialog(html, '高負載測試');
+  getControlPanelUi_().showModalDialog(html, '高負載測試');
 }
 
 function cleanupHighLoadTestEnvironment() {
@@ -617,7 +617,7 @@ function cleanupHighLoadTestEnvironment() {
   if (isActiveSyncJob_(loadSyncJob_())) {
     throw new Error('首次同步仍在背景執行，請等待完成後再清除測試環境。');
   }
-  const ui = SpreadsheetApp.getUi();
+  const ui = getControlPanelUi_();
   const response = ui.alert(
     '清除高負載測試環境',
     '將刪除 [TEST] 測試日曆及本工具保存的測試資料。正式專用日曆不會被操作。是否繼續？',
@@ -728,7 +728,7 @@ function showHighLoadTestReportAlert_(title, report) {
     });
   }
   lines.push('', report.ok ? '結果：通過' : '結果：未通過，請停止下一階段並保存畫面。');
-  SpreadsheetApp.getUi().alert(title, lines.join('\\n'), SpreadsheetApp.getUi().ButtonSet.OK);
+  getControlPanelUi_().alert(title, lines.join('\\n'), getControlPanelUi_().ButtonSet.OK);
 }
 
 function saveHighLoadTestReport_(scenario, report) {
@@ -872,41 +872,46 @@ function buildHighLoadTestSettings_(source) {
   }
 
   window.buildAppsScriptCode = function buildAppsScriptCode(settings) {
-    const requestedNotifyHour = normalizeHour(settings.notifySyncHour, 5);
-    const notificationHours = normalizeHourArray(
-      settings.notificationHours || settings.autoSyncHours,
-      requestedNotifyHour
-    );
-    const notifyHour = notificationHours[notificationHours.length - 1];
-    const gradeName = settings.gradeName || '高一';
-    const defaultCalendarName = `${gradeName}行程｜T-SCHOOL Schedule Sync`;
+    settings = settings || {};
+    const notificationHours = [6];
+    const notifyHour = 6;
+    const sourceApiUrl = String(settings.sourceApiUrl || '').trim();
+    const emailTemplateManifestUrl = String(settings.emailTemplateManifestUrl || '').trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(sourceApiUrl)) {
+      throw new Error('Generic Code.gs generation requires the published Apps Script /exec sourceApiUrl.');
+    }
+    if (!/^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[0-9a-f]{40}\/notification-email-templates\.json$/.test(emailTemplateManifestUrl)) {
+      throw new Error('Production Code.gs generation requires an immutable emailTemplateManifestUrl.');
+    }
     const initialSettings = {
-      schemaVersion: 6,
-      appVersion: settings.appVersion || '2.0.0-rc.1',
+      schemaVersion: 7,
+      appVersion: settings.appVersion || '2.0.0-rc.2',
       setupComplete: false,
-      gradeName,
+      setupImportedAt: '',
+      setupCodeVersion: 0,
+      gradeName: '',
       calendarId: '',
-      calendarName: settings.calendarName || defaultCalendarName,
-      notificationEmail: settings.notificationEmail || '',
-      selectedCourses: settings.selectedCourses || [],
-      includeActivities: settings.includeActivities !== false,
-      excludedActivities: settings.excludedActivities || [],
+      calendarName: '',
+      notificationEmail: '',
+      selectedCourses: [],
+      includeActivities: true,
+      excludedActivities: [],
       autoSyncEnabled: true,
       autoSyncHours: [3, 11, 18, 21],
-      instantNotificationsEnabled: settings.instantNotificationsEnabled !== false,
+      instantNotificationsEnabled: true,
       notificationHours,
       notifySyncHour: notifyHour,
       notificationPreset: 'standard',
       customNotification: '',
-      descriptionPreset: settings.descriptionPreset === 'custom' ? 'custom' : 'standard',
-      customDescription: settings.customDescription || STANDARD_CUSTOM_DESCRIPTION_TEMPLATE,
-      reminderMode: settings.reminderMode || 'none',
-      reminderMinutes: Number(settings.reminderMinutes) || 10,
-      knownTitles: settings.initialKnownTitles || [],
+      descriptionPreset: 'standard',
+      customDescription: STANDARD_CUSTOM_DESCRIPTION_TEMPLATE,
+      reminderMode: 'none',
+      reminderMinutes: 10,
+      knownTitles: [],
       pendingTitles: [],
       excludedTitles: [],
-      termKey: settings.initialTermKey || '',
-      sourceFingerprint: settings.initialSourceFingerprint || '',
+      termKey: '',
+      sourceFingerprint: '',
       pendingTermKey: '',
       pausedReason: '',
       autoSyncEnabledBeforeTermTransition: null,
@@ -916,23 +921,55 @@ function buildHighLoadTestSettings_(source) {
       calendarMigrationFromId: ''
     };
     const sidebarHtml = window.TSCHOOL_SIDEBAR_HTML || '';
+    const setupDialogHtml = window.TSCHOOL_SETUP_DIALOG_HTML || '';
     const highLoadTestingEnabled = settings.highLoadTestingEnabled === true;
     const highLoadTestCode = highLoadTestingEnabled
       ? buildHighLoadTestAppsScriptCode()
       : '';
+    const highLoadMenuCode = highLoadTestingEnabled
+      ? `
+  menu.addSubMenu(
+    ui.createMenu('高負載測試')
+      .addItem('操作說明', 'showHighLoadTestGuide')
+      .addItem('模擬控制臺首次同步', 'runHighLoadFirstSyncTest')
+      .addSeparator()
+      .addItem('查看首次同步進度', 'showHighLoadTestStatus')
+      .addItem('開啟測試日曆', 'openHighLoadTestCalendar')
+      .addItem('清除測試環境', 'cleanupHighLoadTestEnvironment')
+  );
+  menu.addSeparator();
+`
+      : '';
+    const highLoadConstantCode = highLoadTestingEnabled
+      ? 'const HIGH_LOAD_TESTING_ENABLED = true;\n'
+      : '';
+    const highLoadBusinessNowCode = highLoadTestingEnabled
+      ? `  const config = readChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, null);
+  if (config && config.simulatedNow) return new Date(config.simulatedNow);
+`
+      : '';
 
-    return `const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-rc.1')};
-const SETTINGS_SCHEMA_VERSION = 6;
+return `/**
+ * @OnlyCurrentDoc
+ */
+// GENERATED UNIVERSAL GOOGLE DOCS TEMPLATE — do not paste a personalized or archived Code.gs here.
+const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-rc.2')};
+const SETTINGS_SCHEMA_VERSION = 7;
 const TIMEZONE = 'Asia/Taipei';
 const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];
 const INSTANT_NOTIFICATION_SUMMARY_HOUR = 6;
-const SOURCE_API_URL = ${formatString(settings.sourceApiUrl)};
-const EMAIL_TEMPLATE_MANIFEST_URL = 'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json';
-const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8';
+const SOURCE_API_URL = ${formatString(sourceApiUrl)};
+const SOURCE_FETCH_MAX_ATTEMPTS = 3;
+const SOURCE_FETCH_RETRY_DELAY_MS = 750;
+const EMAIL_TEMPLATE_MANIFEST_URL = ${formatString(emailTemplateManifestUrl)};
+const EMAIL_TEMPLATE_CACHE_KEY = 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_' + ${formatString(emailTemplateManifestUrl.match(/[0-9a-f]{40}/)[0].slice(0, 8).toUpperCase())};
 const EMAIL_TEMPLATE_CACHE_SECONDS = 60 * 60;
 const EMAIL_TEMPLATE_MAX_BYTES = 100 * 1024;
+const EMAIL_TEMPLATE_FETCH_MAX_ATTEMPTS = 3;
+const EMAIL_TEMPLATE_FETCH_RETRY_DELAY_MS = 500;
 const EMAIL_LINK_ALLOWED_HOSTS = ['calendar.google.com', 'docs.google.com'];
 const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
+const SETUP_SOURCE_CONTEXT_STORE = 'TSCHOOL_SETUP_SOURCE_CONTEXT';
 const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
 const SYNC_JOB_STORE = 'TSCHOOL_SYNC_JOB';
 const STATUS_STORE = 'TSCHOOL_STATUS';
@@ -993,9 +1030,12 @@ const MANAGED_MARKER = '[T-SCHOOL-SCHEDULE-SYNC]';
 const DESCRIPTION_MARKER = '[T-SCHOOL 行程同步]';
 const LEGACY_DESCRIPTION_MARKER = '[T-SCHOOL 課表同步]';
 const ALLOW_QUICK_DELETE_ALL = false;
-const HIGH_LOAD_TESTING_ENABLED = ${highLoadTestingEnabled ? 'true' : 'false'};
-const DEFAULT_SETTINGS = ${formatObject(initialSettings)};
+${highLoadConstantCode}const DEFAULT_SETTINGS = ${formatObject(initialSettings)};
 const SETTINGS_SIDEBAR_HTML = ${formatLongString(sidebarHtml)};
+const SETUP_DIALOG_HTML = ${formatLongString(setupDialogHtml)};
+const SETUP_CODE_PREFIX = 'TSCHOOL_SETUP_V1';
+const SETUP_CODE_SCHEMA_VERSION = 1;
+const SETUP_CODE_MAX_LENGTH = 32 * 1024;
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const MANUAL_MERGE_EXCEPTIONS = {};
@@ -1020,6 +1060,9 @@ const COURSE_OUTLINE_SOURCE_SETS_BY_GRADE = {
   '高三': []
 };
 let courseOutlineSourceIndexRuntimeCache_ = null;
+let scheduleSourceRuntimeCache_ = Object.create(null);
+let emailTemplateManifestRuntimeCache_ = null;
+let emailTemplateManifestRuntimeLoadAttempted_ = false;
 const ACTIVITY_PATTERNS = [
   /全校(?:性)?活動/,
   /^高[一二三](?:導入期|全校活動)$/,
@@ -1032,11 +1075,44 @@ const ACTIVITY_PATTERNS = [
   /防災|避難演練|畢業典禮|畢展布展/
 ];
 
+function getControlPanelUi_() {
+  return DocumentApp.getUi();
+}
+
+function getControlPanelUrl_() {
+  try {
+    const document = DocumentApp.getActiveDocument();
+    return document && typeof document.getUrl === 'function'
+      ? String(document.getUrl() || '')
+      : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function hasImportedSetup_(settings) {
+  return Boolean(settings && settings.setupImportedAt && settings.setupCodeVersion);
+}
+
+function assertSetupImported_(settings) {
+  if (!hasImportedSetup_(settings)) {
+    throw new Error('請先開啟控制臺介面，貼上網站產生的設定碼。');
+  }
+}
+
 function onOpen() {
-  const ui = SpreadsheetApp.getUi();
+  const ui = getControlPanelUi_();
+  const settings = loadSettings_();
   const menu = ui
     .createMenu('T-SCHOOL Schedule Sync')
-    .addItem('開啟控制臺介面', 'showSettingsSidebar')
+    .addItem('開啟控制臺介面', 'showSettingsSidebar');
+
+  if (!hasImportedSetup_(settings)) {
+    menu.addToUi();
+    return;
+  }
+
+  menu
     .addSeparator()
     .addItem('立即同步', 'syncMyScheduleToCalendar')
     .addItem('關閉 / 啟用自動同步', 'toggleAutoSyncFromMenu')
@@ -1044,18 +1120,7 @@ function onOpen() {
     .addItem('強制修復', 'forceFullSyncMyScheduleToCalendar')
     .addSeparator();
 
-  if (HIGH_LOAD_TESTING_ENABLED) {
-    menu.addSubMenu(
-      ui.createMenu('高負載測試')
-        .addItem('操作說明', 'showHighLoadTestGuide')
-        .addItem('模擬控制臺首次同步', 'runHighLoadFirstSyncTest')
-        .addSeparator()
-        .addItem('查看首次同步進度', 'showHighLoadTestStatus')
-        .addItem('開啟測試日曆', 'openHighLoadTestCalendar')
-        .addItem('清除測試環境', 'cleanupHighLoadTestEnvironment')
-    );
-    menu.addSeparator();
-  }
+${highLoadMenuCode}
 
   menu
     .addItem('移除受管理事件', 'confirmQuickDeleteSyncedEvents')
@@ -1063,26 +1128,362 @@ function onOpen() {
 }
 
 function showSettingsSidebar() {
+  ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
+  const settings = loadSettings_();
+  if (!hasImportedSetup_(settings) ||
+      (!settings.setupComplete && !hasSetupSourceContext_(settings))) {
+    showSetupImportDialog();
+    return;
+  }
   const output = HtmlService.createHtmlOutput(SETTINGS_SIDEBAR_HTML)
-    .setTitle('T-SCHOOL 行程同步');
-  SpreadsheetApp.getUi().showSidebar(output);
+    .setTitle('行程同步控制臺');
+  getControlPanelUi_().showSidebar(output);
+}
+
+function showSetupImportDialog() {
+  const settings = loadSettings_();
+  if (settings.setupComplete) {
+    throw new Error('首次同步已完成，為了保護現有日曆與同步狀態，不能再匯入安裝設定碼。');
+  }
+  const output = HtmlService.createHtmlOutput(SETUP_DIALOG_HTML)
+    .setWidth(560)
+    .setHeight(640);
+  getControlPanelUi_().showModalDialog(output, '匯入設定');
 }
 
 function getSettingsUiData() {
+  let settings = loadSettings_();
+  assertSetupImported_(settings);
+  const source = !settings.setupComplete
+    ? loadSetupSourceContext_(settings)
+    : loadSourceContext_(settings.gradeName);
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) {
+  if (!lock.tryLock(3000)) {
     throw new Error('背景同步正在保存行程，請稍後重新開啟控制臺。');
   }
-  let settings;
-  let source;
   try {
     settings = loadSettings_();
-    source = loadSourceContext_(settings.gradeName);
+    assertSetupImported_(settings);
     settings = applyTermTransitionIfNeeded_(settings, source, true);
   } finally {
     lock.releaseLock();
   }
   return buildUiData_(settings, source);
+}
+
+function previewSetupCodeForUi(code) {
+  const settings = loadSettings_();
+  if (settings.setupComplete) {
+    throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+  }
+  return setupImportPreviewForClient_(buildSetupImportPreview_(code, settings));
+}
+
+function importSetupCodeFromUi(code) {
+  const beforeImport = loadSettings_();
+  if (beforeImport.setupComplete) {
+    throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+  }
+  const decoded = decodeSetupCode_(code);
+  const notificationEmail = String(decoded.payload && decoded.payload.notificationEmail || '').trim();
+  assertSingleEmail_(notificationEmail);
+  if (activeGoogleAccountDoesNotMatch_(notificationEmail)) {
+    return {
+      applied: false,
+      accountMismatch: true,
+      notificationEmail
+    };
+  }
+  const preview = buildSetupImportPreview_(code, beforeImport, decoded);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) throw new Error('控制臺正在處理其他資料，請稍後重試。');
+  try {
+    const previous = loadSettings_();
+    if (previous.setupComplete) {
+      throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+    }
+    return Object.assign({ applied: true, accountMismatch: false },
+      applySetupImportPreview_(preview, previous));
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function applySetupCodeFromUi(code, confirmationToken) {
+  const beforeImport = loadSettings_();
+  if (beforeImport.setupComplete) {
+    throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+  }
+  const preview = buildSetupImportPreview_(code, beforeImport);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) throw new Error('控制臺正在處理其他資料，請稍後重試。');
+  try {
+    const previous = loadSettings_();
+    if (previous.setupComplete) {
+      throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+    }
+    if (!confirmationToken || confirmationToken !== preview.confirmationToken) {
+      throw new Error('課表在確認期間又有變動，請重新檢查設定碼。');
+    }
+    return applySetupImportPreview_(preview, previous);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function applySetupImportPreview_(preview, previous) {
+  const input = {
+    gradeName: preview.gradeName,
+    selectedCourses: preview.selectedCourses,
+    includeActivities: preview.includeActivities,
+    excludedActivities: preview.excludedActivities,
+    notificationEmail: preview.notificationEmail,
+    instantNotificationsEnabled: preview.instantNotificationsEnabled,
+    notificationHours: preview.notificationHours,
+    notifySyncHour: preview.notificationHours[preview.notificationHours.length - 1],
+    autoSyncEnabled: true,
+    calendarId: '',
+    calendarName: defaultCalendarNameForGrade_(preview.gradeName),
+    reminderMode: 'none',
+    reminderMinutes: 10
+  };
+  const next = sanitizeSettingsInput_(input, previous, preview.source_);
+  next.setupComplete = false;
+  next.setupImportedAt = new Date().toISOString();
+  next.setupCodeVersion = SETUP_CODE_SCHEMA_VERSION;
+  next.calendarId = '';
+  next.calendarMigrationFromId = '';
+  next.pendingTermKey = '';
+  next.pausedReason = '';
+  cancelActiveSyncJob_('已重新匯入安裝設定。');
+  deleteAutoSyncTriggersUnlocked_();
+  saveSettings_(next);
+  saveSetupSourceContext_(preview.source_, preview.gradeName);
+  return { message: '網站設定已匯入' };
+}
+
+function saveSetupSourceContext_(source, gradeName) {
+  if (!source || !source.catalog) return;
+  writeChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, {
+    gradeName: source.gradeName || gradeName || '',
+    firstDateKey: source.firstDateKey || '',
+    lastDateKey: source.lastDateKey || '',
+    sourceUpdatedLabel: source.sourceUpdatedLabel || '',
+    sourceStale: Boolean(source.sourceStale),
+    catalog: source.catalog,
+    termKey: source.termKey || '',
+    fingerprint: source.fingerprint || '',
+    events: [],
+    initialSetupSnapshot: true
+  });
+}
+
+function loadSetupSourceContext_(settings) {
+  const source = readChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, null);
+  if (source && source.catalog &&
+      source.gradeName === settings.gradeName &&
+      source.termKey === settings.termKey &&
+      source.fingerprint === settings.sourceFingerprint) {
+    return source;
+  }
+  throw new Error('請重新貼上行程同步設定碼，再開啟控制臺。');
+}
+
+function hasSetupSourceContext_(settings) {
+  try {
+    loadSetupSourceContext_(settings);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function buildSetupImportPreview_(code, previous, decodedSetup) {
+  const decoded = decodedSetup || decodeSetupCode_(code);
+  const payload = decoded.payload;
+  if (!GRADE_API_NAMES[payload.gradeName]) {
+    throw new Error('設定碼的年級無法辨識，請回網站重新產生。');
+  }
+  if (!String(payload.termKey || '').trim() || !String(payload.sourceFingerprint || '').trim()) {
+    throw new Error('設定碼缺少課表版本，請回網站重新產生。');
+  }
+  if (!Array.isArray(payload.selectedCourses) || !Array.isArray(payload.excludedActivities) ||
+      typeof payload.includeActivities !== 'boolean' ||
+      typeof payload.instantNotificationsEnabled !== 'boolean') {
+    throw new Error('設定碼的設定欄位無法辨識，請回網站重新產生。');
+  }
+  const notificationEmail = String(payload.notificationEmail || '').trim();
+  assertSingleEmail_(notificationEmail);
+  const notificationHours = validateSetupNotificationHours_(payload.notificationHours);
+  const embeddedSource = buildSetupSourceContextFromPayload_(payload);
+  const source = embeddedSource || loadSourceContext_(payload.gradeName);
+  if (payload.termKey && source.termKey && payload.termKey !== source.termKey) {
+    throw new Error('這份設定碼屬於不同學期，請回網站依目前課表重新產生。');
+  }
+
+  const courseByKey = {};
+  source.catalog.courses.forEach(item => {
+    courseByKey[normalizeTitle_(item.title)] = item.title;
+  });
+  const activityByKey = {};
+  source.catalog.activities.forEach(item => {
+    activityByKey[normalizeTitle_(item.title)] = item.title;
+  });
+  const missingItems = [];
+  const selectedCourses = uniqueStrings_(payload.selectedCourses || []).map(title => {
+    const current = courseByKey[normalizeTitle_(title)] || '';
+    if (!current) missingItems.push(String(title));
+    return current;
+  }).filter(Boolean);
+  const excludedActivities = uniqueStrings_(payload.excludedActivities || []).map(title => {
+    const current = activityByKey[normalizeTitle_(title)] || '';
+    if (!current) missingItems.push(String(title));
+    return current;
+  }).filter(Boolean);
+  const sourceChanged = Boolean(
+    missingItems.length ||
+    payload.sourceFingerprint && payload.sourceFingerprint !== source.fingerprint
+  );
+  const confirmationToken = hashText_([
+    decoded.codeHash,
+    source.fingerprint,
+    payload.gradeName,
+    selectedCourses.join('|'),
+    excludedActivities.join('|'),
+    notificationEmail,
+    notificationHours.join(',')
+  ].join('::'));
+
+  return {
+    gradeName: payload.gradeName,
+    selectedCourses,
+    includeActivities: payload.includeActivities !== false,
+    excludedActivities,
+    notificationEmail,
+    instantNotificationsEnabled: payload.instantNotificationsEnabled !== false,
+    notificationHours,
+    sourceChanged,
+    missingItems: uniqueStrings_(missingItems),
+    confirmationToken,
+    source_: source
+  };
+}
+
+function buildSetupSourceContextFromPayload_(payload) {
+  if (!Object.prototype.hasOwnProperty.call(payload || {}, 'sourceSnapshot')) return null;
+  const snapshot = payload && payload.sourceSnapshot;
+  const items = snapshot && Array.isArray(snapshot.items) ? snapshot.items : [];
+  const firstDateKey = String(snapshot && snapshot.firstDateKey || '').trim();
+  const lastDateKey = String(snapshot && snapshot.lastDateKey || '').trim();
+  if (!snapshot || !/^\\d{4}-\\d{2}-\\d{2}$/.test(firstDateKey) ||
+      !/^\\d{4}-\\d{2}-\\d{2}$/.test(lastDateKey) ||
+      Date.parse(firstDateKey + 'T12:00:00+08:00') > Date.parse(lastDateKey + 'T12:00:00+08:00') ||
+      !items.length || items.length > 500) {
+    throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
+  }
+
+  const seen = {};
+  const catalogAll = items.map(item => {
+    const title = String(item && item.title || '').trim().slice(0, 300);
+    const type = item && item.type;
+    const period = item && item.period;
+    const key = normalizeTitle_(title);
+    if (!key || seen[key] || ['course', 'activity'].indexOf(type) === -1 ||
+        ['term', 'vacation'].indexOf(period) === -1) {
+      throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
+    }
+    seen[key] = true;
+    return { title, type, period };
+  }).sort((left, right) => left.title.localeCompare(right.title, 'zh-Hant'));
+  const updateMatch = String(snapshot.sourceUpdatedLabel || '').match(/(\\d{8})/);
+  const sourceUpdatedLabel = updateMatch ? updateMatch[1] : '';
+
+  return {
+    gradeName: payload.gradeName,
+    firstDateKey,
+    lastDateKey,
+    sourceUpdatedLabel,
+    sourceStale: isSourceStale_(sourceUpdatedLabel, scheduleBusinessNow_()),
+    catalog: {
+      all: catalogAll,
+      courses: catalogAll.filter(item => item.type === 'course'),
+      activities: catalogAll.filter(item => item.type === 'activity'),
+      vacationItems: catalogAll.filter(item => item.period === 'vacation')
+    },
+    termKey: String(payload.termKey || ''),
+    fingerprint: String(payload.sourceFingerprint || ''),
+    events: [],
+    initialSetupSnapshot: true
+  };
+}
+
+function setupImportPreviewForClient_(preview) {
+  return {
+    gradeName: preview.gradeName,
+    selectedCourses: preview.selectedCourses,
+    includeActivities: preview.includeActivities,
+    excludedActivities: preview.excludedActivities,
+    notificationEmail: preview.notificationEmail,
+    instantNotificationsEnabled: preview.instantNotificationsEnabled,
+    notificationHours: preview.notificationHours,
+    accountMismatch: activeGoogleAccountDoesNotMatch_(preview.notificationEmail),
+    sourceChanged: preview.sourceChanged,
+    missingItems: preview.missingItems,
+    confirmationToken: preview.confirmationToken
+  };
+}
+
+function activeGoogleAccountDoesNotMatch_(notificationEmail) {
+  try {
+    const activeUser = Session.getActiveUser();
+    const activeEmail = String(activeUser && activeUser.getEmail
+      ? activeUser.getEmail()
+      : '').trim().toLowerCase();
+    const expectedEmail = String(notificationEmail || '').trim().toLowerCase();
+    return Boolean(activeEmail && expectedEmail && activeEmail !== expectedEmail);
+  } catch (error) {
+    return false;
+  }
+}
+
+function decodeSetupCode_(code) {
+  const normalized = String(code || '').trim();
+  if (!normalized) throw new Error('請貼上設定碼。');
+  if (normalized.length > SETUP_CODE_MAX_LENGTH) throw new Error('設定碼過長。');
+  const parts = normalized.split('.');
+  if (parts.length !== 3 || parts[0] !== SETUP_CODE_PREFIX) {
+    throw new Error('這不是可用的 T-SCHOOL 設定碼。');
+  }
+  if (hashText_(parts[1]) !== parts[2]) {
+    throw new Error('設定碼不完整，請回網站重新複製。');
+  }
+  let payload;
+  try {
+    const padding = '='.repeat((4 - parts[1].length % 4) % 4);
+    const bytes = Utilities.base64DecodeWebSafe(parts[1] + padding);
+    payload = JSON.parse(Utilities.newBlob(bytes).getDataAsString('UTF-8'));
+  } catch (error) {
+    throw new Error('設定碼內容無法讀取，請回網站重新複製。');
+  }
+  if (!payload || payload.schemaVersion !== SETUP_CODE_SCHEMA_VERSION) {
+    throw new Error('設定碼版本不受支援，請回網站重新產生。');
+  }
+  return { payload, codeHash: hashText_(normalized) };
+}
+
+function validateSetupNotificationHours_(values) {
+  if (!Array.isArray(values) || values.length < 1 || values.length > 4) {
+    throw new Error('設定碼的通知時間無法辨識。');
+  }
+  const result = [];
+  values.forEach(value => {
+    const hour = Number(value);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23 || result.indexOf(hour) !== -1) {
+      throw new Error('設定碼的通知時間無法辨識。');
+    }
+    result.push(hour);
+  });
+  return result.sort((a, b) => a - b);
 }
 
 function getSyncProgressForUi(jobId) {
@@ -1126,6 +1527,7 @@ function getSyncProgressForUi(jobId) {
 }
 
 function getSourceCatalogForUi(gradeName) {
+  assertSetupImported_(loadSettings_());
   const cleanGrade = sanitizeGrade_(gradeName);
   return buildSourceUiModel_(loadSourceContext_(cleanGrade), cleanGrade);
 }
@@ -1141,7 +1543,9 @@ function saveSettingsFromUi(input) {
 
 function previewSettingsImpactFromUi(input) {
   const previous = loadSettings_();
+  assertSetupImported_(previous);
   const source = loadSourceContext_(sanitizeGrade_(input && input.gradeName));
+  assertFirstSetupTermStillCurrent_(previous, source);
   const next = sanitizeSettingsInput_(input, previous, source);
   const businessNow = scheduleBusinessNow_();
   const todayKey = formatDateKey_(businessNow);
@@ -1185,6 +1589,7 @@ function prepareFirstSyncCourseOutlinesFromUi(input) {
   const startedAt = Date.now();
   try {
     const previous = loadSettings_();
+    assertSetupImported_(previous);
     if (previous.setupComplete) {
       return { prepared: false, skipped: true, message: '已完成第一次同步，不需要再次預先載入課綱資料。' };
     }
@@ -1298,7 +1703,7 @@ function buildSyncUiResponse_(result, completeMessage) {
     message: pending
       ? (result.retrying
         ? 'Google 服務暫時無法完成，已保存進度並安排重試。'
-        : '第一批已安全保存，剩餘行程會在背景分批完成；現在可以關閉側欄。')
+        : '第一批已安全保存，剩餘行程會在背景分批完成；現在可以關閉控制臺。')
       : completeMessage,
     uiData: getSettingsUiData()
   };
@@ -1306,9 +1711,10 @@ function buildSyncUiResponse_(result, completeMessage) {
 
 function createDedicatedCalendarForUi(input) {
   const settings = loadSettings_();
+  assertSetupImported_(settings);
   const gradeName = sanitizeGrade_(input && input.gradeName || settings.gradeName);
   const calendarName = sanitizeCalendarName_(input && input.calendarName, gradeName);
-  const calendar = CalendarApp.createCalendar(calendarName);
+  const calendar = CalendarApp.createCalendar(calendarName, { selected: true });
   return {
     message: '已建立專用日曆',
     calendarId: calendar.getId(),
@@ -1364,7 +1770,9 @@ function saveSettingsCore_(input) {
   }
   try {
     const oldSettings = loadSettings_();
+    assertSetupImported_(oldSettings);
     const source = loadSourceContext_(sanitizeGrade_(input && input.gradeName));
+    assertFirstSetupTermStillCurrent_(oldSettings, source);
     const next = sanitizeSettingsInput_(input, oldSettings, source);
 
     cancelActiveSyncJob_('設定已更新，將依新設定重新規劃。');
@@ -1381,6 +1789,13 @@ function saveSettingsCore_(input) {
     };
   } finally {
     lock.releaseLock();
+  }
+}
+
+function assertFirstSetupTermStillCurrent_(settings, source) {
+  if (settings && !settings.setupComplete && settings.termKey && source && source.termKey &&
+      settings.termKey !== source.termKey) {
+    throw new Error('課表已進入不同學期，請回設定網站重新選課並產生新的設定碼。');
   }
 }
 
@@ -1512,7 +1927,11 @@ function buildUiData_(settings, source) {
     source: buildSourceUiModel_(source, settings.gradeName),
     calendars: listOwnedCalendars_(),
     status: loadStatus_(),
-    courseOutlineStatus: buildCourseOutlineUiStatus_(settings, source),
+    courseOutlineStatus: buildCourseOutlineUiStatus_(
+      settings,
+      source && source.initialSetupSnapshot ? null : source,
+      loadCourseOutlineSourceIndexForUi_()
+    ),
     termTransition: buildTermTransitionUiModel_(settings, source)
   };
 }
@@ -1555,8 +1974,11 @@ function buildSourceUiModel_(source, gradeName) {
 function listOwnedCalendars_() {
   const defaultId = CalendarApp.getDefaultCalendar().getId();
   return CalendarApp.getAllOwnedCalendars()
-    .filter(calendar => calendar.getId() !== defaultId)
-    .map(calendar => ({ id: calendar.getId(), name: calendar.getName() }))
+    .reduce((items, calendar) => {
+      const id = calendar.getId();
+      if (id !== defaultId) items.push({ id, name: calendar.getName() });
+      return items;
+    }, [])
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -1569,7 +1991,9 @@ function ensureDedicatedCalendar_(settings) {
     return assertDedicatedCalendar_(settings.calendarId);
   }
 
-  const calendar = CalendarApp.createCalendar(buildDedicatedCalendarName_(settings));
+  const calendar = CalendarApp.createCalendar(buildDedicatedCalendarName_(settings), {
+    selected: true
+  });
   settings.calendarId = calendar.getId();
   saveSettings_(settings);
   return calendar;
@@ -1764,6 +2188,7 @@ function syncSchedule_(options) {
     }
     if (trackProgress) writeSyncProgress_(8, '正在讀取控制臺設定…', 'running');
     let settings = loadSettings_();
+    assertSetupImported_(settings);
     if (trackProgress) writeSyncProgress_(16, '正在取得最新課表…', 'running');
     const source = loadSourceContext_(settings.gradeName);
     settings = applyTermTransitionIfNeeded_(settings, source, false);
@@ -2296,6 +2721,7 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
   );
   if (job.migrationFromId) settings.calendarMigrationFromId = '';
   saveSettings_(settings);
+  clearChunkedStore_(SETUP_SOURCE_CONTEXT_STORE);
   refreshAutoSyncTriggers_(settings);
   scheduleCourseOutlineRefreshIfNeeded_(settings, source);
 
@@ -2584,7 +3010,7 @@ function buildTermTransitionNotice_(settings, source) {
       '系統偵測到 ' + dateRange + ' 的新學期行程\\n\\n' +
       '已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課\\n' +
       '既有日曆事件會完整保留\\n' +
-      '在控制臺試算表選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」，重新選擇本學期課程並儲存'
+      '在行程同步控制臺選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」，重新選擇本學期課程並儲存'
   };
 }
 
@@ -2737,30 +3163,40 @@ function buildSyncPlan_(oldState, desiredEvents, todayKey) {
   });
 
   const unmatchedOld = oldFuture.filter(item => !matchedOld[item.stateKey]);
+  const unmatchedOldByTitle = Object.create(null);
+  unmatchedOld.forEach(oldItem => {
+    const titleKey = normalizeTitle_(oldItem.originalTitle);
+    if (!unmatchedOldByTitle[titleKey]) unmatchedOldByTitle[titleKey] = [];
+    unmatchedOldByTitle[titleKey].push(oldItem);
+  });
   const moved = [];
   const usedOld = {};
   const stillNew = [];
+  const moveWindowMs = 21 * 24 * 60 * 60 * 1000;
 
   unmatchedNew.forEach(newItem => {
-    const candidates = unmatchedOld
-      .filter(oldItem =>
-        !usedOld[oldItem.stateKey] &&
-        normalizeTitle_(oldItem.originalTitle) === normalizeTitle_(newItem.originalTitle)
-      )
-      .map(oldItem => ({
-        oldItem,
-        distance: Math.abs(new Date(oldItem.start).getTime() - newItem.start.getTime())
-      }))
-      .filter(candidate => candidate.distance <= 21 * 24 * 60 * 60 * 1000)
-      .sort((left, right) => left.distance - right.distance);
-    const best = candidates.length &&
-      (candidates.length === 1 || candidates[0].distance < candidates[1].distance)
-      ? candidates[0]
-      : null;
+    const candidates = unmatchedOldByTitle[normalizeTitle_(newItem.originalTitle)] || [];
+    let bestOldItem = null;
+    let bestDistance = Infinity;
+    let bestIsTied = false;
+    candidates.forEach(oldItem => {
+      if (usedOld[oldItem.stateKey]) return;
+      const distance = Math.abs(
+        new Date(oldItem.start).getTime() - newItem.start.getTime()
+      );
+      if (!(distance <= moveWindowMs)) return;
+      if (distance < bestDistance) {
+        bestOldItem = oldItem;
+        bestDistance = distance;
+        bestIsTied = false;
+      } else if (distance === bestDistance) {
+        bestIsTied = true;
+      }
+    });
 
-    if (best) {
-      usedOld[best.oldItem.stateKey] = true;
-      moved.push({ oldItem: best.oldItem, newItem, newKey: makeOccurrenceKey_(newItem) });
+    if (bestOldItem && !bestIsTied) {
+      usedOld[bestOldItem.stateKey] = true;
+      moved.push({ oldItem: bestOldItem, newItem, newKey: makeOccurrenceKey_(newItem) });
     } else {
       stillNew.push(newItem);
     }
@@ -3438,14 +3874,67 @@ function assertCourseOutlineSourceIndexPayload_(payload) {
   return payload;
 }
 
+function quoteSheetsA1Title_(title) {
+  return "'" + String(title || '').replace(/'/g, "''") + "'";
+}
+
+function assertSheetsReadonlyServiceAvailable_() {
+  if (typeof Sheets === 'undefined' || !Sheets.Spreadsheets || !Sheets.Spreadsheets.Values) {
+    throw new Error(
+      '控制臺母版缺少唯讀 Google Sheets API 服務，請更新 appsscript.json 後重新授權。'
+    );
+  }
+}
+
+function readSheetsWorkbookMetadata_(spreadsheetId) {
+  assertSheetsReadonlyServiceAvailable_();
+  const response = Sheets.Spreadsheets.get(spreadsheetId, {
+    includeGridData: false,
+    fields: 'properties(title),sheets(properties(sheetId,title),merges)'
+  });
+  if (!response || !response.properties || !Array.isArray(response.sheets)) {
+    throw new Error('Google Sheets API 沒有回傳可讀取的試算表資料。');
+  }
+  return response;
+}
+
+function findSheetsResourceByTitle_(metadata, sheetTitle) {
+  return (metadata && metadata.sheets || []).find(sheet =>
+    sheet && sheet.properties && sheet.properties.title === sheetTitle
+  ) || null;
+}
+
+function readSheetsDisplayValues_(spreadsheetId, sheetTitles) {
+  assertSheetsReadonlyServiceAvailable_();
+  const titles = uniqueExactStrings_(sheetTitles || []);
+  if (!titles.length) return {};
+  const response = Sheets.Spreadsheets.Values.batchGet(spreadsheetId, {
+    ranges: titles.map(quoteSheetsA1Title_),
+    majorDimension: 'ROWS',
+    valueRenderOption: 'FORMATTED_VALUE',
+    dateTimeRenderOption: 'FORMATTED_STRING'
+  });
+  const valueRanges = response && Array.isArray(response.valueRanges)
+    ? response.valueRanges
+    : [];
+  const result = {};
+  titles.forEach((title, index) => {
+    const valueRange = valueRanges[index] || {};
+    result[title] = Array.isArray(valueRange.values) ? valueRange.values : [];
+  });
+  return result;
+}
+
 function readCourseOutlineSourceIndexSpreadsheet_() {
-  const spreadsheet = SpreadsheetApp.openById(COURSE_OUTLINE_INDEX_SPREADSHEET_ID);
-  const sheet = spreadsheet.getSheetByName(COURSE_OUTLINE_INDEX_SHEET_NAME);
-  if (!sheet) throw new Error('課綱來源索引缺少「' + COURSE_OUTLINE_INDEX_SHEET_NAME + '」分頁。');
-  const lastRow = sheet.getLastRow();
-  const lastColumn = sheet.getLastColumn();
-  if (!lastRow || !lastColumn) throw new Error('課綱來源索引沒有可讀取的資料。');
-  const values = sheet.getRange(1, 1, lastRow, lastColumn).getDisplayValues();
+  const metadata = readSheetsWorkbookMetadata_(COURSE_OUTLINE_INDEX_SPREADSHEET_ID);
+  if (!findSheetsResourceByTitle_(metadata, COURSE_OUTLINE_INDEX_SHEET_NAME)) {
+    throw new Error('課綱來源索引缺少「' + COURSE_OUTLINE_INDEX_SHEET_NAME + '」分頁。');
+  }
+  const values = readSheetsDisplayValues_(
+    COURSE_OUTLINE_INDEX_SPREADSHEET_ID,
+    [COURSE_OUTLINE_INDEX_SHEET_NAME]
+  )[COURSE_OUTLINE_INDEX_SHEET_NAME] || [];
+  if (!values.length) throw new Error('課綱來源索引沒有可讀取的資料。');
   return parseCourseOutlineSourceIndexValues_(values);
 }
 
@@ -3855,6 +4344,28 @@ function loadCourseOutlineSourceIndex_() {
   }
 }
 
+function loadCourseOutlineSourceIndexForUi_() {
+  if (courseOutlineSourceIndexRuntimeCache_) return courseOutlineSourceIndexRuntimeCache_;
+  try {
+    const cached = readChunkedJson_(COURSE_OUTLINE_INDEX_CACHE_STORE, null);
+    assertCourseOutlineSourceIndexPayload_(cached);
+    return Object.assign({}, cached, {
+      source: 'last_success',
+      warning: ''
+    });
+  } catch (cacheError) {
+    const fallback = assertCourseOutlineSourceIndexPayload_({
+      setsByGrade: JSON.parse(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
+      fingerprint: hashText_(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
+      refreshedAt: ''
+    });
+    return Object.assign({}, fallback, {
+      source: 'embedded_fallback',
+      warning: ''
+    });
+  }
+}
+
 function isDateInCourseOutlineSourceSet_(dateKey, sourceSet) {
   return Boolean(dateKey && sourceSet && dateKey >= sourceSet.validFrom && dateKey <= sourceSet.validUntil);
 }
@@ -3946,7 +4457,13 @@ function normalizeCourseOutlineHeader_(value) {
 }
 
 function resolveCourseOutlineDateKey_(value, candidateDateKeys) {
-  const candidates = uniqueExactStrings_(candidateDateKeys || []);
+  return resolveCourseOutlineDateKeyFromUniqueCandidates_(
+    value,
+    uniqueExactStrings_(candidateDateKeys || [])
+  );
+}
+
+function resolveCourseOutlineDateKeyFromUniqueCandidates_(value, candidates) {
   const numbers = String(value == null ? '' : value).match(/\\d+/g);
   if (!numbers || numbers.length < 2) return '';
 
@@ -4003,11 +4520,20 @@ function isPureAsynchronousCourseOutlineRow_(row, columns) {
 function expandVerticalMergedCourseOutlineValues_(values, mergedRanges) {
   const expanded = (values || []).map(row => (row || []).slice());
   (mergedRanges || []).forEach(mergedRange => {
-    const rowCount = Number(mergedRange.getNumRows()) || 0;
-    const columnCount = Number(mergedRange.getNumColumns()) || 0;
+    const isAppsScriptRange = typeof mergedRange.getNumRows === 'function';
+    const startRow = isAppsScriptRange
+      ? Number(mergedRange.getRow()) - 1
+      : Number(mergedRange.startRowIndex) || 0;
+    const startColumn = isAppsScriptRange
+      ? Number(mergedRange.getColumn()) - 1
+      : Number(mergedRange.startColumnIndex) || 0;
+    const rowCount = isAppsScriptRange
+      ? Number(mergedRange.getNumRows()) || 0
+      : Number(mergedRange.endRowIndex) - startRow;
+    const columnCount = isAppsScriptRange
+      ? Number(mergedRange.getNumColumns()) || 0
+      : Number(mergedRange.endColumnIndex) - startColumn;
     if (rowCount <= 1 || columnCount !== 1) return;
-    const startRow = Number(mergedRange.getRow()) - 1;
-    const startColumn = Number(mergedRange.getColumn()) - 1;
     if (startRow < 0 || startColumn < 0 || !expanded[startRow]) return;
     const mergedValue = typeof mergedRange.getDisplayValue === 'function'
       ? mergedRange.getDisplayValue()
@@ -4034,7 +4560,10 @@ function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, source
 
   for (let rowIndex = header.headerRowIndex + 1; rowIndex < values.length; rowIndex += 1) {
     const row = values[rowIndex] || [];
-    const dateKey = resolveCourseOutlineDateKey_(row[header.columns['日期']], candidates);
+    const dateKey = resolveCourseOutlineDateKeyFromUniqueCandidates_(
+      row[header.columns['日期']],
+      candidates
+    );
     const period = parseCourseOutlinePeriod_(row[header.columns['節次']]);
     if (!dateKey || !period || isPureAsynchronousCourseOutlineRow_(row, header.columns)) continue;
     const key = makeCourseOutlineOccurrenceKey_(sheetName, dateKey, period.periodStart, period.periodEnd);
@@ -4094,8 +4623,8 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
     const setCourseNames = uniqueExactStrings_(setEvents.map(event => event.originalTitle));
 
     sourceSet.spreadsheetIds.forEach(spreadsheetId => {
-      const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
-      const spreadsheetName = spreadsheet.getName();
+      const spreadsheet = readSheetsWorkbookMetadata_(spreadsheetId);
+      const spreadsheetName = String(spreadsheet.properties.title || '未命名課綱');
       const sourceSummary = {
         sourceSetKey: sourceSet.key,
         spreadsheetId,
@@ -4105,18 +4634,27 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
       };
       diagnostics.spreadsheetCount += 1;
 
-      spreadsheet.getSheets().forEach(sheet => {
-        const sheetName = sheet.getName();
+      const relevantSheets = [];
+      spreadsheet.sheets.forEach(sheet => {
+        const sheetName = String(sheet && sheet.properties && sheet.properties.title || '');
+        if (!sheetName) return;
         availableSheetNames[sheetName] = true;
         if (setCourseNames.indexOf(sheetName) === -1) return;
+        relevantSheets.push(sheet);
+      });
+      const valuesBySheet = readSheetsDisplayValues_(
+        spreadsheetId,
+        relevantSheets.map(sheet => sheet.properties.title)
+      );
+
+      relevantSheets.forEach(sheet => {
+        const sheetName = sheet.properties.title;
         foundSheetNames[sheetName] = true;
-        const lastRow = sheet.getLastRow();
-        const lastColumn = sheet.getLastColumn();
-        if (!lastRow || !lastColumn) throw new Error('課綱分頁「' + sheetName + '」沒有可讀取的資料。');
-        const range = sheet.getRange(1, 1, lastRow, lastColumn);
+        const sheetValues = valuesBySheet[sheetName] || [];
+        if (!sheetValues.length) throw new Error('課綱分頁「' + sheetName + '」沒有可讀取的資料。');
         const values = expandVerticalMergedCourseOutlineValues_(
-          range.getDisplayValues(),
-          typeof range.getMergedRanges === 'function' ? range.getMergedRanges() : []
+          sheetValues,
+          Array.isArray(sheet.merges) ? sheet.merges : []
         );
         const sheetEvents = setEvents.filter(event => event.originalTitle === sheetName);
         const parsed = parseCourseOutlineSheetValues_(values, sheetName, sheetEvents, {
@@ -4240,8 +4778,8 @@ function saveCourseOutlineState_(state) {
   writeChunkedJson_(COURSE_OUTLINE_STATE_STORE, state);
 }
 
-function buildCourseOutlineUiStatus_(settings, source) {
-  const sourceIndex = loadCourseOutlineSourceIndex_();
+function buildCourseOutlineUiStatus_(settings, source, sourceIndexOverride) {
+  const sourceIndex = sourceIndexOverride || loadCourseOutlineSourceIndex_();
   const configuredSets = getConfiguredCourseOutlineSourceSets_(settings.gradeName);
   const relevantSets = source && Array.isArray(source.events)
     ? getRelevantCourseOutlineSourceSets_(settings.gradeName, source.events)
@@ -4350,7 +4888,7 @@ function refreshCourseOutlinesNow() {
     const message = result.skipped
       ? result.message
       : (result.ok ? '課綱已更新，行事曆說明將於下一次同步套用。' : '課綱更新失敗，系統已依規則安排重試。');
-    SpreadsheetApp.getUi().alert('課綱更新', message, SpreadsheetApp.getUi().ButtonSet.OK);
+    getControlPanelUi_().alert('課綱更新', message, getControlPanelUi_().ButtonSet.OK);
   } catch (error) {
     Logger.log('無法顯示課綱更新結果：' + error.message);
   }
@@ -4620,32 +5158,55 @@ function flushPendingCourseOutlineFailureNotification_() {
 }
 
 function loadSourceContext_(gradeName) {
-  const payload = fetchSchedulePayload_(gradeName);
-  return parseSchedulePayload_(payload, gradeName, scheduleBusinessNow_());
+  const cleanGrade = sanitizeGrade_(gradeName);
+  if (Object.prototype.hasOwnProperty.call(scheduleSourceRuntimeCache_, cleanGrade)) {
+    return scheduleSourceRuntimeCache_[cleanGrade];
+  }
+  const payload = fetchSchedulePayload_(cleanGrade);
+  const source = parseSchedulePayload_(payload, cleanGrade, scheduleBusinessNow_());
+  scheduleSourceRuntimeCache_[cleanGrade] = source;
+  return source;
+}
+
+function resetScheduleSourceRuntimeCache_() {
+  scheduleSourceRuntimeCache_ = Object.create(null);
 }
 
 function scheduleBusinessNow_() {
-  if (HIGH_LOAD_TESTING_ENABLED &&
-      typeof HIGH_LOAD_TEST_CONFIG_STORE !== 'undefined') {
-    const config = readChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, null);
-    if (config && config.simulatedNow) return new Date(config.simulatedNow);
-  }
+${highLoadBusinessNowCode}
   return new Date();
 }
 
 function fetchSchedulePayload_(gradeName) {
   const apiGrade = GRADE_API_NAMES[sanitizeGrade_(gradeName)];
-  const response = UrlFetchApp.fetch(SOURCE_API_URL + '?grade=' + encodeURIComponent(apiGrade), {
-    followRedirects: true,
-    muteHttpExceptions: true
-  });
-  const code = response.getResponseCode();
-  if (code !== 200) throw new Error('課表來源回應失敗（HTTP ' + code + '）。');
-  let payload;
-  try { payload = JSON.parse(response.getContentText('UTF-8')); }
-  catch (error) { throw new Error('課表來源不是有效的 JSON。'); }
-  assertSourcePayload_(payload, apiGrade);
-  return payload;
+  let lastError = null;
+  for (let attempt = 1; attempt <= SOURCE_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = UrlFetchApp.fetch(
+        SOURCE_API_URL + '?grade=' + encodeURIComponent(apiGrade),
+        { followRedirects: true, muteHttpExceptions: true }
+      );
+      const code = response.getResponseCode();
+      if (code !== 200) {
+        const httpError = new Error('課表來源回應失敗（HTTP ' + code + '）。');
+        httpError.httpStatus = code;
+        throw httpError;
+      }
+      let payload;
+      try { payload = JSON.parse(response.getContentText('UTF-8')); }
+      catch (error) { throw new Error('課表來源不是有效的 JSON。'); }
+      assertSourcePayload_(payload, apiGrade);
+      return payload;
+    } catch (error) {
+      lastError = error;
+      const code = Number(error && error.httpStatus) || 0;
+      const retryable = !code || code === 302 || code === 404 ||
+        code === 408 || code === 425 || code === 429 || code >= 500;
+      if (!retryable || attempt === SOURCE_FETCH_MAX_ATTEMPTS) throw error;
+      Utilities.sleep(SOURCE_FETCH_RETRY_DELAY_MS * attempt);
+    }
+  }
+  throw lastError || new Error('目前無法讀取課表來源。');
 }
 
 function assertSourcePayload_(payload, expectedGrade) {
@@ -5085,12 +5646,13 @@ function writeChunkedJson_(key, value) {
   const properties = PropertiesService.getScriptProperties();
   const raw = JSON.stringify(value);
   const chunks = splitUtf8Chunks_(raw, SCRIPT_PROPERTY_CHUNK_SAFE_BYTES);
-  const oldCount = Number(properties.getProperty(key + '_COUNT')) || 0;
+  let oldCount = 0;
   const updates = {};
   chunks.forEach((chunk, index) => { updates[key + '_' + index] = chunk; });
   updates[key + '_COUNT'] = String(chunks.length);
   if (typeof properties.getProperties === 'function') {
     const existing = properties.getProperties();
+    oldCount = Number(existing[key + '_COUNT']) || 0;
     let estimatedBytes = 0;
     Object.keys(existing).forEach(propertyKey => {
       if (propertyKey === key + '_COUNT' ||
@@ -5108,6 +5670,8 @@ function writeChunkedJson_(key, value) {
         '請先保留畫面並聯絡維護者。'
       );
     }
+  } else {
+    oldCount = Number(properties.getProperty(key + '_COUNT')) || 0;
   }
   properties.setProperties(updates, false);
   for (let index = chunks.length; index < oldCount; index += 1) properties.deleteProperty(key + '_' + index);
@@ -5174,6 +5738,7 @@ function setupAutoSyncTriggers() {
   if (!lock.tryLock(15000)) throw new Error('背景同步正在保存行程，請稍後再試。');
   try {
     const settings = loadSettings_();
+    assertSetupImported_(settings);
     settings.autoSyncEnabled = true;
     saveSettings_(settings);
     refreshAutoSyncTriggers_(settings);
@@ -5253,7 +5818,6 @@ function deleteDailySyncTriggers_() {
     'syncMyScheduleToCalendarWithNotification',
     NOTIFICATION_HANDLER,
     FINAL_NOTIFICATION_HANDLER,
-    NOTIFICATION_DELIVERY_RETRY_HANDLER,
     COURSE_OUTLINE_DAILY_HANDLER
   ]);
 }
@@ -5315,6 +5879,7 @@ function deleteAutoSyncTriggers() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) throw new Error('背景同步正在保存行程，請稍後再試。');
   try {
+    assertSetupImported_(loadSettings_());
     deleteAutoSyncTriggersUnlocked_();
   } finally {
     lock.releaseLock();
@@ -5332,6 +5897,7 @@ function toggleAutoSyncFromMenu() {
   let settings;
   try {
     settings = loadSettings_();
+    assertSetupImported_(settings);
     settings.autoSyncEnabled = !settings.autoSyncEnabled;
     settings.pausedReason = settings.autoSyncEnabled ? '' : '由使用者關閉。';
     saveSettings_(settings);
@@ -5339,12 +5905,14 @@ function toggleAutoSyncFromMenu() {
   } finally {
     lock.releaseLock();
   }
-  SpreadsheetApp.getUi().alert(settings.autoSyncEnabled ? '已啟用自動同步。' : '已關閉自動同步。');
+  getControlPanelUi_().alert(settings.autoSyncEnabled ? '已啟用自動同步。' : '已關閉自動同步。');
 }
 
 function showSyncStatus() {
+  const settings = loadSettings_();
+  assertSetupImported_(settings);
   const status = loadStatus_();
-  const outline = buildCourseOutlineUiStatus_(loadSettings_());
+  const outline = buildCourseOutlineUiStatus_(settings);
   const outlineMessage = outline.enabled
     ? '\\n\\n課綱資料：' + describeCourseOutlineStatusForUser_(outline) +
       '\\n最近完成課綱更新：' + (outline.lastSuccessLabel || '尚未完成第一次更新') +
@@ -5357,15 +5925,16 @@ function showSyncStatus() {
         : '') +
       (outline.lastError ? '\\n未完成的原因：' + outline.lastError : '')
     : '';
-  SpreadsheetApp.getUi().alert(
+  getControlPanelUi_().alert(
     'T-SCHOOL 行程同步',
     (status.message || '尚未同步') + '\\n\\n上次執行：' + (status.lastSyncLabel || '尚無紀錄') + outlineMessage,
-    SpreadsheetApp.getUi().ButtonSet.OK
+    getControlPanelUi_().ButtonSet.OK
   );
 }
 
 function previewParsedEvents() {
   const settings = loadSettings_();
+  assertSetupImported_(settings);
   const source = loadSourceContext_(settings.gradeName);
   const events = source.events.filter(item => shouldIncludeEvent_(item, settings));
   Logger.log(JSON.stringify(events.slice(0, 50), null, 2));
@@ -5373,7 +5942,7 @@ function previewParsedEvents() {
 }
 
 function confirmQuickDeleteSyncedEvents() {
-  const ui = SpreadsheetApp.getUi();
+  const ui = getControlPanelUi_();
   const response = ui.alert('移除受管理事件', '只會刪除本工具建立且仍可辨識的事件。是否繼續？', ui.ButtonSet.YES_NO);
   if (response === ui.Button.YES) {
     const count = quickDeleteSyncedCalendarEvents();
@@ -5382,13 +5951,22 @@ function confirmQuickDeleteSyncedEvents() {
 }
 
 function quickDeleteSyncedCalendarEvents() {
-  if (isActiveSyncJob_(loadSyncJob_())) {
-    throw new Error('同步仍在背景執行，請等待完成後再移除事件。');
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    throw new Error('背景同步正在保存行程，請稍後再移除事件。');
   }
-  const settings = loadSettings_();
-  const count = settings.calendarId ? removeManagedEventsFromCalendar_(settings.calendarId, true) : 0;
-  clearChunkedStore_(SYNC_STATE_STORE);
-  return count;
+  try {
+    if (isActiveSyncJob_(loadSyncJob_())) {
+      throw new Error('同步仍在背景執行，請等待完成後再移除事件。');
+    }
+    const settings = loadSettings_();
+    assertSetupImported_(settings);
+    return settings.calendarId
+      ? removeManagedEventsFromCalendar_(settings.calendarId, true)
+      : 0;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function removeManagedEventsFromCalendar_(calendarId, clearState) {
@@ -5416,11 +5994,20 @@ function quickDeleteAllCalendarEvents() {
 }
 
 function resetSyncState() {
-  if (isActiveSyncJob_(loadSyncJob_())) {
-    throw new Error('同步仍在背景執行，請等待完成後再重設狀態。');
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    throw new Error('背景同步正在保存行程，請稍後再重設狀態。');
   }
-  clearChunkedStore_(SYNC_STATE_STORE);
-  clearChunkedStore_(STATUS_STORE);
+  try {
+    assertSetupImported_(loadSettings_());
+    if (isActiveSyncJob_(loadSyncJob_())) {
+      throw new Error('同步仍在背景執行，請等待完成後再重設狀態。');
+    }
+    clearChunkedStore_(SYNC_STATE_STORE);
+    clearChunkedStore_(STATUS_STORE);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function sendScheduledNotifications() {
@@ -5437,6 +6024,7 @@ function retryScheduledNotificationDelivery() {
 }
 
 function requestScheduledNotificationDelivery_(includeDailySummary) {
+  assertSetupImported_(loadSettings_());
   const properties = PropertiesService.getScriptProperties();
   const previous = loadScheduledNotificationDeliveryRequest_();
   properties.setProperty(NOTIFICATION_DELIVERY_REQUEST_STORE, JSON.stringify({
@@ -5848,20 +6436,9 @@ function sanitizeNotificationTemplateData_(value) {
 function buildEmailBaseData_() {
   return {
     sentAt: formatDateTime_(new Date()),
-    controlUrl: getControlSpreadsheetUrl_(),
+    controlUrl: getControlPanelUrl_(),
     calendarUrl: 'https://calendar.google.com/calendar/u/0/r'
   };
-}
-
-function getControlSpreadsheetUrl_() {
-  try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    return spreadsheet && typeof spreadsheet.getUrl === 'function'
-      ? String(spreadsheet.getUrl() || '')
-      : '';
-  } catch (error) {
-    return '';
-  }
 }
 
 function buildEmailHtmlSafe_(templateKind, subject, templateData) {
@@ -5924,6 +6501,11 @@ function buildEmailRepeaterSections_(repeaters, values) {
 }
 
 function loadEmailTemplateManifest_() {
+  if (emailTemplateManifestRuntimeCache_) {
+    return emailTemplateManifestRuntimeCache_;
+  }
+  if (emailTemplateManifestRuntimeLoadAttempted_) return null;
+  emailTemplateManifestRuntimeLoadAttempted_ = true;
   let cache = null;
   try {
     cache = CacheService.getScriptCache();
@@ -5931,38 +6513,62 @@ function loadEmailTemplateManifest_() {
     if (cached) {
       const parsed = JSON.parse(cached);
       assertEmailTemplateManifest_(parsed);
-      return parsed;
+      emailTemplateManifestRuntimeCache_ = parsed;
+      return emailTemplateManifestRuntimeCache_;
     }
   } catch (cacheError) {
     Logger.log('HTML 信件版型快取無法讀取：' + cacheError.message);
   }
 
-  try {
-    const response = UrlFetchApp.fetch(EMAIL_TEMPLATE_MANIFEST_URL, {
-      followRedirects: true,
-      muteHttpExceptions: true
-    });
-    if (response.getResponseCode() !== 200) {
-      throw new Error('HTTP ' + response.getResponseCode());
-    }
-    const text = response.getContentText('UTF-8');
-    if (!text || text.length > EMAIL_TEMPLATE_MAX_BYTES) {
-      throw new Error('版型檔案為空或超過大小限制');
-    }
-    const manifest = JSON.parse(text);
-    assertEmailTemplateManifest_(manifest);
-    if (cache) {
-      try {
-        cache.put(EMAIL_TEMPLATE_CACHE_KEY, text, EMAIL_TEMPLATE_CACHE_SECONDS);
-      } catch (cacheWriteError) {
-        Logger.log('HTML 信件版型快取無法寫入：' + cacheWriteError.message);
+  let fetchError = null;
+  for (let attempt = 1; attempt <= EMAIL_TEMPLATE_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = UrlFetchApp.fetch(EMAIL_TEMPLATE_MANIFEST_URL, {
+        followRedirects: true,
+        muteHttpExceptions: true
+      });
+      const responseCode = response.getResponseCode();
+      if (responseCode !== 200) {
+        const httpError = new Error('HTTP ' + responseCode);
+        httpError.httpStatus = responseCode;
+        throw httpError;
       }
+      const text = response.getContentText('UTF-8');
+      assertEmailTemplateManifestTextSize_(text);
+      const manifest = JSON.parse(text);
+      assertEmailTemplateManifest_(manifest);
+      if (cache) {
+        try {
+          cache.put(EMAIL_TEMPLATE_CACHE_KEY, text, EMAIL_TEMPLATE_CACHE_SECONDS);
+        } catch (cacheWriteError) {
+          Logger.log('HTML 信件版型快取無法寫入：' + cacheWriteError.message);
+        }
+      }
+      emailTemplateManifestRuntimeCache_ = manifest;
+      return emailTemplateManifestRuntimeCache_;
+    } catch (error) {
+      fetchError = error;
+      const responseCode = Number(error && error.httpStatus) || 0;
+      const retryable = !responseCode || responseCode === 302 || responseCode === 404 ||
+        responseCode === 408 || responseCode === 425 || responseCode === 429 || responseCode >= 500;
+      if (!retryable || attempt === EMAIL_TEMPLATE_FETCH_MAX_ATTEMPTS) break;
+      Utilities.sleep(EMAIL_TEMPLATE_FETCH_RETRY_DELAY_MS * attempt);
     }
-    return manifest;
-  } catch (fetchError) {
-    Logger.log('HTML 信件版型無法下載：' + fetchError.message);
-    return null;
   }
+  Logger.log('HTML 信件版型無法下載：' + (fetchError && fetchError.message || '未知錯誤'));
+  return null;
+}
+
+function assertEmailTemplateManifestTextSize_(text) {
+  if (!text || utf8ByteLength_(text) > EMAIL_TEMPLATE_MAX_BYTES) {
+    throw new Error('版型檔案為空或超過大小限制');
+  }
+  return text;
+}
+
+function resetEmailTemplateManifestRuntimeCache_() {
+  emailTemplateManifestRuntimeCache_ = null;
+  emailTemplateManifestRuntimeLoadAttempted_ = false;
 }
 
 function assertEmailTemplateManifest_(manifest) {
@@ -6038,13 +6644,16 @@ function isAllowedEmailLink_(value) {
   const path = String(match[2] || '/');
   if (EMAIL_LINK_ALLOWED_HOSTS.indexOf(host) === -1) return false;
   if (host === 'calendar.google.com') return /^\\/calendar(?:\\/|$)/.test(path);
-  if (host === 'docs.google.com') return /^\\/spreadsheets(?:\\/|$)/.test(path);
+  if (host === 'docs.google.com') return /^\\/document(?:\\/|$)/.test(path);
   return false;
 }
 
 function sanitizeEmailHtmlLinks_(html) {
   const safeAnchors = [];
-  let sanitized = String(html || '').replace(
+  const original = String(html || '');
+  let tokenPrefix = 'TSCHOOL_SAFE_EMAIL_LINK_';
+  while (original.indexOf(tokenPrefix) !== -1) tokenPrefix = '_' + tokenPrefix;
+  let sanitized = original.replace(
     /<a\\b([^>]*)>([\\s\\S]*?)<\\/a\\s*>/gi,
     (match, attributes, content) => {
       const hrefMatch = String(attributes || '').match(
@@ -6062,7 +6671,7 @@ function sanitizeEmailHtmlLinks_(html) {
       const anchor = '<a href="' + escapeEmailHtml_(decodeEmailHtmlAttribute_(href)) + '"' +
         (style ? ' style="' + escapeEmailHtml_(style) + '"' : '') +
         ' rel="noopener noreferrer">' + safeContent + '</a>';
-      const token = 'TSCHOOL_SAFE_EMAIL_LINK_' + safeAnchors.length + '_END';
+      const token = tokenPrefix + safeAnchors.length + '_END';
       safeAnchors.push({ token, anchor });
       return token;
     }

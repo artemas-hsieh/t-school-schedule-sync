@@ -5,23 +5,24 @@ T-SCHOOL Schedule Sync 需要讀取課表、更新專用 Google Calendar，並�
 ## 先記住這幾件事
 
 1. 線上設定器不會登入你的 Google 帳號，也不會直接修改 Calendar。
-2. 真正執行同步的是你貼進 Google Apps Script 的 `Code.gs`。
-3. `Code.gs` 會以授權它的 Google 帳號執行，並能使用你同意的 Google 服務。
+2. 網站只產生設定碼；真正執行同步的通用 Apps Script 已預載於 Google Docs 控制臺母版。
+3. 通用 Apps Script 會以授權它的 Google 帳號執行，並能使用你同意的 Google 服務。
 4. 請使用只交給本工具管理的專用 Calendar，不要使用主要日曆。
-5. 不要公開完整 `Code.gs`、Apps Script 專案、通知 Email 或 Calendar ID。
+5. 不要公開設定碼、Apps Script 專案、通知 Email 或 Calendar ID。
 6. 如果程式碼被別人修改，它能做的事可能和本文件不同；授權前請確認來源。
 
-## 網頁與 Code.gs 有什麼不同
+## 網頁與 Google Docs 控制臺有什麼不同
 
 線上設定器只負責：
 
 - 讀取目前的年級課表。
 - 接收你選擇的年級、課程、活動、通知 Email、即時通知開關與自訂通知時間。
-- 在瀏覽器中產生一份 `Code.gs`，供你自行複製。
+- 在瀏覽器中產生一份設定碼，供 Google Docs 控制臺匯入。
+- 在手機上使用原生寄信選單，把設定碼、母版連結與純文字指引寄到你填寫的 Email；網站本身不代寄信件。
 
-網頁本身沒有專案後端或會員資料庫。你填入的設定會寫進產生的 `Code.gs`，不會由專案作者的伺服器保存。
+網頁本身沒有專案後端或會員資料庫。你填入的設定只會編碼在設定碼中，不會由專案作者的伺服器保存。設定碼不是加密內容；寄送後也會保存在你選擇的郵件服務中。
 
-安裝後，`Code.gs` 會在你的 Google Apps Script 專案中執行，負責：
+授權並匯入後，通用 Apps Script 會在你的 Google Docs 控制臺副本中執行，負責：
 
 - 讀取課表與適用的校內課綱。
 - 建立、更新或刪除專用 Calendar 中由本工具管理的行程。
@@ -36,9 +37,9 @@ T-SCHOOL Schedule Sync 需要讀取課表、更新專用 Google Calendar，並�
 - 年級。
 - 選擇的課程與活動。
 - 通知 Email、即時通知開關與關閉時使用的自訂通知時間。
-- Calendar、提醒與事件說明的初始設定。
+- 設定碼版本、年級、學期、來源指紋、選課、活動與通知偏好。
 
-這些資料只用來產生 `Code.gs`。任何拿到完整程式碼的人，都可能看到其中的初始設定，因此不要公開貼出。
+這些資料只用來產生設定碼。任何取得設定碼的人都能解碼並看到 Email 與選課，因此不要公開、轉寄給其他人或貼到公開問題回報中。
 
 ### Google Apps Script
 
@@ -53,13 +54,15 @@ T-SCHOOL Schedule Sync 需要讀取課表、更新專用 Google Calendar，並�
 
 ## 為什麼 Google 會要求這些權限
 
+Google Docs 母版中使用的精簡版本另見[控制臺權限說明](PERMISSION_NOTICE.md)。以下保留各項權限與風險的完整說明。
+
 Google Apps Script 會依程式實際使用的服務顯示授權畫面。Google 也說明，使用者可以之後從帳號設定撤銷授權。[Google Apps Script 授權說明](https://developers.google.com/apps-script/guides/services/authorization)
 
-### Google Sheet
+### Google Docs 與 Google Sheets
 
-程式需要在控制臺 Sheet 中顯示選單與側邊欄，並用 `SpreadsheetApp.openById()` 開啟指定的校內課綱。
+程式需要在目前的 Google Docs 控制臺顯示選單與側邊欄，並用 Google Sheets API v4 進階服務開啟中央索引與適用的校內課綱。
 
-Google 對 `openById()` 要求的是完整 Google Sheets 授權，因此授權畫面可能看起來比「只讀指定課綱」更廣。現在這份 `Code.gs` 只讀取專案指定的課綱來源，不會修改來源課綱；但這項限制來自程式碼本身，所以不要安裝來源不明或被修改過的版本。[Google `openById()` 權限說明](https://developers.google.com/apps-script/reference/spreadsheet/spreadsheet-app#openById(String))
+正式母版在 `Code.gs` 使用 `@OnlyCurrentDoc`，並在 `appsscript.json` 明確指定 `documents.currentonly` 與 `spreadsheets.readonly`。課綱讀取不能使用 `SpreadsheetApp.openById()`：Google 官方為該方法列出的必要權限是可讀寫的 `spreadsheets`，即使程式只呼叫讀取方法也會失敗。因此目前改用支援 `spreadsheets.readonly` 的 Sheets API 讀取資料，不要求修改其他 Docs 或 Sheets。Sheets 唯讀權限仍涵蓋使用者可開啟的試算表，無法再限制為只有特定課綱檔案；正式程式只會讀取專案指定的來源。[Sheets API 的授權範圍](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/get#authorization-scopes)
 
 ### Google Calendar
 
@@ -73,7 +76,9 @@ Google 對 `openById()` 要求的是完整 Google Sheets 授權，因此授權�
 
 ### 寄送 Email
 
-同步結果與調課通知會從你的 Google 帳號寄到設定的通知 Email。程式也可能讀取目前帳號的 Email，作為通知欄位的預設值。
+同步結果與調課通知會從你的 Google 帳號寄到設定的通知 Email。程式不能讀取 Gmail；它只會讀取目前帳號的 Email 地址，用來確認執行控制臺的帳號是否與設定碼中的通知 Email 相同。
+
+手機網站的「寄送設定信」只會開啟裝置的寄信選單並預填內容；信件由你選擇的郵件程式與帳號送出，專案網站不會收到或保存信件。設定碼過長時會改用系統檔案分享，無法分享時下載純文字檔。
 
 ### 自動排程
 
@@ -85,7 +90,7 @@ Google 對 `openById()` 要求的是完整 Google Sheets 授權，因此授權�
 
 ## 授權前請先確認
 
-- Apps Script 編輯器中的程式碼，是剛從正式設定器產生的完整 `Code.gs`。
+- Google Docs 控制臺副本來自正式母版連結，且綁定的 Apps Script 沒有被他人修改。
 - 瀏覽器網址與 GitHub 專案來源正確，沒有從陌生訊息取得修改版。
 - Google 授權畫面顯示的是你打算使用的帳號。
 - 你了解程式會讀取課綱、修改專用 Calendar、建立排程並寄送 Email。
@@ -100,6 +105,10 @@ Google 對 `openById()` 要求的是完整 Google Sheets 授權，因此授權�
 - 發現重複識別碼或可疑的大量刪除時，停止自動修改並要求處理。
 - 大量行程會分批更新並保存進度，降低執行中斷造成重複行程的機會。
 - 偵測到新學期時先停止改動，等你重新確認年級與選課。
+- 遠端 Email 版型固定到已核准的 commit，並以 UTF-8 100 KiB 為大小上限；下載或驗證失敗時改用內建純文字通知。
+- 課表只接受正式發布的 `script.google.com/macros/s/.../exec` 網址，不保存重新導向後含權杖的網址。
+- 移除受管理事件與重設同步狀態時會先鎖定同步工作，避免和背景更新同時修改狀態。
+- 已保存的待寄通知不會因重新整理或關閉後續自動同步而失去一次性重試；完成寄送後才清除重試。
 - 課綱讀取失敗時保留最後成功內容，不讓失敗結果直接覆蓋。
 - 使用者輸入會先安全轉成程式中的資料，不直接當成可執行程式碼。
 - 網頁限制可載入的外部程式與資源。
@@ -113,9 +122,9 @@ Google 對 `openById()` 要求的是完整 Google Sheets 授權，因此授權�
 
 來源可能延遲、漏資料或改變格式。第一次同步及重要行程調整後，請對照課表、課網或教師公告。
 
-### Apps Script 專案或 Code.gs 被分享
+### Apps Script 專案或設定碼被分享
 
-完整 `Code.gs` 可能包含通知 Email、年級與初始選課；Apps Script 專案還可能保存 Calendar ID、同步狀態及課綱快照。
+設定碼包含通知 Email、年級與初始選課；安裝後的 Apps Script 專案還可能保存 Calendar ID、同步狀態及課綱快照。
 
 不要公開分享。如果必須請別人協助檢查，先移除私人設定，或只提供不含資料的錯誤訊息。
 
@@ -131,20 +140,20 @@ Google 的權限是授予整個 Apps Script 專案，不是只授予最初複製
 
 不要把 Apps Script 專案的編輯權交給不需要的人，也不要自行開啟看不懂的危險功能。
 
-### 校內課綱權限較廣
+### 校內課綱可讀範圍較廣
 
-因為程式使用 `openById()` 讀取指定課綱，Google Sheets 授權範圍可能涵蓋其他試算表。現在的程式只讀取指定來源，但被修改過的程式可能利用同一權限做其他事。
+Google Sheets 唯讀權限仍可能讀取帳號有權開啟的其他試算表，不能只授權特定的中央索引與課綱。現在的程式只讀取指定來源，但被修改過的程式可能利用同一唯讀權限查看其他試算表內容；它不能用這項權限修改試算表。
 
-因此最重要的保護不是只看權限名稱，而是確認 `Code.gs` 的來源與 Apps Script 專案的編輯者。
+因此最重要的保護不是只看權限名稱，而是確認 Google Docs 母版來源與 Apps Script 專案的編輯者。
 
 ## 安全地停止使用
 
 如果不再使用：
 
-1. 在 Google Sheet 選擇「T-SCHOOL Schedule Sync」→「關閉 / 啟用自動同步」，確認畫面顯示已關閉。
+1. 在 Google Docs 控制臺選擇「T-SCHOOL Schedule Sync」→「關閉 / 啟用自動同步」，確認畫面顯示已關閉。
 2. 如果不想保留已同步行程，選擇「移除受管理事件」並確認刪除結果。
-3. 確認沒有背景同步正在進行，再刪除 Apps Script 專案或控制臺 Sheet。
-4. 到 Google 帳號的第三方連結管理頁面，檢查並移除這個 Apps Script 專案的存取權。
+3. 確認沒有背景同步正在進行，再刪除 Apps Script 專案或 Google Docs 控制臺副本。
+4. 到 [Google 帳戶的第三方連結管理頁面](https://myaccount.google.com/connections)，選擇這個 Apps Script 專案、查看詳細資料並移除存取權。
 
 Google 提供的撤銷方式可參考：[管理與移除第三方存取權](https://support.google.com/accounts/answer/13533235)。
 
@@ -160,10 +169,10 @@ Google 提供的撤銷方式可參考：[管理與移除第三方存取權](http
 - 輸入內容被當成程式執行。
 - 實際要求的 Google 權限與本文件明顯不同。
 
-請寄信至 [artemas.hsieh5473@gmail.com](mailto:artemas.hsieh5473@gmail.com)，先簡短說明受影響功能與發生時間。不要在公開 issue 貼出私人資料、Calendar ID、通知 Email、完整 `Code.gs` 或可直接攻擊他人的步驟。
+請寄信至 [artemas.hsieh5473@gmail.com](mailto:artemas.hsieh5473@gmail.com)，先簡短說明受影響功能與發生時間。不要在公開 issue 貼出私人資料、Calendar ID、通知 Email、完整設定碼或可直接攻擊他人的步驟。
 
 ## 支援範圍
 
-本文件說明的是正式設定器目前產生的 `Code.gs`。舊版程式可能仍可執行，但不一定包含最新保護。
+本文件說明的是正式網站目前產生的設定碼與正式 Google Docs 母版。舊版 Google Sheet 控制臺可能仍可執行，但不一定包含最新保護。
 
-若要更新，請回到正式設定器重新產生程式碼，完整取代 Apps Script 專案中的舊版 `Code.gs`，再儲存並確認同步狀態。
+首次同步前可回到正式網站重新產生設定碼並重新匯入。首次同步完成後，為避免破壞 Calendar 與同步狀態，請勿以新設定碼覆寫；目前也不要假設舊控制臺已有自動更新路徑。

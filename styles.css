@@ -59,22 +59,6 @@ body {
   overscroll-behavior-y: none;
 }
 
-.high-load-test-banner {
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: 10000;
-  min-height: 40px;
-  padding: 10px 8px;
-  background: #7a2e00;
-  color: #fff;
-  font: 700 12px/20px var(--body);
-  text-align: center;
-}
-
-body.is-high-load-test-build .site-header {
-  top: 40px;
-}
-
 button,
 input,
 select,
@@ -659,11 +643,32 @@ textarea::placeholder {
 .field-icon {
   position: absolute;
   right: 15px;
+  z-index: 2;
   display: grid;
   width: 20px;
   height: 20px;
   place-items: center;
   pointer-events: none;
+}
+
+.field-state-border {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateZ(0);
+  will-change: opacity;
+}
+
+.field-state-border-invalid {
+  border-color: var(--shift);
+}
+
+.field-state-border-valid {
+  border-color: var(--sync-dark);
 }
 
 .field-hint {
@@ -673,27 +678,57 @@ textarea::placeholder {
   line-height: 1.5;
 }
 
-.validated-field[data-field-state="valid"] input {
-  border-color: var(--sync-dark);
+.validation-hint-stack {
+  display: grid;
 }
 
-.validated-field[data-field-state="valid"] .field-icon::after {
-  content: "✓";
-  color: var(--sync-dark);
-  font-weight: 900;
+.validation-hint-stack > span {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: translateZ(0);
+  will-change: opacity;
 }
 
-.validated-field[data-field-state="invalid"] input {
-  border-color: var(--shift);
+.validation-hint-stack > .validation-hint-default {
+  opacity: 1;
 }
 
-.validated-field[data-field-state="invalid"] .field-icon::after {
+.field-icon::before,
+.field-icon::after {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: translateZ(0);
+  will-change: opacity;
+}
+
+.field-icon::before {
   content: "!";
   color: var(--shift);
   font-weight: 900;
 }
 
-.validated-field[data-field-state="invalid"] .field-hint {
+.field-icon::after {
+  content: "✓";
+  color: var(--sync-dark);
+  font-weight: 900;
+}
+
+.validated-field[data-field-state="valid"] .field-state-border-valid,
+.validated-field[data-field-state="valid"] .field-icon::after {
+  opacity: 1;
+}
+
+.validated-field[data-field-state="invalid"] .field-state-border-invalid,
+.validated-field[data-field-state="invalid"] .field-icon::before,
+.validated-field[data-field-state="invalid"] .validation-hint-error {
+  opacity: 1;
+}
+
+.validated-field[data-field-state="invalid"] .validation-hint-default {
+  opacity: 0;
+}
+
+.validated-field[data-field-state="invalid"] .validation-hint-error {
   color: #a63c2f;
 }
 
@@ -1335,7 +1370,7 @@ textarea::placeholder {
   transform: translateY(0);
 }
 
-/* Final generated-code surface */
+/* Final setup-code surface */
 .output-step {
   padding-bottom: 40px;
 }
@@ -1367,8 +1402,7 @@ textarea::placeholder {
   box-shadow: 6px 6px 0 var(--sync-dark);
 }
 
-.copy-button:disabled,
-.inline-code-button:disabled {
+.copy-button:disabled {
   opacity: 0.42;
   box-shadow: none;
   transform: none;
@@ -1405,7 +1439,7 @@ textarea::placeholder {
   font-weight: 800;
 }
 
-#generated-code {
+#setup-code {
   display: block;
   width: 100%;
   height: 190px;
@@ -1422,69 +1456,15 @@ textarea::placeholder {
   transition: height 420ms var(--ease-out);
 }
 
-.code-window.is-expanded #generated-code {
+.code-window.is-expanded #setup-code {
   height: 620px;
 }
 
-#generated-code:focus {
+#setup-code:focus {
   box-shadow: inset 4px 0 0 var(--bell);
 }
 
-.install-steps {
-  margin-top: 32px;
-}
-
-.install-steps h3 {
-  margin-bottom: 8px;
-  color: #79d5b8;
-  font-size: 0.84rem;
-}
-
-.steps-intro {
-  max-width: 760px;
-  margin-bottom: 20px;
-  color: #b9c9c3;
-  font-size: 0.82rem;
-}
-
-.steps-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--code-line);
-  border-left: 1px solid var(--code-line);
-  list-style: none;
-}
-
-.steps-list li {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 12px;
-  min-height: 132px;
-  padding: 16px;
-  border-right: 1px solid var(--code-line);
-  border-bottom: 1px solid var(--code-line);
-}
-
-.step-num {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  background: #79d5b8;
-  color: var(--ink);
-  font-family: var(--technical);
-  font-size: 0.72rem;
-  font-weight: 900;
-}
-
-.steps-list strong,
-.steps-list small {
-  display: block;
-}
-
-.sheet-template-link {
+.docs-template-link {
   display: inline-flex;
   min-height: 36px;
   margin-top: 14px;
@@ -1498,43 +1478,16 @@ textarea::placeholder {
   transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
 }
 
-.sheet-template-link:hover {
+.docs-template-link:hover {
   background: #79d5b8;
   color: var(--ink);
   box-shadow: var(--shadow-action-hover);
   transform: translate(-1px, -1px);
 }
 
-.sheet-template-link:active {
+.docs-template-link:active {
   box-shadow: none;
   transform: translate(1px, 1px);
-}
-
-.steps-list strong {
-  margin-bottom: 6px;
-  font-size: 0.84rem;
-}
-
-.steps-list small {
-  color: #b9c9c3;
-  font-size: 0.76rem;
-  line-height: 1.65;
-}
-
-.inline-code-button {
-  display: inline;
-  width: auto;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-}
-
-.inline-code-button code {
-  color: #79d5b8;
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .output-card .step-navigation {
@@ -1901,7 +1854,6 @@ textarea::placeholder {
 
   .two-column,
   .settings-summary,
-  .steps-list,
   .course-grid {
     grid-template-columns: 1fr;
   }
@@ -1943,10 +1895,6 @@ textarea::placeholder {
 
   .code-window-bar button {
     text-align: right;
-  }
-
-  .steps-list li {
-    min-height: 118px;
   }
 
   .toast {
@@ -2338,7 +2286,7 @@ textarea::placeholder {
 }
 
 .summary-line {
-  gap: var(--space-1);
+  gap: var(--space-3);
 }
 
 .summary-line strong {
@@ -3771,30 +3719,11 @@ select,
   padding-inline: var(--space-4);
 }
 
-#generated-code {
+#setup-code {
   height: 192px;
   min-height: 192px;
   padding: var(--space-5);
   line-height: var(--leading-small);
-}
-
-.install-steps {
-  margin-top: var(--space-8);
-}
-
-.steps-intro {
-  margin-bottom: var(--space-5);
-}
-
-.steps-list li {
-  gap: var(--space-3);
-  min-height: 132px;
-  padding: var(--space-4);
-}
-
-.step-num {
-  width: var(--space-8);
-  height: var(--space-8);
 }
 
 .toast {
@@ -4138,6 +4067,13 @@ select,
   top: auto;
   z-index: auto;
   display: grid;
+  /*
+   * Give every step its own Backdrop Root. Email validation repaints step 3;
+   * without this boundary Chromium may invalidate the masked backdrop-filter
+   * surfaces in the step 4 preview for one frame and composite a large flat
+   * blur tile instead. Each preview/past fog only needs to sample its own card.
+   */
+  isolation: isolate;
   width: 100%;
   height: auto;
   min-height: 0;
@@ -4229,7 +4165,10 @@ select,
 .progressive-blur {
   --fog-direction: to bottom;
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: calc(-1 * var(--fog-layer-bleed));
+  bottom: 0;
+  left: calc(-1 * var(--fog-layer-bleed));
   z-index: 6;
   display: none;
   overflow: hidden;
@@ -4367,7 +4306,7 @@ select,
 
 .progressive-blur-layer {
   position: absolute;
-  inset: calc(-1 * var(--fog-layer-bleed)) 0;
+  inset: calc(-1 * var(--fog-layer-bleed));
   background: rgba(var(--connector-fog-rgb), var(--preview-fog-layer-opacity));
   -webkit-backdrop-filter: blur(var(--fog-blur));
   backdrop-filter: blur(var(--fog-blur));
@@ -5170,19 +5109,21 @@ select,
   --hero-fog-blur-4: var(--hero-fog-desktop-blur-4);
   --hero-fog-blur-5: var(--hero-fog-desktop-blur-5);
   /*
-   * Fade the whole fog to transparent just above the boards so its
-   * backdrop-filter never composites across the fixed header (which produced a
-   * Chrome-only seam at the top-left). The fog's own top sits one vertical bleed
-   * above the boards, so the transparent stop lands above the header while the
-   * fog reaches full strength a little into the boards. Intersected per layer
-   * with each layer's horizontal mask so the left bleed is preserved.
+   * Fade the whole fog at both vertical ends. The top fade keeps its
+   * backdrop-filter away from the fixed header; the bottom fade keeps the same
+   * promoted layers from sampling across the Hero/wizard background boundary
+   * while the sticky scene leaves the viewport. Intersect this per layer with
+   * the horizontal mask so the left bleed remains available without exposing a
+   * hard compositor edge at either page boundary.
    */
   --hero-fog-vertical-mask: linear-gradient(
     to bottom,
     transparent 0,
     transparent calc(var(--hero-fog-vertical-bleed) - 16px),
     #000 calc(var(--hero-fog-vertical-bleed) + 48px),
-    #000 100%
+    #000 calc(100% - var(--hero-fog-vertical-bleed) - 48px),
+    transparent calc(100% - var(--hero-fog-vertical-bleed) + 16px),
+    transparent 100%
   );
   position: absolute;
   top: calc(-1 * var(--hero-fog-vertical-bleed));
@@ -5196,6 +5137,19 @@ select,
 
 .hero-stage.is-rendering-paused .hero-progressive-fog {
   visibility: hidden;
+}
+
+/*
+ * The observer resumes the Hero 640px before it can re-enter the viewport.
+ * Until then, hide the whole visual scene so off-screen boards, shadows and 3D
+ * layers no longer occupy mobile paint/compositor work or promoted surfaces.
+ */
+.hero-stage.is-rendering-paused .hero-visual {
+  visibility: hidden;
+}
+
+.hero-stage.is-rendering-paused .hero-depth-scene {
+  will-change: auto;
 }
 
 .hero-fog-layer {
@@ -5597,11 +5551,22 @@ select,
 .control-panel-card .code-window {
   position: relative;
   display: grid;
-  height: 272px;
+  height: 138px;
   overflow: hidden;
   border: 1px solid #47655a;
   border-radius: var(--radius-card);
   background: #000;
+}
+
+.control-panel-card .code-window::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(6px);
+  content: "";
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .control-panel-card .code-window::after {
@@ -5619,7 +5584,7 @@ select,
   pointer-events: none;
 }
 
-.control-panel-card #generated-code {
+.control-panel-card #setup-code {
   grid-area: 1 / 1;
   width: 100%;
   height: 100%;
@@ -5636,7 +5601,7 @@ select,
   resize: none;
 }
 
-.control-panel-card #generated-code:focus {
+.control-panel-card #setup-code:focus {
   box-shadow: inset 3px 0 0 #79d5b8;
 }
 
@@ -5707,7 +5672,7 @@ select,
   .start-button:not(:disabled):active,
   .copy-button:not(:disabled):active,
   .calendar-link:active,
-  .sheet-template-link:active,
+  .docs-template-link:active,
   .step-card button:not(:disabled):active,
   .step-complete-button:not(:disabled):active,
   .segmented-control label:active span,
@@ -5718,89 +5683,90 @@ select,
   }
 }
 
-.control-panel-card .install-steps {
-  margin-top: 32px;
+.control-panel-card .next-steps {
+  margin-top: 28px;
 }
 
-.control-panel-card .steps-list {
-  display: block;
-  border: 0;
-  border-top: 1px solid #93aaa1;
-}
-
-.control-panel-card .steps-list li {
-  display: block;
-  min-height: 0;
-  padding: 23px 20px;
-  border: 0;
-  border-bottom: 1px solid #93aaa1;
-}
-
-.control-panel-card .steps-list li:last-child {
-  padding-block: 18px;
-}
-
-.install-step-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-6);
-}
-
-.control-panel-card .install-step-heading strong {
+.control-panel-card .next-steps h3 {
   margin: 0;
   color: #f4f7f2;
   font-size: 1rem;
+  line-height: 1.5;
 }
 
-.control-panel-card .install-step-heading span {
-  flex: 0 0 auto;
-  color: #b9c9c3;
-  font-size: 0.94rem;
-}
-
-.control-panel-card .steps-list small {
-  margin-top: 8px;
+.control-panel-card .desktop-next-steps {
+  margin: 24px 0 0;
+  padding-left: 1.5rem;
   color: #b9c9c3;
   font-size: 0.98rem;
-  line-height: 1.55;
+  line-height: 1.75;
 }
 
-.control-panel-card .apps-script-guide-image {
+.control-panel-card .desktop-next-steps li + li {
+  margin-top: 2px;
+}
+
+.control-panel-card .output-email {
+  overflow-wrap: anywhere;
+}
+
+.control-panel-card .mobile-next-steps {
+  display: none;
+  margin: 16px 0 0;
+  color: #b9c9c3;
+  font-size: 0.98rem;
+  line-height: 1.6;
+}
+
+#step-5[data-transfer-mode="email"] .desktop-next-steps {
+  display: none;
+}
+
+#step-5[data-transfer-mode="email"] .mobile-next-steps {
   display: block;
-  width: min(800px, 100%);
-  height: auto;
-  margin-top: 16px;
 }
 
-.control-panel-card .sheet-template-link,
-.control-panel-card .inline-code-button {
+.control-panel-card .desktop-step-copy-button,
+.control-panel-card .docs-template-link {
   display: inline;
   min-height: 0;
-  margin: 0;
+  margin: 0 2px;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid #00c792;
   border-radius: 0;
   background: transparent;
   color: #00c792;
   font: inherit;
   font-weight: inherit;
   line-height: inherit;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.12em;
+  text-decoration-skip-ink: auto;
   vertical-align: baseline;
 }
 
-.control-panel-card .sheet-template-link {
-  margin-inline: 2px;
-}
-
-.control-panel-card .sheet-template-link:hover,
-.control-panel-card .inline-code-button:not(:disabled):hover {
+.control-panel-card .desktop-step-copy-button:not(:disabled):hover,
+.control-panel-card .docs-template-link:hover {
   background: rgba(0, 199, 146, 0.12);
   color: #79d5b8;
   box-shadow: none;
   transform: none;
+}
+
+.control-panel-card .desktop-step-copy-button:disabled {
+  color: #8fa19a;
+  cursor: not-allowed;
+}
+
+.control-panel-card .docs-template-link.is-disabled {
+  color: #8fa19a;
+  cursor: not-allowed;
+}
+
+.control-panel-card .docs-template-link.is-disabled:hover {
+  background: transparent;
+  color: #8fa19a;
 }
 
 @media (max-width: 760px) {
@@ -5838,25 +5804,14 @@ select,
   }
 
   .control-panel-card .code-window {
-    height: 240px;
+    height: 220px;
   }
 
-  .control-panel-card #generated-code {
+  .control-panel-card #setup-code {
     padding: 28px 18px;
     font-size: 0.78rem;
   }
 
-  .control-panel-card .steps-list li {
-    padding-inline: 8px;
-  }
-
-  .control-panel-card .steps-list small {
-    font-size: 0.88rem;
-  }
-
-  .control-panel-card .apps-script-guide-image {
-    margin-top: 12px;
-  }
 }
 
 /* Footer: project identity and direct contact routes. */
@@ -6000,7 +5955,9 @@ html[data-input-active] {
    */
   overflow-anchor: none;
   scroll-padding-top: calc(72px + var(--space-4));
-  scroll-padding-bottom: calc(var(--keyboard-inset, 0px) + var(--space-4));
+  /* The visual viewport already excludes the keyboard. Adding its height here
+   * makes WebKit's native caret scroll fight the app's layout-viewport scroll. */
+  scroll-padding-bottom: var(--space-4);
 }
 
 html[data-input-active] body,
@@ -6053,8 +6010,7 @@ html[data-keyboard-open] .journey-step.is-current .step-heading {
     min-height: 44px;
   }
 
-  .control-panel-card .sheet-template-link,
-  .control-panel-card .inline-code-button {
+  .control-panel-card .docs-template-link {
     display: inline-flex;
     min-height: 44px;
     align-items: center;
