@@ -17,7 +17,7 @@ const controlPanelGenerator = require(path.join(
 ));
 const immutableManifestUrl =
   'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
-  '0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json';
+  '3fae71be483f6c1039a77f6e55a34ba158d4e6c8/notification-email-templates.json';
 const expectedAppsScriptOAuthScopes = [
   'https://www.googleapis.com/auth/documents.currentonly',
   'https://www.googleapis.com/auth/spreadsheets.readonly',
@@ -1626,7 +1626,7 @@ assert.equal(generatedCode.includes('notification-email-templates.json'), true);
 assert.equal(
   generatedCode.includes(
     'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
-    '0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json'
+    '3fae71be483f6c1039a77f6e55a34ba158d4e6c8/notification-email-templates.json'
   ),
   true,
   'HTML Email 版型必須固定到已核准的 commit'
@@ -3864,11 +3864,11 @@ context.CacheService = {
     return {
       get(key) {
         emailTemplateCacheReadCount += 1;
-        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8');
+        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_3FAE71BE');
         return cachedEmailTemplateManifest;
       },
       put(key, value, seconds) {
-        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_0131D6B8');
+        assert.equal(key, 'TSCHOOL_EMAIL_TEMPLATE_MANIFEST_3FAE71BE');
         assert.equal(seconds, 60 * 60);
         cachedEmailTemplateManifest = value;
       }
@@ -3881,7 +3881,7 @@ context.UrlFetchApp = {
     assert.equal(
       url,
       'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
-      '0131d6b8cf2b0f524e85bb8720d2e680458afea2/notification-email-templates.json'
+      '3fae71be483f6c1039a77f6e55a34ba158d4e6c8/notification-email-templates.json'
     );
     assert.equal(options.followRedirects, true);
     assert.equal(options.muteHttpExceptions, true);
