@@ -1031,7 +1031,8 @@ function getSettings() {
     reminderMode: DEFAULTS.reminderMode,
     reminderMinutes: DEFAULTS.reminderMinutes,
     initialTermKey: summary ? summary.termKey : '',
-    initialSourceFingerprint: summary ? summary.fingerprint : '',
+    initialCatalogFingerprint: summary ? summary.catalogFingerprint : '',
+    initialCatalogFingerprintVersion: summary ? summary.catalogFingerprintVersion : 0,
     initialKnownTitles: summary ? summary.catalog.all.map(item => item.title) : [],
     setupSourceSnapshot: summary ? {
       firstDateKey: summary.firstDateKey,

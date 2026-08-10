@@ -141,6 +141,21 @@ assert.equal(
   true,
   'Google 帳號不符警告應使用指定文案與設定碼中的 Email'
 );
+assert.equal(
+  setupDialogHtml.includes('受組織隱私設定限制，無法確認目前 Google 帳號'),
+  true,
+  '無法讀取 Google 帳號時，匯入頁必須要求使用者自行確認'
+);
+assert.equal(
+  setupDialogHtml.includes("openButton.textContent = '我已確認，開啟控制臺'"),
+  true,
+  '帳號無法驗證時不得立刻關閉提示，應要求一次明確確認'
+);
+assert.match(
+  setupDialogHtml,
+  /importSetupCodeFromUi\(codeInput\.value, unverifiedAccountConfirmed\)/,
+  '帳號無法驗證時，第二次確認必須送回後端後才可真正匯入'
+);
 assert.equal(configuratorStylesSource.includes('.notification-grid #field-notification-email'), true);
 assert.equal(configuratorStylesSource.includes('grid-column: 1 / -1'), true);
 assert.equal(configuratorHtml.includes('class="instant-notification-track"'), true);
@@ -392,6 +407,11 @@ assert.equal(
   true,
   '第一次同步前應以獨立 Apps Script 執行預讀 30 天課綱'
 );
+assert.match(
+  sidebarHtml,
+  /function updateActionAvailability\(\)[\s\S]*?sourceUnavailable[\s\S]*?byId\('create-calendar'\)\.disabled = sourceUnavailable[\s\S]*?input\[name="grade"\]/,
+  '課表來源離線時除同步與儲存外，也不得建立額外 Calendar 或切換年級'
+);
 assert.equal(
   sidebarHtml.includes('正在準備未來 30 天的課綱資料…'),
   true
@@ -578,7 +598,38 @@ assert.equal(emailTemplateManifestText.includes('。'), false);
 assert.equal(/border-left\s*:/i.test(emailTemplateManifestText), false);
 assert.equal(
   emailTemplateManifestText.includes('這封信由你的行程同步控制臺自動寄出'),
+  false
+);
+assert.equal(
+  emailTemplateManifest.shell.includes('>{{controlPanelName}}</p>'),
   true
+);
+assert.equal(emailTemplateManifest.shell.includes('這封信由'), false);
+assert.equal(
+  emailTemplateManifest.notifications.schedule_changes.content.includes(
+    'margin:24px 0 0;font-size:12px;line-height:1.7;color:#4f5d57;'
+  ),
+  true,
+  '行程調整說明應沿用信件 spacing 與次要文字規格'
+);
+assert.equal(
+  emailTemplateManifest.notifications.schedule_changes.content.includes(
+    '＊部分資訊來自課綱，請以教師最新說明為主'
+  ),
+  true
+);
+assert.equal(
+  emailTemplateManifest.notifications.schedule_changes.repeaters.changesHtml.template.includes(
+    '{{type}}'
+  ),
+  false,
+  '行程調整卡片標題列不應顯示異動類型標籤'
+);
+assert.equal(
+  emailTemplateManifest.notifications.schedule_changes.repeaters.changesHtml.template.includes(
+    'float:right'
+  ),
+  false
 );
 assert.equal(emailTemplateManifestText.includes('課表異動'), false);
 assert.equal(configuratorAppSource.includes('HIGH_LOAD_TEST_QUERY_PARAMETER'), false);
@@ -1179,19 +1230,26 @@ assert.deepEqual(
   '剛好 5 節的正式課程不得被節數邊界誤判為活動'
 );
 
+const roundTripSetupCatalog = [
+  { title: '公民／社會探究', type: 'course', period: 'term' },
+  { title: '全校活動（上午）', type: 'activity', period: 'term' }
+];
+const roundTripCatalogFingerprint = scheduleData.makeCatalogFingerprint(
+  '二年級|2026-02-23',
+  '2026-08-30',
+  roundTripSetupCatalog
+);
 const roundTripSetupCode = setupCode.encode({
   appVersion: '2.0.0-rc.1',
   gradeName: '高二',
   termKey: '二年級|2026-02-23',
-  sourceFingerprint: '來源-😀-指紋',
+  initialCatalogFingerprintVersion: scheduleData.CATALOG_FINGERPRINT_VERSION,
+  initialCatalogFingerprint: roundTripCatalogFingerprint,
   setupSourceSnapshot: {
     firstDateKey: '2026-02-23',
     lastDateKey: '2026-08-30',
     sourceUpdatedLabel: '更新時間\n08011200',
-    items: [
-      { title: '公民／社會探究', type: 'course', period: 'term' },
-      { title: '全校活動（上午）', type: 'activity', period: 'term' }
-    ]
+    items: roundTripSetupCatalog
   },
   selectedCourses: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
   includeActivities: true,
@@ -1208,7 +1266,9 @@ assert.deepEqual(decodedSetupCode, {
   generatorVersion: '2.0.0-rc.1',
   gradeName: '高二',
   termKey: '二年級|2026-02-23',
-  sourceFingerprint: '來源-😀-指紋',
+  catalogFingerprintVersion: 1,
+  catalogFingerprint: roundTripCatalogFingerprint,
+  sourceFingerprint: roundTripCatalogFingerprint,
   selectedCourses: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
   includeActivities: true,
   excludedActivities: ['全校活動（上午）'],
@@ -1219,10 +1279,7 @@ assert.deepEqual(decodedSetupCode, {
     firstDateKey: '2026-02-23',
     lastDateKey: '2026-08-30',
     sourceUpdatedLabel: '更新時間\n08011200',
-    items: [
-      { title: '公民／社會探究', type: 'course', period: 'term' },
-      { title: '全校活動（上午）', type: 'activity', period: 'term' }
-    ]
+    items: roundTripSetupCatalog
   }
 });
 assert.throws(() => setupCode.decode(''), /請貼上設定碼/);
@@ -1248,7 +1305,8 @@ const generatedCode = global.buildAppsScriptCode({
   reminderMode: 'none',
   reminderMinutes: 10,
   initialTermKey: '',
-  initialSourceFingerprint: '',
+  initialCatalogFingerprintVersion: 0,
+  initialCatalogFingerprint: '',
   initialKnownTitles: []
 });
 
@@ -1372,6 +1430,20 @@ assert.equal(
     `控制臺呼叫的 Apps Script handler ${handler} 必須存在`
   );
 });
+assert.equal(generatedCode.includes('const SETTINGS_SCHEMA_VERSION = 8;'), true);
+assert.equal(generatedCode.includes('const SETUP_CATALOG_FINGERPRINT_VERSION = 1;'), true);
+assert.equal(generatedCode.includes('const SETUP_CONTEXT_FINGERPRINT_VERSION = 1;'), true);
+assert.equal(generatedCode.includes('const SCHEDULE_FINGERPRINT_VERSION = 1;'), true);
+assert.equal(
+  generatedCode.includes('source.fingerprint === settings.sourceFingerprint'),
+  false,
+  '產生的 Code.gs 不得再比較不同語意的通用指紋'
+);
+assert.match(
+  generatedCode,
+  /function saveSettingsAndSyncFromUi\(input\)[\s\S]*?catch \(error\) \{[\s\S]*?notifySyncFailureUnlessActionRequired_[\s\S]*?\}\s*return buildSyncUiResponse_\(/,
+  '同步失敗通知的 catch 邊界必須排除同步完成後的 UI 重載'
+);
 ['同步狀態', '日曆', '年級', '課程與活動', '通知'].forEach(heading => {
   assert.equal(
     generatedCode.includes(`<h2>${heading}</h2>`),
@@ -1387,14 +1459,20 @@ assert.match(
 );
 assert.match(
   generatedCode,
-  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?CalendarApp\.createCalendar\(buildDedicatedCalendarName_\(settings\), \{\s*selected: true\s*\}\)/,
+  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?const calendarName = buildDedicatedCalendarName_\(settings\);[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{\s*selected: true\s*\}\)/,
   '首次同步自動建立的專用 Calendar 應預設顯示'
+);
+assert.match(
+  generatedCode,
+  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?findRecoverableDedicatedCalendars_\(calendarName\)[\s\S]*?setDescription\(MANAGED_CALENDAR_DESCRIPTION\)/,
+  '日曆已建立但 Calendar ID 尚未保存時，下次必須接回同一個受管理日曆'
 );
 assert.equal(generatedCode.includes('function previewSettingsImpactFromUi('), true);
 assert.equal(generatedCode.includes('function showSettingsSidebar('), true);
 assert.equal(generatedCode.includes('function showSetupImportDialog('), true);
 assert.equal(generatedCode.includes('function previewSetupCodeForUi('), true);
 assert.equal(generatedCode.includes('function activeGoogleAccountDoesNotMatch_('), true);
+assert.equal(generatedCode.includes('function getActiveGoogleAccountCheck_('), true);
 assert.equal(generatedCode.includes('function importSetupCodeFromUi('), true);
 assert.equal(generatedCode.includes('function applySetupCodeFromUi('), true);
 assert.match(
@@ -1403,6 +1481,47 @@ assert.match(
   '第一次開啟控制臺時必須先要求完整的既定 OAuth 權限，再讀取設定或顯示介面'
 );
 assert.equal(generatedCode.includes('lock.tryLock(3000)'), true);
+assert.match(
+  generatedCode,
+  /function getSettingsUiData\(\)[\s\S]*?loadSourceContextForUi_\(observedSettings\)[\s\S]*?!source\.sourceUnavailable/,
+  '控制臺讀取即時課表失敗時應改用唯讀摘要，且不得用摘要觸發學期轉銜'
+);
+assert.match(
+  generatedCode,
+  /function prepareFirstSyncCourseOutlinesFromUi\(input\)[\s\S]*?LockService\.getScriptLock\(\)[\s\S]*?tryLock\(3000\)[\s\S]*?finally \{\s*lock\.releaseLock\(\)/,
+  '第一次同步前的課綱預載必須在同一把 Script Lock 內完成'
+);
+const syncScheduleFunctionSource = generatedCode.slice(
+  generatedCode.indexOf('function syncSchedule_('),
+  generatedCode.indexOf('function buildSyncJobInput_(')
+);
+assert.match(
+  syncScheduleFunctionSource,
+  /LockService\.getScriptLock\(\)[\s\S]*?tryLock\(15000\)[\s\S]*?registerNewTitles_\(settings, source\)/,
+  '背景同步發現新標題與 SETTINGS_STORE 寫回必須位於 Script Lock 內'
+);
+const saveSettingsCoreFunctionSource = generatedCode.slice(
+  generatedCode.indexOf('function saveSettingsCore_('),
+  generatedCode.indexOf('function sanitizeSettingsInput_(')
+);
+assert.match(
+  saveSettingsCoreFunctionSource,
+  /LockService\.getScriptLock\(\)[\s\S]*?tryLock\(15000\)/,
+  '前台儲存設定必須和背景同步使用同一種 Script Lock'
+);
+assert.match(
+  syncScheduleFunctionSource,
+  /resetSyncWatchdogTrigger_\(\)/,
+  '每批同步開始前必須重設 watchdog，不得沿用殘留觸發器時間'
+);
+assert.doesNotMatch(
+  generatedCode.slice(
+    generatedCode.indexOf('function writeChunkedJson_('),
+    generatedCode.indexOf('function splitUtf8Chunks_(')
+  ),
+  /deleteProperty\(/,
+  '分塊寫入不得清除尾端 chunk，以免較舊的小寫入刪除較新的大寫入'
+);
 const quickDeleteFunctionSource = generatedCode.slice(
   generatedCode.indexOf('function quickDeleteSyncedCalendarEvents()'),
   generatedCode.indexOf('function removeManagedEventsFromCalendar_(')
@@ -1450,6 +1569,7 @@ assert.match(
 );
 assert.equal(generatedCode.includes('function getControlPanelUi_('), true);
 assert.equal(generatedCode.includes('function getControlPanelUrl_('), true);
+assert.equal(generatedCode.includes('function getControlPanelName_('), true);
 assert.equal(generatedCode.includes('SpreadsheetApp.getUi('), false);
 assert.equal(generatedCode.includes('SpreadsheetApp.getActiveSpreadsheet('), false);
 assert.equal(generatedCode.includes('DocumentApp.getUi('), true);
@@ -1820,12 +1940,18 @@ context.parseSchedulePayload_ = originalParseSchedulePayload;
 context.resetScheduleSourceRuntimeCache_();
 
 const currentSetupSource = {
+  gradeName: '高二',
+  firstDateKey: '2026-02-23',
+  lastDateKey: '2026-08-30',
   termKey: '二年級|2026-02-23',
-  fingerprint: 'current-source-fingerprint',
+  catalogFingerprintVersion: 1,
+  catalogFingerprint: roundTripCatalogFingerprint,
+  scheduleFingerprint: 'current-schedule-fingerprint',
   catalog: {
-    courses: [{ title: '公民／社會探究' }],
-    activities: [{ title: '全校活動（上午）' }],
-    all: [{ title: '公民／社會探究' }, { title: '全校活動（上午）' }]
+    courses: [roundTripSetupCatalog[0]],
+    activities: [roundTripSetupCatalog[1]],
+    all: roundTripSetupCatalog,
+    vacationItems: []
   }
 };
 let setupPreviewLiveFetchCount = 0;
@@ -1845,11 +1971,36 @@ assert.deepEqual(
   ['從巴士底到車諾比：歷史', '程式設計 & AI']
 );
 assert.equal(setupPreview.sourceChanged, true);
+const mismatchedCatalogFingerprintCode = setupCode.encode({
+  appVersion: '2.0.0-rc.1',
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  initialCatalogFingerprintVersion: 1,
+  initialCatalogFingerprint: 'tampered-catalog-fingerprint',
+  setupSourceSnapshot: {
+    firstDateKey: '2026-02-23',
+    lastDateKey: '2026-08-30',
+    sourceUpdatedLabel: '0801',
+    items: roundTripSetupCatalog
+  },
+  selectedCourses: ['公民／社會探究'],
+  includeActivities: true,
+  excludedActivities: [],
+  notificationEmail: 'student+sync@example.com',
+  instantNotificationsEnabled: true,
+  notificationHours: [6]
+});
+assert.throws(
+  () => context.buildSetupImportPreview_(mismatchedCatalogFingerprintCode, {}),
+  /課表摘要指紋不一致/,
+  '設定碼 checksum 正確但內嵌目錄與明確指紋不一致時仍必須拒絕'
+);
 const legacySetupCode = setupCode.encode({
   appVersion: '2.0.0-rc.1',
   gradeName: '高二',
   termKey: currentSetupSource.termKey,
-  sourceFingerprint: currentSetupSource.fingerprint,
+  initialCatalogFingerprintVersion: currentSetupSource.catalogFingerprintVersion,
+  initialCatalogFingerprint: currentSetupSource.catalogFingerprint,
   selectedCourses: ['公民／社會探究'],
   includeActivities: true,
   excludedActivities: ['全校活動（上午）'],
@@ -1859,12 +2010,33 @@ const legacySetupCode = setupCode.encode({
 });
 const firstConfirmationToken = context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken;
 context.loadSourceContext_ = () => Object.assign({}, currentSetupSource, {
-  fingerprint: 'newer-source-fingerprint'
+  scheduleFingerprint: 'newer-schedule-fingerprint'
+});
+assert.equal(
+  context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken,
+  firstConfirmationToken,
+  '行程細節改變不得冒充設定目錄改變，也不得讓設定碼確認失效'
+);
+const changedSetupCatalog = roundTripSetupCatalog.concat([
+  { title: '新增選修', type: 'course', period: 'term' }
+]);
+context.loadSourceContext_ = () => Object.assign({}, currentSetupSource, {
+  catalogFingerprint: scheduleData.makeCatalogFingerprint(
+    currentSetupSource.termKey,
+    currentSetupSource.lastDateKey,
+    changedSetupCatalog
+  ),
+  catalog: {
+    courses: [roundTripSetupCatalog[0], changedSetupCatalog[2]],
+    activities: [roundTripSetupCatalog[1]],
+    all: changedSetupCatalog,
+    vacationItems: []
+  }
 });
 assert.notEqual(
   context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken,
   firstConfirmationToken,
-  '來源再次變動後，既有 confirmationToken 必須失效'
+  '設定目錄再次變動後，既有 confirmationToken 必須失效'
 );
 context.loadSourceContext_ = () => currentSetupSource;
 const crossTermCode = setupCode.encode({
@@ -1886,7 +2058,8 @@ assert.throws(
 const invalidEmailCode = setupCode.encode({
   gradeName: '高二',
   termKey: currentSetupSource.termKey,
-  sourceFingerprint: currentSetupSource.fingerprint,
+  initialCatalogFingerprintVersion: currentSetupSource.catalogFingerprintVersion,
+  initialCatalogFingerprint: currentSetupSource.catalogFingerprint,
   selectedCourses: ['公民／社會探究'],
   includeActivities: true,
   excludedActivities: [],
@@ -1962,6 +2135,19 @@ assert.deepEqual(
   ].sort(),
   '控制臺的 Code.gs 課程目錄應保留學期間與寒暑假分類'
 );
+assert.equal(
+  context.makeSetupCatalogFingerprint_(
+    '一年級|2026-01-01',
+    '2026-08-31',
+    runtimeVacationCatalog
+  ),
+  scheduleData.makeCatalogFingerprint(
+    '一年級|2026-01-01',
+    '2026-08-31',
+    vacationCatalog.all
+  ),
+  '網站與 Code.gs 必須對同一課程目錄產生完全相同的指紋'
+);
 assert.deepEqual(
   Array.from(context.extractCatalogFromPayload_(makeCatalogPayload(
     [1],
@@ -2027,6 +2213,22 @@ assert.deepEqual(
 assert.deepEqual(
   Array.from(parsedOutlineIndex.setsByGrade['高二'][0].spreadsheetIds),
   ['index-required-sheet', 'index-elective-sheet']
+);
+const reorderedOutlineIndexSets = JSON.parse(JSON.stringify(parsedOutlineIndex.setsByGrade));
+reorderedOutlineIndexSets['高二'][0].outlineNames.reverse();
+reorderedOutlineIndexSets['高二'][0].spreadsheetIds.reverse();
+assert.equal(
+  context.makeCourseOutlineSourceIndexFingerprint_(reorderedOutlineIndexSets),
+  parsedOutlineIndex.indexFingerprint,
+  '中央課綱索引只調整資料列順序時，不得被誤判為內容變更'
+);
+assert.throws(
+  () => context.assertCourseOutlineSourceIndexPayload_({
+    setsByGrade: JSON.parse(JSON.stringify(parsedOutlineIndex.setsByGrade)),
+    indexFingerprint: 'tampered-index-fingerprint'
+  }),
+  /指紋不一致/,
+  '中央課綱索引快取內容與明確指紋不一致時必須停止使用'
 );
 assert.equal(parsedOutlineIndex.setsByGrade['高一'].length, 0);
 assert.throws(
@@ -2119,6 +2321,15 @@ assert.deepEqual(
   ),
   ['2026-02-23', '2026-03-25'],
   '課綱視窗應包含今天至第 30 天，排除過去與更遠課程'
+);
+assert.equal(
+  context.formatDateKey_(new Date('2026-08-10T23:59:59+08:00')),
+  '2026-08-10'
+);
+assert.equal(
+  context.formatDateKey_(new Date('2026-08-11T00:00:00+08:00')),
+  '2026-08-11',
+  '跨夜日期應直接依 Asia/Taipei 日界線切換，不得把凌晨五分鐘誤算為前一天'
 );
 
 if (fs.existsSync('/tmp/tschool-requirements-grade2.json')) {
@@ -2377,6 +2588,66 @@ const outlineStateKey = context.makeOccurrenceKey_(outlineBaseItem);
 assert.equal(context.makeOccurrenceKey_(oldOutlineItem), context.makeOccurrenceKey_(newOutlineItem));
 assert.equal(context.normalizeTitle_(' 國 語 文　'), '國語文');
 assert.equal(context.normalizeTitle_('數學Ａ'), context.normalizeTitle_('數學A'));
+const outlineIdentityHash = context.makeCourseOutlineIdentityHash_({
+  classroom: '原教室',
+  topic: '第一冊',
+  content: '107年歷屆國寫練習-知性題(紙本練習)'
+});
+assert.ok(outlineIdentityHash);
+assert.equal(
+  outlineIdentityHash,
+  context.makeCourseOutlineIdentityHash_({
+    classroom: '新教室',
+    topic: '第一冊',
+    content: '107年歷屆國寫練習-知性題(紙本練習)'
+  }),
+  '課綱事件身分只由單元主題與課程內容決定，教室變更不得改變身分'
+);
+assert.notEqual(
+  outlineIdentityHash,
+  context.makeCourseOutlineIdentityHash_({
+    classroom: '原教室',
+    topic: '第一冊',
+    content: '另一份練習'
+  })
+);
+assert.ok(
+  context.makeCourseOutlineIdentityHash_({ topic: '只有主題', content: '' }),
+  '課綱只有單元主題時，仍應使用實際存在的資訊輔助判定'
+);
+assert.ok(
+  context.makeCourseOutlineIdentityHash_({ topic: '', content: '只有課程內容' }),
+  '課綱只有課程內容時，仍應使用實際存在的資訊輔助判定'
+);
+assert.equal(
+  context.makeCourseOutlineIdentityHash_({ topic: '', content: '' }),
+  '',
+  '單元主題與課程內容都缺少時不得創造課綱身分'
+);
+assert.equal(
+  context.serializeStateItem_(
+    Object.assign({}, outlineBaseItem, { outlineIdentityHash }),
+    'outline-identity-calendar-event',
+    'outline-identity-signature',
+    outlineSettings
+  ).outlineIdentityHash,
+  outlineIdentityHash,
+  '課綱事件身分必須保存到同步狀態，下次讀取才能跨時間比對'
+);
+
+function haveCompatibleMoveShapeReference(oldItem, newItem) {
+  if (Boolean(oldItem && oldItem.isAllDay) !== Boolean(newItem && newItem.isAllDay)) {
+    return false;
+  }
+  if (oldItem && oldItem.isAllDay) return true;
+  const oldStart = Number(oldItem && oldItem.periodStart);
+  const oldEnd = Number(oldItem && oldItem.periodEnd) || oldStart;
+  const newStart = Number(newItem && newItem.periodStart);
+  const newEnd = Number(newItem && newItem.periodEnd) || newStart;
+  if (![oldStart, oldEnd, newStart, newEnd].every(Number.isInteger)) return false;
+  if (oldStart < 1 || newStart < 1 || oldEnd < oldStart || newEnd < newStart) return false;
+  return oldEnd - oldStart === newEnd - newStart;
+}
 
 function buildSyncPlanReference(oldState, desiredEvents, todayKey) {
   const oldFuture = Object.keys(oldState)
@@ -2411,18 +2682,28 @@ function buildSyncPlanReference(oldState, desiredEvents, todayKey) {
   const usedOld = {};
   const stillNew = [];
   unmatchedNew.forEach(newItem => {
-    const candidates = unmatchedOld
+    let candidates = unmatchedOld
       .filter(oldItem =>
         !usedOld[oldItem.stateKey] &&
         context.normalizeTitle_(oldItem.originalTitle) ===
-          context.normalizeTitle_(newItem.originalTitle)
+          context.normalizeTitle_(newItem.originalTitle) &&
+        haveCompatibleMoveShapeReference(oldItem, newItem)
       )
       .map(oldItem => ({
         oldItem,
         distance: Math.abs(new Date(oldItem.start).getTime() - newItem.start.getTime())
       }))
-      .filter(candidate => candidate.distance <= 21 * 24 * 60 * 60 * 1000)
-      .sort((left, right) => left.distance - right.distance);
+      .filter(candidate => candidate.distance <= 21 * 24 * 60 * 60 * 1000);
+    const newOutlineIdentityHash = String(newItem.outlineIdentityHash || '');
+    if (newOutlineIdentityHash) {
+      const sameOutlineCandidates = candidates.filter(candidate =>
+        String(candidate.oldItem.outlineIdentityHash || '') === newOutlineIdentityHash
+      );
+      candidates = sameOutlineCandidates.length
+        ? sameOutlineCandidates
+        : candidates.filter(candidate => !candidate.oldItem.outlineIdentityHash);
+    }
+    candidates.sort((left, right) => left.distance - right.distance);
     const best = candidates.length &&
       (candidates.length === 1 || candidates[0].distance < candidates[1].distance)
       ? candidates[0]
@@ -2480,6 +2761,34 @@ function makePlanTestItem(title, date, location, period, testId) {
     start: new Date(date.getTime()),
     end: new Date(date.getTime() + 50 * 60 * 1000)
   };
+}
+
+function makePlanRangeTestItem(
+  title,
+  date,
+  location,
+  periodStart,
+  periodEnd,
+  testId,
+  outlineIdentityHashValue
+) {
+  const item = makePlanTestItem(title, date, location, periodStart, testId);
+  item.periodEnd = periodEnd;
+  item.end = new Date(date.getTime() + (periodEnd - periodStart + 1) * 50 * 60 * 1000);
+  if (outlineIdentityHashValue) item.outlineIdentityHash = outlineIdentityHashValue;
+  return item;
+}
+
+function makePlanState(items) {
+  return items.reduce((state, item) => {
+    const stateKey = context.makeOccurrenceKey_(item);
+    state[stateKey] = Object.assign({}, item, {
+      stateKey,
+      start: item.start.toISOString(),
+      end: item.end.toISOString()
+    });
+    return state;
+  }, {});
 }
 
 const planTieCenter = new Date('2026-08-15T09:00:00.000Z');
@@ -2557,6 +2866,281 @@ assert.equal(
   '超過 21 日一毫秒不得誤判為移動'
 );
 
+const changedPeriodCountOld = makePlanRangeTestItem(
+  '節數測試課程',
+  new Date('2026-08-05T09:00:00.000Z'),
+  '原教室',
+  1,
+  1,
+  'shape-old'
+);
+const changedPeriodCountNew = makePlanRangeTestItem(
+  '節數測試課程',
+  new Date('2026-08-06T09:00:00.000Z'),
+  '新教室',
+  1,
+  2,
+  'shape-new'
+);
+const changedPeriodCountPlan = context.buildSyncPlan_(
+  makePlanState([changedPeriodCountOld]),
+  [changedPeriodCountNew],
+  '2026-08-01'
+);
+assert.equal(changedPeriodCountPlan.moved.length, 0);
+assert.equal(changedPeriodCountPlan.additions.length, 1);
+assert.equal(changedPeriodCountPlan.deletions.length, 1);
+
+const allDayShapeOld = makePlanRangeTestItem(
+  '全天與節次測試',
+  new Date('2026-08-05T00:00:00.000Z'),
+  '',
+  1,
+  1,
+  'all-day-shape-old'
+);
+allDayShapeOld.isAllDay = true;
+const timedShapeNew = makePlanRangeTestItem(
+  '全天與節次測試',
+  new Date('2026-08-06T09:00:00.000Z'),
+  '新教室',
+  1,
+  1,
+  'timed-shape-new'
+);
+const allDayShapePlan = context.buildSyncPlan_(
+  makePlanState([allDayShapeOld]),
+  [timedShapeNew],
+  '2026-08-01'
+);
+assert.equal(allDayShapePlan.moved.length, 0);
+assert.equal(allDayShapePlan.additions.length, 1);
+assert.equal(allDayShapePlan.deletions.length, 1);
+
+const differentOutlineIdentityHash = context.makeCourseOutlineIdentityHash_({
+  topic: '第二冊',
+  content: '不同課程內容'
+});
+const outlineNearOld = makePlanRangeTestItem(
+  '課綱身分課程',
+  new Date('2026-08-14T09:00:00.000Z'),
+  '近教室',
+  1,
+  1,
+  'outline-near-old',
+  differentOutlineIdentityHash
+);
+const outlineFarOld = makePlanRangeTestItem(
+  '課綱身分課程',
+  new Date('2026-08-10T09:00:00.000Z'),
+  '遠教室',
+  1,
+  1,
+  'outline-far-old',
+  outlineIdentityHash
+);
+const outlineIdentityNew = makePlanRangeTestItem(
+  '課綱身分課程',
+  new Date('2026-08-15T09:00:00.000Z'),
+  '調整後教室',
+  5,
+  5,
+  'outline-new',
+  outlineIdentityHash
+);
+const outlineIdentityPlan = context.buildSyncPlan_(
+  makePlanState([outlineNearOld, outlineFarOld]),
+  [outlineIdentityNew],
+  '2026-08-01'
+);
+assert.equal(outlineIdentityPlan.moved.length, 1);
+assert.equal(
+  outlineIdentityPlan.moved[0].oldItem.testId,
+  'outline-far-old',
+  '單元主題與課程內容相同時，應優先於較近但課綱身分不同的候選'
+);
+const outlineMismatchPlan = context.buildSyncPlan_(
+  makePlanState([outlineNearOld]),
+  [outlineIdentityNew],
+  '2026-08-01'
+);
+assert.equal(outlineMismatchPlan.moved.length, 0);
+assert.equal(outlineMismatchPlan.additions.length, 1);
+assert.equal(outlineMismatchPlan.deletions.length, 1);
+const outlineMissingFallbackOld = Object.assign({}, outlineNearOld);
+delete outlineMissingFallbackOld.outlineIdentityHash;
+const outlineMissingFallbackPlan = context.buildSyncPlan_(
+  makePlanState([outlineMissingFallbackOld]),
+  [outlineIdentityNew],
+  '2026-08-01'
+);
+assert.equal(
+  outlineMissingFallbackPlan.moved.length,
+  1,
+  '舊狀態尚未保存課綱身分時，應安全退回同節數的最近時間規則'
+);
+
+const firstAdjustmentOldItems = [
+  makePlanRangeTestItem('化學', new Date('2026-08-05T14:15:00.000Z'), '吉林基地', 6, 6, 'chem-old-single'),
+  makePlanRangeTestItem('化學', new Date('2026-08-05T15:15:00.000Z'), '測驗時間', 7, 7, 'chem-old-test'),
+  makePlanRangeTestItem('化學', new Date('2026-08-13T13:25:00.000Z'), '吉林基地', 5, 6, 'chem-old-double')
+];
+const firstAdjustmentNewItems = [
+  makePlanRangeTestItem('化學', new Date('2026-08-05T14:15:00.000Z'), '吉林基地', 6, 7, 'chem-new-double'),
+  makePlanRangeTestItem('化學', new Date('2026-08-13T13:25:00.000Z'), '測驗時間', 5, 5, 'chem-new-test'),
+  makePlanRangeTestItem('化學', new Date('2026-08-13T14:15:00.000Z'), '吉林基地', 6, 6, 'chem-new-single')
+];
+const firstAdjustmentPlan = context.buildSyncPlan_(
+  makePlanState(firstAdjustmentOldItems),
+  firstAdjustmentNewItems,
+  '2026-08-01'
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(
+    firstAdjustmentPlan.moved.map(pair => [pair.oldItem.testId, pair.newItem.testId])
+  )),
+  [
+    ['chem-old-double', 'chem-new-double'],
+    ['chem-old-test', 'chem-new-test'],
+    ['chem-old-single', 'chem-new-single']
+  ],
+  '化學調課應保持單節／雙節事件形狀，不得判成擴張、縮短或拆併'
+);
+const firstDetectedChanges = context.normalizeDetectedScheduleChanges_(
+  firstAdjustmentPlan.moved.map(pair => ({
+    type: '調整',
+    oldItem: pair.oldItem,
+    newItem: pair.newItem
+  }))
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(firstDetectedChanges.map(change => [
+    change.type,
+    change.oldItem && change.oldItem.dateKey,
+    change.oldItem && change.oldItem.periodStart,
+    change.oldItem && change.oldItem.periodEnd,
+    change.newItem && change.newItem.dateKey,
+    change.newItem && change.newItem.periodStart,
+    change.newItem && change.newItem.periodEnd,
+    change.newItem && change.newItem.location
+  ]))),
+  [
+    ['調整', '2026-08-13', 5, 5, '2026-08-05', 7, 7, '吉林基地'],
+    ['調整', '2026-08-05', 7, 7, '2026-08-13', 5, 5, '測驗時間']
+  ],
+  '化學判定結果應消去相同時段只因連續區間邊界改變所造成的假調整'
+);
+const firstDetectedJobResult = context.buildSyncJobResult_({
+  jobId: 'first-detected-result',
+  created: 0,
+  updated: 3,
+  outlineUpdated: 0,
+  deleted: 0,
+  omittedChangeCount: 0,
+  changes: firstAdjustmentPlan.moved.map(pair => context.serializeSyncChange_({
+    type: '調整',
+    oldItem: pair.oldItem,
+    newItem: pair.newItem
+  }))
+}, false);
+assert.equal(firstDetectedJobResult.updated, 2);
+assert.equal(firstDetectedJobResult.changes.length, 2);
+
+const secondAdjustmentOldItems = [
+  makePlanRangeTestItem('國語文', new Date('2026-08-07T08:25:00.000Z'), '測驗時間', 1, 1, 'chinese-old-test'),
+  makePlanRangeTestItem('國語文', new Date('2026-08-10T13:25:00.000Z'), '吉林基地', 5, 6, 'chinese-old-double'),
+  makePlanRangeTestItem('英語文', new Date('2026-08-07T09:15:00.000Z'), '測驗時間', 2, 2, 'english-old-test')
+];
+const secondAdjustmentNewItems = [
+  makePlanRangeTestItem('國語文', new Date('2026-08-07T08:25:00.000Z'), '吉林基地', 1, 2, 'chinese-new-double'),
+  makePlanRangeTestItem('國語文', new Date('2026-08-10T13:25:00.000Z'), '測驗時間', 5, 5, 'chinese-new-test'),
+  makePlanRangeTestItem('英語文', new Date('2026-08-10T14:15:00.000Z'), '測驗時間', 6, 6, 'english-new-test')
+];
+const secondAdjustmentPlan = context.buildSyncPlan_(
+  makePlanState(secondAdjustmentOldItems),
+  secondAdjustmentNewItems,
+  '2026-08-01'
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(
+    secondAdjustmentPlan.moved.map(pair => [pair.oldItem.testId, pair.newItem.testId])
+  )),
+  [
+    ['chinese-old-double', 'chinese-new-double'],
+    ['chinese-old-test', 'chinese-new-test'],
+    ['english-old-test', 'english-new-test']
+  ],
+  '國語文與英語文調課應依節數形狀辨識真正的跨日期移動'
+);
+const secondDetectedChanges = context.normalizeDetectedScheduleChanges_(
+  secondAdjustmentPlan.moved.map(pair => ({
+    type: '調整',
+    oldItem: pair.oldItem,
+    newItem: pair.newItem
+  }))
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(secondDetectedChanges.map(change => [
+    change.oldItem.testId,
+    change.newItem.testId
+  ]))),
+  [
+    ['chinese-old-double', 'chinese-new-double'],
+    ['chinese-old-test', 'chinese-new-test'],
+    ['english-old-test', 'english-new-test']
+  ],
+  '區間邊界沒有產生假調整時，不得改寫原本正確的三筆判定'
+);
+const identityConflictNormalization = context.normalizeDetectedScheduleChanges_([
+  {
+    type: '調整',
+    oldItem: makePlanRangeTestItem(
+      '課綱衝突測試',
+      new Date('2026-08-05T09:00:00.000Z'),
+      '同地點',
+      1,
+      1,
+      'identity-conflict-a-old',
+      outlineIdentityHash
+    ),
+    newItem: makePlanRangeTestItem(
+      '課綱衝突測試',
+      new Date('2026-08-06T10:00:00.000Z'),
+      '同地點',
+      2,
+      2,
+      'identity-conflict-a-new',
+      outlineIdentityHash
+    )
+  },
+  {
+    type: '調整',
+    oldItem: makePlanRangeTestItem(
+      '課綱衝突測試',
+      new Date('2026-08-06T10:00:00.000Z'),
+      '同地點',
+      2,
+      2,
+      'identity-conflict-b-old',
+      differentOutlineIdentityHash
+    ),
+    newItem: makePlanRangeTestItem(
+      '課綱衝突測試',
+      new Date('2026-08-05T09:00:00.000Z'),
+      '同地點',
+      1,
+      1,
+      'identity-conflict-b-new',
+      differentOutlineIdentityHash
+    )
+  }
+]);
+assert.equal(
+  identityConflictNormalization.length,
+  2,
+  '已知的課綱身分衝突時，不得因日期、節次與地點重疊而消去異動'
+);
+
 let planRandomState = 0x6d2b79f5;
 function nextPlanRandom() {
   planRandomState = (Math.imul(planRandomState, 1664525) + 1013904223) >>> 0;
@@ -2618,7 +3202,7 @@ for (let caseIndex = 0; caseIndex < 1500; caseIndex += 1) {
   assert.deepEqual(
     summarizeSyncPlan(context.buildSyncPlan_(oldState, desiredEvents, '2026-08-01')),
     summarizeSyncPlan(buildSyncPlanReference(oldState, desiredEvents, '2026-08-01')),
-    '標題分桶最佳化必須與原配對演算法逐項等價，隨機案例 ' + caseIndex
+    '標題分桶最佳化必須與節數／課綱身分配對規則逐項等價，隨機案例 ' + caseIndex
   );
 }
 
@@ -2868,6 +3452,71 @@ assert.equal(
   '已有 getProperties() 快照時，分塊寫入不應再單獨讀取舊 COUNT'
 );
 context.clearChunkedStore_('PROPERTY_RPC_TEST');
+context.writeChunkedJson_('CHUNK_TAIL_TEST', { text: '甲'.repeat(6000) });
+const chunkTailPeakCount = Number(scriptPropertiesData.CHUNK_TAIL_TEST_COUNT);
+assert.equal(chunkTailPeakCount > 1, true);
+context.writeChunkedJson_('CHUNK_TAIL_TEST', { text: '短資料' });
+assert.equal(
+  Object.prototype.hasOwnProperty.call(scriptPropertiesData, 'CHUNK_TAIL_TEST_1'),
+  true,
+  '縮小寫入應保留由 COUNT 忽略的尾端 chunk，避免並發刪除競態'
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(context.readChunkedJson_('CHUNK_TAIL_TEST', null))),
+  { text: '短資料' }
+);
+context.clearChunkedStore_('CHUNK_TAIL_TEST');
+assert.equal(
+  Object.keys(scriptPropertiesData).some(key => /^CHUNK_TAIL_TEST_\d+$/.test(key)),
+  false,
+  '明確清除 store 時仍須移除歷史尾端 chunk'
+);
+context.Logger = { log() {} };
+context.clearChunkedStore_('TSCHOOL_SOURCE_UI_CACHE');
+context.loadSourceContext_ = () => currentSetupSource;
+const liveUiSource = context.loadSourceContextForUi_({
+  gradeName: '高二',
+  termKey: currentSetupSource.termKey,
+  pendingTermKey: ''
+});
+assert.equal(Boolean(liveUiSource.sourceUnavailable), false);
+assert.equal(
+  context.readChunkedJson_('TSCHOOL_SOURCE_UI_CACHE', null).gradeName,
+  '高二',
+  '即時課表成功時應更新控制臺唯讀備援摘要'
+);
+context.loadSourceContext_ = () => { throw new Error('模擬課表 API 維護'); };
+const cachedUiSource = context.loadSourceContextForUi_({
+  gradeName: '高二',
+  termKey: currentSetupSource.termKey,
+  pendingTermKey: '',
+  knownTitles: []
+});
+assert.equal(cachedUiSource.sourceUnavailable, true);
+assert.deepEqual(
+  Array.from(cachedUiSource.catalog.all, item => item.title),
+  Array.from(currentSetupSource.catalog.all, item => item.title),
+  '課表 API 失敗時控制臺應使用最後成功摘要，而不是整個崩潰'
+);
+context.clearChunkedStore_('TSCHOOL_SOURCE_UI_CACHE');
+context.clearChunkedStore_('TSCHOOL_SETUP_SOURCE_CONTEXT');
+const settingsOnlyUiSource = context.loadSourceContextForUi_({
+  gradeName: '高二',
+  termKey: currentSetupSource.termKey,
+  pendingTermKey: '',
+  scheduleFingerprint: 'stored-schedule',
+  knownTitles: ['既有課程'],
+  selectedCourses: ['既有課程'],
+  pendingTitles: [],
+  excludedActivities: []
+});
+assert.equal(settingsOnlyUiSource.sourceUnavailable, true);
+assert.deepEqual(
+  Array.from(settingsOnlyUiSource.catalog.courses, item => item.title),
+  ['既有課程'],
+  '沒有持久摘要的舊安裝也應至少用既有設定開啟唯讀控制臺'
+);
+context.loadSourceContext_ = () => currentSetupSource;
 const initialGeneratedSettings = context.loadSettings_();
 assert.deepEqual(
   Array.from(initialGeneratedSettings.autoSyncHours),
@@ -2893,13 +3542,24 @@ assert.deepEqual(
 context.writeChunkedJson_('TSCHOOL_SETTINGS', {
   schemaVersion: 4,
   autoSyncHours: [7, 19],
-  notifySyncHour: 19
+  notifySyncHour: 19,
+  sourceFingerprint: 'legacy-schedule-fingerprint'
 });
 const migratedNotificationSettings = context.loadSettings_();
 assert.deepEqual(
   Array.from(migratedNotificationSettings.notificationHours),
   [7, 19],
   '舊版 autoSyncHours 應遷移為通知時間'
+);
+assert.equal(
+  migratedNotificationSettings.scheduleFingerprint,
+  'legacy-schedule-fingerprint',
+  '舊版通用指紋應單向遷移為明確的課表指紋'
+);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(migratedNotificationSettings, 'sourceFingerprint'),
+  false,
+  '遷移後的記憶體設定不得繼續暴露語意不明的 sourceFingerprint'
 );
 assert.deepEqual(
   Array.from(migratedNotificationSettings.autoSyncHours),
@@ -2946,6 +3606,25 @@ context.LockService = {
     };
   }
 };
+const normalLockService = context.LockService;
+let rejectedPreparationReleased = false;
+context.LockService = {
+  getScriptLock() {
+    return {
+      tryLock(waitMs) {
+        assert.equal(waitMs, 3000);
+        return false;
+      },
+      releaseLock() {
+        rejectedPreparationReleased = true;
+      }
+    };
+  }
+};
+const busyOutlinePreparation = context.prepareFirstSyncCourseOutlinesFromUi({ gradeName: '高二' });
+assert.equal(busyOutlinePreparation.busy, true);
+assert.equal(rejectedPreparationReleased, false, '未取得課綱預載鎖時不得錯誤釋放');
+context.LockService = normalLockService;
 context.writeChunkedJson_('TSCHOOL_SETTINGS', {
   setupComplete: true,
   setupImportedAt: '2026-08-01T00:00:00.000Z',
@@ -2956,6 +3635,13 @@ const lockReleasesBeforeDelete = scriptLockReleases;
 assert.equal(context.quickDeleteSyncedCalendarEvents(), 0);
 assert.equal(scriptLockAttempts, lockAttemptsBeforeDelete + 1);
 assert.equal(scriptLockReleases, lockReleasesBeforeDelete + 1);
+assert.equal(scriptLockHeld, false);
+const lockAttemptsBeforeOutlinePreparation = scriptLockAttempts;
+const lockReleasesBeforeOutlinePreparation = scriptLockReleases;
+const completedOutlinePreparation = context.prepareFirstSyncCourseOutlinesFromUi({ gradeName: '高二' });
+assert.equal(completedOutlinePreparation.skipped, true);
+assert.equal(scriptLockAttempts, lockAttemptsBeforeOutlinePreparation + 1);
+assert.equal(scriptLockReleases, lockReleasesBeforeOutlinePreparation + 1);
 assert.equal(scriptLockHeld, false);
 context.writeChunkedJson_('TSCHOOL_SYNC_STATE', { stale: { calendarEventId: 'old' } });
 context.writeChunkedJson_('TSCHOOL_STATUS', { message: 'stale' });
@@ -3024,6 +3710,45 @@ context.ScriptApp = {
     return builder;
   }
 };
+context.ensureOneTimeTrigger_('watchScheduleSync', 60 * 1000);
+const staleWatchdogId = projectTriggers.find(trigger =>
+  trigger.getHandlerFunction() === 'watchScheduleSync'
+).getUniqueId();
+context.resetSyncWatchdogTrigger_();
+const resetWatchdogs = projectTriggers.filter(trigger =>
+  trigger.getHandlerFunction() === 'watchScheduleSync'
+);
+assert.equal(resetWatchdogs.length, 1);
+assert.notEqual(
+  resetWatchdogs[0].getUniqueId(),
+  staleWatchdogId,
+  '新批次同步必須刪除舊 watchdog 並重新計算完整等待時間'
+);
+assert.equal(resetWatchdogs[0].schedule.after, 5 * 60 * 1000);
+projectTriggers = projectTriggers.filter(trigger =>
+  trigger.getHandlerFunction() !== 'watchScheduleSync'
+);
+
+context.CalendarApp = {
+  getCalendarById() {
+    return null;
+  }
+};
+assert.doesNotThrow(() => context.applySyncOperation_(
+  {
+    type: 'migration_delete',
+    calendarEventId: 'deleted-calendar-event',
+    oldKey: 'old-key'
+  },
+  {},
+  null,
+  {},
+  false,
+  { migrationDeleted: 0 },
+  [],
+  { migrationFromId: 'manually-deleted-calendar' }
+), '舊日曆已被手動刪除時，migration_delete 應直接視為無項目可清理');
+delete context.CalendarApp;
 let activeSetupAccountEmail = 'student+sync@example.com';
 context.Session = {
   getActiveUser() {
@@ -3050,10 +3775,33 @@ assert.equal(
   false,
   'Google 帳號不同時應停留在貼上設定碼頁，不得先保存設定'
 );
+activeSetupAccountEmail = '';
+const unverifiedAccountPreview = context.previewSetupCodeForUi(roundTripSetupCode);
+assert.equal(unverifiedAccountPreview.accountMismatch, false);
+assert.equal(
+  unverifiedAccountPreview.accountVerificationUnavailable,
+  true,
+  'Workspace 隱私設定隱藏目前 Email 時，後端應回傳無法驗證狀態而非假裝相符'
+);
+const unconfirmedAccountImport = context.importSetupCodeFromUi(roundTripSetupCode);
+assert.equal(unconfirmedAccountImport.applied, false);
+assert.equal(unconfirmedAccountImport.requiresAccountConfirmation, true);
+assert.equal(
+  context.hasImportedSetup_(context.loadSettings_()),
+  false,
+  '使用者尚未明確確認無法驗證的帳號時，關閉視窗後不得留下可繞過提示的設定'
+);
+const confirmedUnverifiedImport = context.importSetupCodeFromUi(roundTripSetupCode, true);
+assert.equal(confirmedUnverifiedImport.applied, true);
+assert.equal(confirmedUnverifiedImport.accountVerificationUnavailable, true);
+assert.equal(confirmedUnverifiedImport.requiresAccountConfirmation, false);
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
+context.clearChunkedStore_('TSCHOOL_SETUP_SOURCE_CONTEXT');
 activeSetupAccountEmail = 'student+sync@example.com';
 const importResult = context.importSetupCodeFromUi(roundTripSetupCode);
 assert.equal(importResult.applied, true);
 assert.equal(importResult.accountMismatch, false);
+assert.equal(importResult.accountVerificationUnavailable, false);
 assert.equal(importResult.message, '網站設定已匯入');
 const importedSettings = context.loadSettings_();
 assert.equal(importedSettings.setupComplete, false);
@@ -3066,9 +3814,51 @@ const importedSourceContext = context.readChunkedJson_('TSCHOOL_SETUP_SOURCE_CON
 assert.equal(importedSourceContext.gradeName, '高二');
 assert.equal(importedSourceContext.initialSetupSnapshot, true);
 assert.equal(importedSourceContext.events.length, 0);
+assert.equal(importedSourceContext.catalogFingerprintVersion, 1);
+assert.equal(importedSourceContext.catalogFingerprint, roundTripCatalogFingerprint);
+assert.equal(
+  importedSettings.setupContextFingerprint,
+  importedSourceContext.setupContextFingerprint
+);
 assert.equal(context.hasSetupSourceContext_(importedSettings), true);
+const settingsAfterLiveScheduleChange = Object.assign({}, importedSettings, {
+  scheduleFingerprint: 'live-api-schedule-fingerprint-b'
+});
+context.saveSettings_(settingsAfterLiveScheduleChange);
+assert.doesNotThrow(
+  () => context.loadSetupSourceContext_(context.loadSettings_()),
+  '實際課表指紋由 A 變 B 時，不得再讓已儲存的設定上下文誤判為失效'
+);
+context.saveSettings_(Object.assign({}, settingsAfterLiveScheduleChange, {
+  setupContextFingerprint: 'tampered-setup-context'
+}));
+assert.throws(
+  () => context.loadSetupSourceContext_(context.loadSettings_()),
+  /課表摘要已改變/,
+  '真正的設定上下文篡改仍必須被阻擋'
+);
+context.saveSettings_(settingsAfterLiveScheduleChange);
 assert.equal(projectTriggers.length, 0, '匯入設定碼時不得建立觸發器');
 context.clearChunkedStore_('TSCHOOL_SETTINGS');
+assert.equal(
+  context.getControlPanelName_(),
+  '行程同步控制臺｜T-SCHOOL Schedule Sync',
+  '即使當次執行無法取得綁定文件，也不得因 footer 檔名中斷寄信'
+);
+let activeControlPanelName = '行程同步控制臺｜T-SCHOOL Schedule Sync';
+context.DocumentApp = {
+  getActiveDocument() {
+    return {
+      getName() {
+        return activeControlPanelName;
+      },
+      getUrl() {
+        return 'https://docs.google.com/document/d/control-panel/edit';
+      }
+    };
+  }
+};
+assert.equal(context.getControlPanelName_(), activeControlPanelName);
 context.CacheService = {
   getScriptCache() {
     return {
@@ -3133,6 +3923,34 @@ context.Session = {
   }
 };
 context.Logger = { log() {} };
+
+const originalSaveSettingsCoreForUiBoundary = context.saveSettingsCore_;
+const originalSyncScheduleForUiBoundary = context.syncSchedule_;
+const originalGetSettingsUiDataForUiBoundary = context.getSettingsUiData;
+const originalNotifySyncFailureForUiBoundary = context.notifySyncFailureUnlessActionRequired_;
+let falseSyncFailureNotifications = 0;
+context.saveSettingsCore_ = () => ({ previousSetupComplete: false });
+context.syncSchedule_ = () => ({ pending: true, jobId: 'job-after-calendar-write' });
+context.getSettingsUiData = () => {
+  throw new Error('模擬同步完成後 UI 重載失敗');
+};
+context.notifySyncFailureUnlessActionRequired_ = () => {
+  falseSyncFailureNotifications += 1;
+};
+const committedSyncWithUiFailure = context.saveSettingsAndSyncFromUi({});
+assert.equal(committedSyncWithUiFailure.pending, true);
+assert.equal(committedSyncWithUiFailure.jobId, 'job-after-calendar-write');
+assert.equal(committedSyncWithUiFailure.uiData, null);
+assert.match(committedSyncWithUiFailure.uiRefreshWarning, /操作已完成/);
+assert.equal(
+  falseSyncFailureNotifications,
+  0,
+  'Calendar 寫入已成功後的 UI 重載失敗不得寄出「同步失敗」通知'
+);
+context.saveSettingsCore_ = originalSaveSettingsCoreForUiBoundary;
+context.syncSchedule_ = originalSyncScheduleForUiBoundary;
+context.getSettingsUiData = originalGetSettingsUiDataForUiBoundary;
+context.notifySyncFailureUnlessActionRequired_ = originalNotifySyncFailureForUiBoundary;
 
 assert.doesNotThrow(() =>
   context.assertEmailTemplateManifest_(JSON.parse(emailTemplateManifestText))
@@ -3225,6 +4043,7 @@ assert.match(sanitizedCollidingEmailLink, new RegExp(collidingEmailLinkToken));
 const sampleEmailData = {
   sentAt: '2026/07/26 12:00',
   controlUrl: 'https://docs.google.com/document/d/test/edit',
+  controlPanelName: activeControlPanelName,
   calendarUrl: 'https://calendar.google.com/calendar/u/0/r',
   summary: '新增 1、更新 2、移除 0、未變更 8',
   message: '測試訊息',
@@ -3287,6 +4106,21 @@ Object.keys(emailTemplateManifest.notifications).forEach(templateKind => {
     `${templateKind} 不應留下未解析變數`
   );
 });
+const renderedScheduleChanges = context.buildEmailHtmlSafe_(
+  'schedule_changes',
+  '有 1 項行程調整',
+  sampleEmailData
+);
+assert.match(
+  renderedScheduleChanges,
+  /＊部分資訊來自課綱，請以教師最新說明為主[\s\S]*>行程同步控制臺｜T-SCHOOL Schedule Sync<\/p>/,
+  '課綱說明應位於行程調整卡片後、動態控制臺檔名 footer 前'
+);
+assert.doesNotMatch(
+  renderedScheduleChanges,
+  />時間變更<\/span>/,
+  '行程調整 HTML 不應渲染右側類型標籤'
+);
 const renderedIndexReview = context.buildEmailHtmlSafe_(
   'course_outline_index_changed',
   '課綱索引已更新',
@@ -3341,9 +4175,14 @@ assert.equal(
 assert.equal(
   sentEmailMessages.at(-1).body,
   '第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\n' +
-    '後續則會根據你的設定自動更新事件'
+    '後續則會根據你的設定自動更新事件\n\n' +
+    '行程同步控制臺｜T-SCHOOL Schedule Sync'
 );
 assert.match(sentEmailMessages.at(-1).htmlBody, /行程同步設定完成/);
+assert.match(
+  sentEmailMessages.at(-1).htmlBody,
+  />行程同步控制臺｜T-SCHOOL Schedule Sync<\/p>/
+);
 assert.match(
   sentEmailMessages.at(-1).htmlBody,
   /第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\n後續則會根據你的設定自動更新事件/
@@ -3367,7 +4206,7 @@ assert.equal(
 );
 assert.match(
   generatedCode,
-  /pendingDiscovered\.length\) \{\s*sendActionRequiredSafe_\(\s*settings,\s*'同步已暫停',[\s\S]*?'new_schedule_items'/,
+  /pendingDiscovered\.length\) \{[\s\S]*?sendActionRequiredSafe_\(\s*settings,\s*'同步已暫停',[\s\S]*?'new_schedule_items'/,
   '新行程項目通知的主旨前段應為同步已暫停'
 );
 
@@ -3465,6 +4304,7 @@ assert.equal(
 );
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
 const emailsBeforeInstantChange = sentEmailMessages.length;
+activeControlPanelName = '我的高二行程控制臺';
 context.sendSyncNotificationsSafe_(
   Object.assign({}, notificationTimingSettings, { instantNotificationsEnabled: true }),
   scheduledChangeResult,
@@ -3474,6 +4314,18 @@ assert.equal(
   sentEmailMessages.length,
   emailsBeforeInstantChange + 1,
   '即時通知開啟時，行程調整應在同步完成後盡快寄出'
+);
+assert.match(
+  sentEmailMessages.at(-1).body,
+  /＊部分資訊來自課綱，請以教師最新說明為主/
+);
+assert.match(
+  sentEmailMessages.at(-1).body,
+  /\n\n我的高二行程控制臺$/
+);
+assert.match(
+  sentEmailMessages.at(-1).htmlBody,
+  /＊部分資訊來自課綱，請以教師最新說明為主[\s\S]*>我的高二行程控制臺<\/p>/
 );
 assert.equal(context.loadNotificationQueueState_().pendingChangeData, null);
 context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
@@ -4928,6 +5780,24 @@ assert.equal(
   1,
   '課綱更新應安排在最早固定同步時段 03:00 的約兩小時前'
 );
+context.refreshAutoSyncTriggers_({
+  gradeName: '高二',
+  autoSyncEnabled: true,
+  pendingTermKey: '二年級|2026-09-01',
+  instantNotificationsEnabled: false,
+  notificationHours: [5],
+  notifySyncHour: 5
+});
+assert.equal(
+  projectTriggers.some(trigger => [
+    'syncMyScheduleToCalendar',
+    'sendScheduledNotifications',
+    'sendScheduledNotificationsWithDailySummary',
+    'refreshCourseOutlinesDaily'
+  ].includes(trigger.getHandlerFunction())),
+  false,
+  '新學期待重新選課時，即使舊背景流程帶著 autoSyncEnabled=true 也不得重建每日觸發器'
+);
 
 projectTriggers = projectTriggers.filter(trigger =>
   trigger.getHandlerFunction() !== 'refreshCourseOutlinesOnce'
@@ -4946,6 +5816,19 @@ context.saveCourseOutlineState_({
   lastError: '',
   lastSuccessAt: ''
 });
+assert.equal(context.scheduleCourseOutlineRefreshIfNeeded_({
+  gradeName: '高二',
+  setupComplete: true,
+  autoSyncEnabled: true,
+  pendingTermKey: '二年級|2026-09-01'
+}), false);
+assert.equal(
+  projectTriggers.some(trigger =>
+    trigger.getHandlerFunction() === 'refreshCourseOutlinesOnce'
+  ),
+  false,
+  '新學期待重新選課時不得排定一次性課綱更新'
+);
 context.scheduleCourseOutlineRefreshIfNeeded_({
   gradeName: '高二',
   setupComplete: true,
@@ -4962,6 +5845,18 @@ assert.equal(
 projectTriggers = projectTriggers.filter(trigger =>
   trigger.getHandlerFunction() !== 'refreshCourseOutlinesOnce'
 );
+
+const settingsBeforePendingTermOutline = context.loadSettings_();
+context.saveSettings_(Object.assign({}, settingsBeforePendingTermOutline, {
+  gradeName: '高二',
+  setupComplete: true,
+  autoSyncEnabled: true,
+  pendingTermKey: '二年級|2026-09-01'
+}));
+const pendingTermOutlineResult = context.runCourseOutlineRefreshAttempt_(1, 'manual');
+assert.equal(pendingTermOutlineResult.skipped, true);
+assert.match(pendingTermOutlineResult.message, /先重新選課/);
+context.saveSettings_(settingsBeforePendingTermOutline);
 
 const settingsBeforeOutlineStartupFailure = context.loadSettings_();
 context.saveSettings_(Object.assign({}, settingsBeforeOutlineStartupFailure, {
@@ -5078,6 +5973,16 @@ const results = fixtures.map(fixture => {
   );
   assert.equal(runtimeSummary.firstDateKey, installerSummary.firstDateKey);
   assert.equal(runtimeSummary.lastDateKey, installerSummary.lastDateKey);
+  assert.equal(
+    runtimeSummary.catalogFingerprint,
+    installerSummary.catalogFingerprint,
+    `${fixture.grade} 的設定目錄指紋必須跨網站與 Code.gs 一致`
+  );
+  assert.notEqual(
+    runtimeSummary.scheduleFingerprint,
+    runtimeSummary.catalogFingerprint,
+    `${fixture.grade} 的完整課表指紋必須與設定目錄指紋分離`
+  );
   assert.equal(runtimeSummary.events.some(event => /\[[^\]]+\]\s*$/.test(event.originalTitle)), false);
   const runtimePeriodCounts = context.countScheduledPeriodsByTitle_(payload);
   assert.equal(

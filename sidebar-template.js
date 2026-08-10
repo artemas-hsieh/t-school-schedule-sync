@@ -652,7 +652,20 @@
           if (byId('notify-hours-list')) updateNotifyHourOptions();
         }
       }
-      function showToast(message) { var toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(function () { toast.classList.remove('show'); }, 2600); }
+      function showToast(message) { var toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(function () { toast.classList.remove('show'); }, 8000); }
+      function showResultMessage(result) {
+        var messages = [
+          result && result.message,
+          result && result.operationWarning,
+          result && result.uiRefreshWarning,
+          result && result.calendarListWarning
+        ].filter(Boolean);
+        if (messages.length) showToast(messages.join('\n'));
+      }
+      function renderUiResult(result) {
+        if (result && result.uiData) render(result.uiData);
+        showResultMessage(result);
+      }
       function server(method, value) { return new Promise(function (resolve, reject) { var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (error) { reject(new Error(error && error.message ? error.message : String(error))); }); runner[method](value); }); }
       function isTransientInitialLoadError(error) {
         return String(error && error.message ? error.message : error)
@@ -731,14 +744,17 @@
         renderTermTransition(data.termTransition, data.courseOutlineStatus, data.source);
         updateConditionalFields();
         var needsTermSelection = Boolean(data.termTransition && data.termTransition.required);
-        byId('top-status').dataset.state = !needsTermSelection && data.status && data.status.ok
+        var sourceUnavailable = Boolean(data.source && data.source.unavailable);
+        byId('top-status').dataset.state = !needsTermSelection && !sourceUnavailable && data.status && data.status.ok
           ? 'success'
           : 'attention';
         byId('top-status').textContent = needsTermSelection
           ? '待重新選課'
+          : (sourceUnavailable
+            ? '課表來源暫時離線'
           : (data.status && data.status.ok
             ? '狀態正常'
-            : (settings.setupComplete ? '需檢查狀態' : '待首次同步'));
+            : (settings.setupComplete ? '需檢查狀態' : '待首次同步')));
         byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
           ? '完成選課並同步'
@@ -776,27 +792,47 @@
       function updateActionAvailability() {
         if (!model || busy) return;
         var requiresSelection = Boolean(model.termTransition && model.termTransition.required);
+        var sourceUnavailable = Boolean(model.source && model.source.unavailable);
         var missingSelection = requiresSelection && selectedCourses.size === 0;
         ['save', 'save-sync'].forEach(function (id) {
           var button = byId(id);
-          button.disabled = missingSelection;
-          button.dataset.validationDisabled = String(missingSelection);
+          button.disabled = missingSelection || sourceUnavailable;
+          button.dataset.validationDisabled = String(missingSelection || sourceUnavailable);
         });
         ['run-sync', 'repair-sync'].forEach(function (id) {
           var button = byId(id);
-          button.disabled = requiresSelection;
-          button.dataset.validationDisabled = String(requiresSelection);
+          button.disabled = requiresSelection || sourceUnavailable;
+          button.dataset.validationDisabled = String(requiresSelection || sourceUnavailable);
         });
-        byId('sync-menu-toggle').disabled = requiresSelection;
-        byId('sync-menu-toggle').dataset.validationDisabled = String(requiresSelection);
-        if (requiresSelection) setSyncMenuOpen(false);
+        byId('sync-menu-toggle').disabled = requiresSelection || sourceUnavailable;
+        byId('sync-menu-toggle').dataset.validationDisabled = String(requiresSelection || sourceUnavailable);
+        byId('create-calendar').disabled = sourceUnavailable;
+        byId('create-calendar').dataset.validationDisabled = String(sourceUnavailable);
+        Array.prototype.forEach.call(
+          document.querySelectorAll('input[name="grade"]'),
+          function (input) { input.disabled = sourceUnavailable; }
+        );
+        Array.prototype.forEach.call(
+          document.querySelectorAll('[data-keep],[data-remove]'),
+          function (button) { button.disabled = sourceUnavailable; }
+        );
+        if (requiresSelection || sourceUnavailable) setSyncMenuOpen(false);
       }
 
       function renderSource(source) {
         var health = byId('source-health');
-        health.dataset.state = source.warning ? 'warning' : 'success';
-        byId('source-title').textContent = source.gradeName + '課表可用';
-        byId('source-detail').textContent = source.firstDate + '–' + source.lastDate + ' · ' + source.courseCount + ' 門課 · ' + source.activityCount + ' 項活動';
+        health.dataset.state = source.unavailable ? 'error' : (source.warning ? 'warning' : 'success');
+        byId('source-title').textContent = source.unavailable
+          ? source.gradeName + '課表來源暫時無法連線'
+          : source.gradeName + '課表可用';
+        var dateRange = source.firstDate
+          ? source.firstDate + (source.lastDate ? '–' + source.lastDate : '') + ' · '
+          : '';
+        var summary = dateRange + source.courseCount + ' 門課 · ' + source.activityCount + ' 項活動';
+        byId('source-detail').textContent = source.unavailable
+          ? (source.unavailableMessage || '目前顯示上次可用摘要，恢復連線後才能儲存或同步。') +
+            (summary ? ' ' + summary : '')
+          : summary;
       }
 
       function normalizeNotifyHours(hours) {
@@ -1061,8 +1097,7 @@
             renderSyncProgress({ percent: 1, message: '正在儲存設定並準備同步…' });
           }
           var result = await server(runSync ? 'saveSettingsAndSyncFromUi' : 'saveSettingsFromUi', settings);
-          render(result.uiData);
-          showToast(result.message);
+          renderUiResult(result);
           if (result.pending) {
             keepPolling = true;
             activeSyncJobId = result.jobId || '';
@@ -1086,8 +1121,7 @@
         else setBusy(true, label);
         try {
           var result = await server(method, null);
-          render(result.uiData);
-          showToast(result.message);
+          renderUiResult(result);
           if (result.pending) {
             keepPolling = true;
             activeSyncJobId = result.jobId || '';
@@ -1238,14 +1272,14 @@
         try {
           var result = await server('createDedicatedCalendarForUi', { calendarName: calendarName, gradeName: getCheckedGrade() });
           renderCalendars(result.calendars, result.calendarId, result.calendarName);
-          showToast(result.message);
+          showResultMessage(result);
         } catch (error) {
           showToast(error.message);
         } finally {
           setBusy(false);
         }
       });
-      byId('pending-list').addEventListener('click', async function (event) { var title = event.target.dataset.keep || event.target.dataset.remove; if (!title) return; setBusy(true, '正在更新項目…'); try { var method = event.target.dataset.keep ? 'confirmPendingTitleFromUi' : 'rejectPendingTitleFromUi'; var result = await server(method, title); render(result.uiData); showToast(result.message); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
+      byId('pending-list').addEventListener('click', async function (event) { var title = event.target.dataset.keep || event.target.dataset.remove; if (!title) return; setBusy(true, '正在更新項目…'); try { var method = event.target.dataset.keep ? 'confirmPendingTitleFromUi' : 'rejectPendingTitleFromUi'; var result = await server(method, title); renderUiResult(result); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
 
       function loadInitialUi() {
         clearTimeout(initialLoadRetryTimer);

@@ -52,7 +52,7 @@ node tests/smoke-test.js
 
 ## 設定碼與母版程式驗證
 
-修改設定碼格式時，至少測試繁體中文、emoji、特殊字元、多課程、活動排除，以及一至四個通知時間的 round-trip；另測試空白、超過 32 KiB、錯誤 prefix、錯誤 checksum、不支援 schema、非法 Email、未知課程、同學期來源變動、跨學期與首次同步後重複匯入。單頁匯入時另確認 Google 帳號不符會留在貼上頁且不保存，帳號相符或無法取得帳號時才直接保存並開啟控制臺。
+修改設定碼格式時，至少測試繁體中文、emoji、特殊字元、多課程、活動排除，以及一至四個通知時間的 round-trip；另測試空白、超過 32 KiB、錯誤 prefix、錯誤 checksum、不支援 schema、非法 Email、未知課程、同學期來源變動、跨學期與首次同步後重複匯入。`catalogFingerprint` 另必須以相同 fixture 同時在網站與產生的 Apps Script 計算並比對，覆蓋課程列順序不同、指紋篡改、舊版 `sourceFingerprint` 遷移，以及完整課表指紋從 A 改為 B 後仍可載入原設定上下文的回歸情境。單頁匯入時另確認 Google 帳號不符會留在貼上頁且不保存；帳號相符時直接保存；無法取得帳號時則保存後保留提示，使用者明確確認後才開啟控制臺。
 
 修改 `sidebar-template.js`、`setup-dialog-template.js` 或 `code-template.js` 時，應確認：
 
@@ -91,10 +91,10 @@ node scripts/generate-google-docs-control-panel.js \
 修改同步、刪除、Calendar 切換、狀態遷移或安全機制時，至少確認：
 
 - 422 筆首次同步以首批 40 次、後續每批最多 80 次操作完成，第二輪為零寫入；首次建立不得因強制檢查而把新事件重複更新一次。
-- 含中文與 emoji 的大型狀態會依 UTF-8 位元組分塊，單一 Property 不超過 7,500 bytes，重新組合後內容不變；支援 `getProperties()` 時，分塊寫入不得再單獨呼叫 `getProperty(<key>_COUNT)`。
+- 含中文與 emoji 的大型狀態會依 UTF-8 位元組分塊，單一 Property 不超過 7,500 bytes，重新組合後內容不變；支援 `getProperties()` 時，分塊寫入不得再單獨呼叫 `getProperty(<key>_COUNT)`。大值縮小後允許保留由 COUNT 忽略的尾端 chunk，讀取仍只能採用目前 count；明確清除 store 時必須連歷史尾端一併移除。
 - Calendar 已建立但狀態未保存時，續跑能以同步識別碼接回事件，不會重複建立。
 - Calendar 已建立但提醒尚未成功時，續跑會接回同一事件並重新套用提醒。
-- 移動事件配對須以原演算法作 differential test：exact 優先、同課名 21 日內唯一最近才配對、等距不配對、恰好 21 日包含、超過一毫秒排除、同一舊事件只用一次，並保留 additions／deletions 與貪婪順序。
+- 移動事件配對須作 differential test：exact 優先；全天型態與節數長度必須相同；課綱「單元主題＋課程內容」組合相同時優先，至少一欄非空即可建立身分；兩者都有身分但不同時不得配對，教室不得進入身分；缺少課綱身分才回退至同課名 21 日內唯一最近。另確認等距不配對、恰好 21 日包含、超過一毫秒排除、同一舊事件只用一次，並保留 additions／deletions 與貪婪順序。以化學跨節交換、國語文／英語文調課覆蓋不得誤判事件擴張、縮短、拆分或合併；化學範例的 Calendar 三筆邊界修改在使用者判定層必須消去未變動的同日同節原地點交集，最後只回報兩項真實調課；第二範例仍回報三項。
 - 強制修復會記錄已檢查的 key，不會因簽章本來相同而無限續跑。
 - 調課事件已寫入新 marker、但尚未提交狀態時仍可恢復。
 - 第一次暫時失敗或硬逾時只重試；連續第二次才停止並寄信。
@@ -108,10 +108,13 @@ node scripts/generate-google-docs-control-panel.js \
 - Calendar 切換遵循先建立新 Calendar 事件、再清理舊 Calendar 的順序。
 - 建立新 Calendar 時仍保存舊 Calendar ID，搬移未完成時再次儲存不會清除該 ID。
 - Calendar 搬移尚未完成時，不允許再次切換到第三個 Calendar。
+- Calendar 搬移期間若舊 Calendar 已不存在，`migration_delete` 應視為沒有可清理項目並繼續；不得把一般 API 或權限例外一律吞掉成「已刪除」。
 - 零操作的 finalizer 重試不會清除連續失敗次數。
 - 設定與 `SYNC_STATE` 遷移不會遺失可復原所需資訊。
 - 大量刪除預覽 token 在來源或設定改變後會失效；強制修復不得繞過大量刪除保護。
 - 失敗通知不會掩蓋原始同步錯誤。
+- Calendar 或設定已寫入後，即使 `getSettingsUiData()`、Calendar 清單、狀態顯示、觸發器或通知後處理失敗，也必須回傳已完成結果與獨立警告；不得進入 `notifySyncFailureUnlessActionRequired_()` 或對使用者誤報主要操作失敗。
+- 指紋、簽章與 hash 輸入必須使用資料域名稱與版本；`catalogFingerprint`、`scheduleFingerprint`、`setupContextFingerprint`、`desiredScheduleFingerprint`、`indexFingerprint` 及事件簽章不得交叉比較。需跨執行環境比較的列必須使用明確字典序，不依賴預設 locale。
 - `notification-email-templates.json` 可解析且涵蓋所有通知種類；產生的 `Code.gs` 不含 manifest 中的信件版型文案或版面內容（Apps Script 側欄本身仍會內嵌 HTML）。
 - 產生的 `Code.gs` 從 `raw.githubusercontent.com` 的已核准 commit 讀取 manifest，不再使用會隨主分支變動的 GitHub Pages 網址；更新 pin 時同步更換 cache key。
 - HTML 信件一般變數會跳脫 `<`、`>`、引號與 `&`；重複區塊只能插入由 manifest 自己渲染的內容。
@@ -119,12 +122,17 @@ node scripts/generate-google-docs-control-panel.js \
 - 遠端 HTML manifest 下載、快取或驗證失敗時，`MailApp` 仍以純文字 `body` 寄送原通知。
 - Email manifest 的 100 KiB 上限依 UTF-8 位元組而非 JavaScript 字元數計算；同一次 Apps Script 執行中，成功載入後不得再次讀取 CacheService、下載或解析相同固定版型。
 - 同一次 Apps Script 執行中，同一年級的課表只能下載、解析一次；不同年級各自快取，下一次執行則必須重新取得。正式 fetch 測試另需覆蓋精確 URL／年級 query、非 200、無效 JSON 與錯誤年級。
+- 完成首次同步後，控制臺遇到課表 API 失敗仍須以最後成功摘要或既有設定開啟，標示來源離線並停用所有依賴即時來源的寫入；正式同步函式仍須直接失敗，不能使用此 UI 摘要更新 Calendar 或判定新學期。
 - 課綱索引與分頁只能使用 Sheets v4 的 `Spreadsheets.get` metadata 與 `Values.batchGet` 唯讀方法；每份試算表只取一次 metadata，並批次讀取實際命中的分頁。空表仍保留原錯誤，API 的零起算合併範圍仍能向下展開；每張課綱分頁的日期候選只去重一次。
 - 既有 `retryScheduledNotificationDelivery` 在每日排程重整及關閉後續自動同步時都必須保留同一 Trigger ID；已保存的通知寄出後才清除 request、佇列與 retry。
 - 通知版型只保留標準版本，沒有句號、單側厚色框或可自訂通知格式；標籤使用直角，底部只保留指定的自動寄送說明。
 - 課表偵測與 Calendar 同步固定建立 03:00、11:00、18:00、21:00 四個 `atHour(hour).nearMinute(0)` Trigger，不得隨通知偏好改變。即時通知開啟時只另建立 06:00 每日摘要 Trigger；關閉時才依使用者選擇的每個通知時間建立獨立 Trigger。
 - 即時通知開啟時，固定同步偵測到行程調整並完整套用 Calendar 後應立即嘗試寄出；失敗時必須保留異動並排程重試。關閉時，設定時間外只排入佇列；後續無新異動的同步不得清除先前待寄的行程調整。通知 Trigger 與背景同步重疊時必須延後重試；錯誤與「行程同步設定完成」通知可立即寄出。
 - 即時通知開啟時，06:00 才可寄每日成功摘要；關閉時則由最後一個自訂通知時間寄出。當日已有行程調整時只寄行程調整通知。
+- 即時通知成功後必須立即清除 `pendingChangeData`；排程通知與同步工作以 active job 檢查及同一 Script Lock 串行，普通重疊不得重寄。同時保留「寄信成功但狀態提交失敗」無法跨兩個 Google 服務達成嚴格 exactly-once 的既有限制，優先避免遺失通知。
+- 前台儲存與背景新標題登錄都必須在同一 Script Lock 內完成；第一次同步課綱預讀取得不到 3 秒鎖時應安全降級，不得與背景工作同時發布快照。
+- 新學期待重新選課時，不得建立每日同步、通知或課綱觸發器，也不得排定或手動執行課綱更新；新一批同步的 watchdog 必須取代既有同名觸發器並得到完整 5 分鐘。
+- `formatDateKey_` 必須在 Asia/Taipei 的 23:59:59 與 00:00:00 正確切日，不加入把凌晨算回前一天的緩衝。
 
 若本機無法實際呼叫 Google Calendar，應以可執行的單元／整合測試或程式路徑檢查代替，並明確列出尚未實際驗證的外部行為。
 
@@ -135,7 +143,7 @@ node scripts/generate-google-docs-control-panel.js \
 - 中央索引依欄名讀取，允許額外的 `備註` 欄；停用列略過，同一來源組的多份 Sheets 正確合併。
 - 同一來源組出現不同年級／適用日期、重複 Sheets 連結、無效啟用值或非一般 Google Sheets 連結時停止使用該次索引。
 - 中央索引暫時失敗時沿用最後成功版本；從未成功讀取時才使用內建來源。
-- 第一次成功讀取中央索引只建立基準；後續內容改變時寄送一次含差異摘要與新舊指紋的通知，寄送失敗時保留待寄狀態並於下次成功讀取重試。
+- 第一次成功讀取中央索引只建立基準；後續內容改變時寄送一次含差異摘要與新舊指紋的通知，寄送失敗時保留待寄狀態並於下次成功讀取重試。只調整來源組、課綱名稱或 Spreadsheet ID 的列順序時，正規化後的 `indexFingerprint` 必須不變，也不得寄出變更通知。
 - 只有已設定來源組的年級會建立課綱觸發器；日期超出來源組適用範圍時不得開啟舊課綱。
 - 課程只以課表原始名稱一字不差對應工作表分頁，不使用分頁內中文名稱或模糊比對。
 - 欄位換序、增欄，以及標頭位於不同列時，仍能依欄名定位。

@@ -45,6 +45,7 @@ textarea { width:100%; min-height:300px; margin-top:16px; padding:14px 16px; res
       var openButton = document.getElementById('open-control-panel');
       var accountWarning = document.getElementById('account-warning');
       var pasteError = document.getElementById('paste-error');
+      var unverifiedAccountConfirmed = false;
 
       function setBusy(busy) {
         openButton.disabled = busy;
@@ -64,6 +65,13 @@ textarea { width:100%; min-height:300px; margin-top:16px; padding:14px 16px; res
         accountWarning.focus();
       }
 
+      function showAccountVerificationUnavailable(email) {
+        accountWarning.textContent = '受組織隱私設定限制，無法確認目前 Google 帳號。請自行確認這是設定時使用的 ' + email;
+        accountWarning.hidden = false;
+        accountWarning.focus();
+        openButton.textContent = '我已確認，開啟控制臺';
+      }
+
       function openSidebarAfterImport() {
         // Give Apps Script a short handoff window so the sidebar's first read
         // does not race the lock released by importSetupCodeFromUi().
@@ -76,8 +84,10 @@ textarea { width:100%; min-height:300px; margin-top:16px; padding:14px 16px; res
       }
 
       codeInput.addEventListener('input', function () {
+        unverifiedAccountConfirmed = false;
         accountWarning.hidden = true;
         pasteError.hidden = true;
+        openButton.textContent = '開啟控制臺';
       });
 
       openButton.addEventListener('click', function () {
@@ -91,10 +101,16 @@ textarea { width:100%; min-height:300px; margin-top:16px; padding:14px 16px; res
               showAccountWarning(result.notificationEmail || '');
               return;
             }
+            if (result && result.requiresAccountConfirmation) {
+              unverifiedAccountConfirmed = true;
+              setBusy(false);
+              showAccountVerificationUnavailable(result.notificationEmail || '設定 Email');
+              return;
+            }
             openSidebarAfterImport();
           })
           .withFailureHandler(function (error) { setBusy(false); showError(error); })
-          .importSetupCodeFromUi(codeInput.value);
+          .importSetupCodeFromUi(codeInput.value, unverifiedAccountConfirmed);
       });
     })();
   </script>

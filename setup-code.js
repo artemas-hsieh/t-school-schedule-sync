@@ -61,13 +61,26 @@
   function makePayload(settings, options) {
     const input = settings || {};
     const config = options || {};
+    const catalogFingerprint = String(
+      input.initialCatalogFingerprint ||
+      input.catalogFingerprint ||
+      input.initialSourceFingerprint ||
+      input.sourceFingerprint ||
+      ''
+    );
+    const catalogFingerprintVersion = Number(
+      input.initialCatalogFingerprintVersion || input.catalogFingerprintVersion
+    ) || 0;
     const payload = {
       schemaVersion: SCHEMA_VERSION,
       createdAt: String(config.createdAt || new Date().toISOString()),
       generatorVersion: String(input.appVersion || ''),
       gradeName: String(input.gradeName || ''),
       termKey: String(input.initialTermKey || input.termKey || ''),
-      sourceFingerprint: String(input.initialSourceFingerprint || input.sourceFingerprint || ''),
+      catalogFingerprintVersion,
+      catalogFingerprint,
+      // 舊版通用 Code.gs 仍讀取此欄位；新程式不得再把它當成完整課表指紋。
+      sourceFingerprint: catalogFingerprint,
       selectedCourses: uniqueStrings(input.selectedCourses),
       includeActivities: input.includeActivities !== false,
       excludedActivities: uniqueStrings(input.excludedActivities),

@@ -22,6 +22,7 @@
   const MIN_COURSE_SCHEDULED_PERIODS = 5;
   const SOURCE_FETCH_MAX_ATTEMPTS = 3;
   const SOURCE_FETCH_RETRY_DELAY_MS = 750;
+  const CATALOG_FINGERPRINT_VERSION = 1;
   const ACTIVITY_PATTERNS = [
     /全校(?:性)?活動/,
     /^高[一二三](?:導入期|全校活動)$/,
@@ -57,6 +58,35 @@
     return normalizeText(value)
       .replace(/\s+/g, '')
       .toLowerCase();
+  }
+
+  function compareCanonicalStrings(left, right) {
+    const leftText = String(left == null ? '' : left);
+    const rightText = String(right == null ? '' : right);
+    return leftText < rightText ? -1 : (leftText > rightText ? 1 : 0);
+  }
+
+  function makeCatalogFingerprintRows(catalogItems) {
+    return (Array.isArray(catalogItems) ? catalogItems : [])
+      .map(item => [
+        String(item && item.title || ''),
+        item && item.type === 'activity' ? 'activity' : 'course',
+        item && item.period === 'vacation' ? 'vacation' : 'term'
+      ])
+      .sort((left, right) => compareCanonicalStrings(
+        JSON.stringify(left),
+        JSON.stringify(right)
+      ));
+  }
+
+  function makeCatalogFingerprint(termKey, lastDateKey, catalogItems) {
+    return hashText(JSON.stringify([
+      'setup-catalog',
+      CATALOG_FINGERPRINT_VERSION,
+      String(termKey || ''),
+      String(lastDateKey || ''),
+      makeCatalogFingerprintRows(catalogItems)
+    ]));
   }
 
   function splitCellEntries(value) {
@@ -369,11 +399,11 @@
     });
 
     const termKey = [payload.currentGrade, formatDateKey(firstDate)].join('|');
-    const fingerprint = hashText(JSON.stringify([
+    const catalogFingerprint = makeCatalogFingerprint(
       termKey,
       formatDateKey(lastDate),
-      catalog.all.map(item => item.title)
-    ]));
+      catalog.all
+    );
 
     return {
       currentGrade: payload.currentGrade,
@@ -383,7 +413,8 @@
       firstDateKey: formatDateKey(firstDate),
       lastDateKey: formatDateKey(lastDate),
       termKey,
-      fingerprint,
+      catalogFingerprintVersion: CATALOG_FINGERPRINT_VERSION,
+      catalogFingerprint,
       updateValues,
       catalog
     };
@@ -433,12 +464,16 @@
   return {
     API_URL,
     GRADE_API_NAMES,
+    CATALOG_FINGERPRINT_VERSION,
     MIN_COURSE_SCHEDULED_PERIODS,
     ACTIVITY_PATTERNS,
     MANUAL_MERGE_EXCEPTIONS,
     WEEKDAY_LABELS,
     normalizeText,
     normalizeTitle,
+    compareCanonicalStrings,
+    makeCatalogFingerprintRows,
+    makeCatalogFingerprint,
     splitCellEntries,
     parseEntry,
     isActivityTitle,

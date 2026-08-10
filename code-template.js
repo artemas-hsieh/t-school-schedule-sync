@@ -119,7 +119,7 @@ function runHighLoadFirstSyncTest() {
     calendarName,
     simulatedNow: HIGH_LOAD_TEST_SIMULATED_NOW,
     createdAt: new Date().toISOString(),
-    sourceFingerprint: '',
+    scheduleFingerprint: '',
     expectedEvents: HIGH_LOAD_TEST_EXPECTED.totalFuture
   };
   writeChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, config);
@@ -130,7 +130,7 @@ function runHighLoadFirstSyncTest() {
   if (!report.ok) {
     throw new Error('高二開學測試資料與 422 筆基準不一致：' + report.mismatches.join('、'));
   }
-  config.sourceFingerprint = source.fingerprint;
+  config.scheduleFingerprint = source.scheduleFingerprint;
   writeChunkedJson_(HIGH_LOAD_TEST_CONFIG_STORE, config);
 
   const settings = buildHighLoadTestSettings_(source);
@@ -248,7 +248,7 @@ function setupHighLoadTestEnvironment() {
   const serializedSource = {
     gradeName: '高二',
     termKey: source.termKey,
-    fingerprint: source.fingerprint,
+    scheduleFingerprint: source.scheduleFingerprint,
     firstDateKey: source.firstDateKey,
     lastDateKey: source.lastDateKey,
     catalog: source.catalog,
@@ -260,7 +260,7 @@ function setupHighLoadTestEnvironment() {
     calendarName,
     simulatedNow: HIGH_LOAD_TEST_SIMULATED_NOW,
     createdAt: new Date().toISOString(),
-    sourceFingerprint: source.fingerprint,
+    scheduleFingerprint: source.scheduleFingerprint,
     lastStageLimit: 0
   });
   writeChunkedJson_(HIGH_LOAD_TEST_STATE_STORE, {
@@ -884,7 +884,7 @@ function buildHighLoadTestSettings_(source) {
       throw new Error('Production Code.gs generation requires an immutable emailTemplateManifestUrl.');
     }
     const initialSettings = {
-      schemaVersion: 7,
+      schemaVersion: 8,
       appVersion: settings.appVersion || '2.0.0-rc.2',
       setupComplete: false,
       setupImportedAt: '',
@@ -911,7 +911,8 @@ function buildHighLoadTestSettings_(source) {
       pendingTitles: [],
       excludedTitles: [],
       termKey: '',
-      sourceFingerprint: '',
+      scheduleFingerprint: '',
+      setupContextFingerprint: '',
       pendingTermKey: '',
       pausedReason: '',
       autoSyncEnabledBeforeTermTransition: null,
@@ -954,7 +955,7 @@ return `/**
  */
 // GENERATED UNIVERSAL GOOGLE DOCS TEMPLATE — do not paste a personalized or archived Code.gs here.
 const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-rc.2')};
-const SETTINGS_SCHEMA_VERSION = 7;
+const SETTINGS_SCHEMA_VERSION = 8;
 const TIMEZONE = 'Asia/Taipei';
 const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];
 const INSTANT_NOTIFICATION_SUMMARY_HOUR = 6;
@@ -970,6 +971,7 @@ const EMAIL_TEMPLATE_FETCH_RETRY_DELAY_MS = 500;
 const EMAIL_LINK_ALLOWED_HOSTS = ['calendar.google.com', 'docs.google.com'];
 const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
 const SETUP_SOURCE_CONTEXT_STORE = 'TSCHOOL_SETUP_SOURCE_CONTEXT';
+const SOURCE_UI_CACHE_STORE = 'TSCHOOL_SOURCE_UI_CACHE';
 const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
 const SYNC_JOB_STORE = 'TSCHOOL_SYNC_JOB';
 const STATUS_STORE = 'TSCHOOL_STATUS';
@@ -978,7 +980,7 @@ const NOTICE_STORE = 'TSCHOOL_NOTICE_STATE';
 const NOTIFICATION_QUEUE_STORE = 'TSCHOOL_NOTIFICATION_QUEUE';
 const NOTIFICATION_DELIVERY_REQUEST_STORE = 'TSCHOOL_NOTIFICATION_DELIVERY_REQUEST';
 const COURSE_OUTLINE_INDEX_CACHE_STORE = 'TSCHOOL_COURSE_OUTLINE_INDEX_CACHE';
-const SYNC_JOB_SCHEMA_VERSION = 1;
+const SYNC_JOB_SCHEMA_VERSION = 2;
 const SYNC_CONTINUATION_HANDLER = 'continueScheduleSync';
 const SYNC_WATCHDOG_HANDLER = 'watchScheduleSync';
 const NOTIFICATION_HANDLER = 'sendScheduledNotifications';
@@ -999,6 +1001,7 @@ const COURSE_OUTLINE_STATE_STORE = 'TSCHOOL_COURSE_OUTLINE_STATE';
 const COURSE_OUTLINE_SNAPSHOT_PREFIX = 'TSCHOOL_COURSE_OUTLINE_SNAPSHOT_';
 const COURSE_OUTLINE_ACTIVE_VERSION_PROPERTY = 'TSCHOOL_COURSE_OUTLINE_ACTIVE_VERSION';
 const COURSE_OUTLINE_CACHE_SCHEMA_VERSION = 1;
+const COURSE_OUTLINE_SOURCE_INDEX_FINGERPRINT_VERSION = 1;
 const COURSE_OUTLINE_HEADER_SCAN_LIMIT = 100;
 const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;
 const COURSE_OUTLINE_FIRST_SETUP_MAX_MS = 60 * 1000;
@@ -1025,6 +1028,8 @@ const MANAGED_EVENT_TAG_VALUE = '1';
 const STANDARD_DESCRIPTION_TEMPLATE = ${formatString(STANDARD_CUSTOM_DESCRIPTION_TEMPLATE)};
 const VISIBLE_DESCRIPTION_FOOTER = '[T-SCHOOL Schedule Sync]';
 const COURSE_OUTLINE_DISCLAIMER = '＊部分資訊來自課綱，請以教師最新說明為主';
+const DEFAULT_CONTROL_PANEL_NAME = '行程同步控制臺｜T-SCHOOL Schedule Sync';
+const MANAGED_CALENDAR_DESCRIPTION = 'T-SCHOOL Schedule Sync managed calendar';
 // 只供辨識既有事件；新版不再把技術標記寫入使用者可見的說明欄。
 const MANAGED_MARKER = '[T-SCHOOL-SCHEDULE-SYNC]';
 const DESCRIPTION_MARKER = '[T-SCHOOL 行程同步]';
@@ -1036,6 +1041,9 @@ const SETUP_DIALOG_HTML = ${formatLongString(setupDialogHtml)};
 const SETUP_CODE_PREFIX = 'TSCHOOL_SETUP_V1';
 const SETUP_CODE_SCHEMA_VERSION = 1;
 const SETUP_CODE_MAX_LENGTH = 32 * 1024;
+const SETUP_CATALOG_FINGERPRINT_VERSION = 1;
+const SETUP_CONTEXT_FINGERPRINT_VERSION = 1;
+const SCHEDULE_FINGERPRINT_VERSION = 1;
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const MANUAL_MERGE_EXCEPTIONS = {};
@@ -1087,6 +1095,18 @@ function getControlPanelUrl_() {
       : '';
   } catch (error) {
     return '';
+  }
+}
+
+function getControlPanelName_() {
+  try {
+    const document = DocumentApp.getActiveDocument();
+    const name = document && typeof document.getName === 'function'
+      ? String(document.getName() || '').trim()
+      : '';
+    return name || DEFAULT_CONTROL_PANEL_NAME;
+  } catch (error) {
+    return DEFAULT_CONTROL_PANEL_NAME;
   }
 }
 
@@ -1152,23 +1172,35 @@ function showSetupImportDialog() {
 }
 
 function getSettingsUiData() {
-  let settings = loadSettings_();
-  assertSetupImported_(settings);
-  const source = !settings.setupComplete
-    ? loadSetupSourceContext_(settings)
-    : loadSourceContext_(settings.gradeName);
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(3000)) {
-    throw new Error('背景同步正在保存行程，請稍後重新開啟控制臺。');
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const observedSettings = loadSettings_();
+    assertSetupImported_(observedSettings);
+    const source = !observedSettings.setupComplete
+      ? loadSetupSourceContext_(observedSettings)
+      : loadSourceContextForUi_(observedSettings);
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(3000)) {
+      throw new Error('背景同步正在保存行程，請稍後重新開啟控制臺。');
+    }
+    let settings;
+    let stateStillMatches = false;
+    try {
+      settings = loadSettings_();
+      assertSetupImported_(settings);
+      stateStillMatches = settings.gradeName === observedSettings.gradeName &&
+        settings.termKey === observedSettings.termKey &&
+        Boolean(settings.setupComplete) === Boolean(observedSettings.setupComplete) &&
+        (settings.setupComplete || !settings.setupContextFingerprint ||
+          settings.setupContextFingerprint === source.setupContextFingerprint);
+      if (stateStillMatches && !source.sourceUnavailable) {
+        settings = applyTermTransitionIfNeeded_(settings, source, true);
+      }
+    } finally {
+      lock.releaseLock();
+    }
+    if (stateStillMatches) return buildUiData_(settings, source);
   }
-  try {
-    settings = loadSettings_();
-    assertSetupImported_(settings);
-    settings = applyTermTransitionIfNeeded_(settings, source, true);
-  } finally {
-    lock.releaseLock();
-  }
-  return buildUiData_(settings, source);
+  throw new Error('設定剛剛被其他執行更新，請重新開啟控制臺。');
 }
 
 function previewSetupCodeForUi(code) {
@@ -1179,7 +1211,7 @@ function previewSetupCodeForUi(code) {
   return setupImportPreviewForClient_(buildSetupImportPreview_(code, settings));
 }
 
-function importSetupCodeFromUi(code) {
+function importSetupCodeFromUi(code, confirmUnverifiedAccount) {
   const beforeImport = loadSettings_();
   if (beforeImport.setupComplete) {
     throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
@@ -1187,10 +1219,21 @@ function importSetupCodeFromUi(code) {
   const decoded = decodeSetupCode_(code);
   const notificationEmail = String(decoded.payload && decoded.payload.notificationEmail || '').trim();
   assertSingleEmail_(notificationEmail);
-  if (activeGoogleAccountDoesNotMatch_(notificationEmail)) {
+  const accountCheck = getActiveGoogleAccountCheck_(notificationEmail);
+  if (accountCheck.accountMismatch) {
     return {
       applied: false,
       accountMismatch: true,
+      accountVerificationUnavailable: false,
+      notificationEmail
+    };
+  }
+  if (accountCheck.accountVerificationUnavailable && !confirmUnverifiedAccount) {
+    return {
+      applied: false,
+      accountMismatch: false,
+      accountVerificationUnavailable: true,
+      requiresAccountConfirmation: true,
       notificationEmail
     };
   }
@@ -1202,7 +1245,13 @@ function importSetupCodeFromUi(code) {
     if (previous.setupComplete) {
       throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
     }
-    return Object.assign({ applied: true, accountMismatch: false },
+    return Object.assign({
+      applied: true,
+      accountMismatch: false,
+      accountVerificationUnavailable: accountCheck.accountVerificationUnavailable,
+      requiresAccountConfirmation: false,
+      notificationEmail
+    },
       applySetupImportPreview_(preview, previous));
   } finally {
     lock.releaseLock();
@@ -1247,46 +1296,292 @@ function applySetupImportPreview_(preview, previous) {
     reminderMode: 'none',
     reminderMinutes: 10
   };
-  const next = sanitizeSettingsInput_(input, previous, preview.source_);
+  const setupSource = normalizeSetupSourceContext_(preview.source_, preview.gradeName);
+  const next = sanitizeSettingsInput_(input, previous, setupSource);
   next.setupComplete = false;
   next.setupImportedAt = new Date().toISOString();
   next.setupCodeVersion = SETUP_CODE_SCHEMA_VERSION;
+  next.setupContextFingerprint = setupSource.setupContextFingerprint;
   next.calendarId = '';
   next.calendarMigrationFromId = '';
   next.pendingTermKey = '';
   next.pausedReason = '';
-  cancelActiveSyncJob_('已重新匯入安裝設定。');
-  deleteAutoSyncTriggersUnlocked_();
+  saveSetupSourceContext_(setupSource, preview.gradeName);
   saveSettings_(next);
-  saveSetupSourceContext_(preview.source_, preview.gradeName);
-  return { message: '網站設定已匯入' };
+  let operationWarning = '';
+  try {
+    cancelActiveSyncJob_('已重新匯入安裝設定。');
+    deleteAutoSyncTriggersUnlocked_();
+  } catch (cleanupError) {
+    operationWarning = '網站設定已匯入，但舊的背景工作暫時無法完全整理。';
+    Logger.log('重新匯入後無法完全整理舊背景工作：' + userFacingError_(cleanupError));
+  }
+  return { message: '網站設定已匯入', operationWarning };
 }
 
 function saveSetupSourceContext_(source, gradeName) {
   if (!source || !source.catalog) return;
-  writeChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, {
-    gradeName: source.gradeName || gradeName || '',
-    firstDateKey: source.firstDateKey || '',
-    lastDateKey: source.lastDateKey || '',
-    sourceUpdatedLabel: source.sourceUpdatedLabel || '',
-    sourceStale: Boolean(source.sourceStale),
-    catalog: source.catalog,
-    termKey: source.termKey || '',
-    fingerprint: source.fingerprint || '',
-    events: [],
-    initialSetupSnapshot: true
-  });
+  const normalized = normalizeSetupSourceContext_(source, gradeName);
+  writeChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, normalized);
 }
 
 function loadSetupSourceContext_(settings) {
-  const source = readChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, null);
-  if (source && source.catalog &&
-      source.gradeName === settings.gradeName &&
-      source.termKey === settings.termKey &&
-      source.fingerprint === settings.sourceFingerprint) {
-    return source;
+  const stored = readChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, null);
+  if (!stored || !stored.catalog ||
+      stored.gradeName !== settings.gradeName ||
+      stored.termKey !== settings.termKey) {
+    throw new Error('請重新貼上行程同步設定碼，再開啟控制臺。');
   }
-  throw new Error('請重新貼上行程同步設定碼，再開啟控制臺。');
+  const source = normalizeSetupSourceContext_(stored, settings.gradeName);
+  const expectedContextFingerprint = String(settings.setupContextFingerprint || '');
+  if (expectedContextFingerprint &&
+      expectedContextFingerprint !== source.setupContextFingerprint) {
+    throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
+  }
+  return source;
+}
+
+function loadSourceContextForUi_(settings) {
+  try {
+    const source = loadSourceContext_(settings.gradeName);
+    saveSourceUiCacheSafely_(source);
+    return source;
+  } catch (error) {
+    Logger.log('控制臺無法讀取即時課表，改用唯讀來源摘要：' + userFacingError_(error));
+    return loadSourceUiFallback_(settings, error);
+  }
+}
+
+function saveSourceUiCacheSafely_(source) {
+  if (!source || !source.catalog) return false;
+  const snapshot = {
+    gradeName: String(source.gradeName || ''),
+    firstDateKey: String(source.firstDateKey || ''),
+    lastDateKey: String(source.lastDateKey || ''),
+    termKey: String(source.termKey || ''),
+    catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
+    catalogFingerprint: String(source.catalogFingerprint || ''),
+    scheduleFingerprint: String(source.scheduleFingerprint || ''),
+    sourceUpdatedLabel: String(source.sourceUpdatedLabel || ''),
+    sourceStale: Boolean(source.sourceStale),
+    catalog: {
+      all: (source.catalog.all || []).map(item => ({
+        title: String(item.title || ''),
+        type: item.type === 'activity' ? 'activity' : 'course',
+        period: item.period === 'vacation' ? 'vacation' : 'term'
+      }))
+    },
+    cachedAt: new Date().toISOString()
+  };
+  snapshot.catalog.courses = snapshot.catalog.all.filter(item => item.type === 'course');
+  snapshot.catalog.activities = snapshot.catalog.all.filter(item => item.type === 'activity');
+  snapshot.catalog.vacationItems = snapshot.catalog.all.filter(item => item.period === 'vacation');
+  try {
+    writeChunkedJson_(SOURCE_UI_CACHE_STORE, snapshot);
+    return true;
+  } catch (error) {
+    Logger.log('無法更新控制臺課表備援摘要：' + userFacingError_(error));
+    return false;
+  }
+}
+
+function loadSourceUiFallback_(settings, sourceError) {
+  const cached = readChunkedJson_(SOURCE_UI_CACHE_STORE, null);
+  const acceptedTerms = uniqueStrings_([settings.pendingTermKey, settings.termKey]);
+  let fallback = cached && cached.catalog &&
+    cached.gradeName === settings.gradeName &&
+    (!acceptedTerms.length || acceptedTerms.indexOf(cached.termKey) !== -1)
+    ? cached
+    : null;
+
+  if (!fallback) {
+    const setupSource = readChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, null);
+    if (setupSource && setupSource.catalog && setupSource.gradeName === settings.gradeName &&
+        (!acceptedTerms.length || acceptedTerms.indexOf(setupSource.termKey) !== -1)) {
+      fallback = setupSource;
+    }
+  }
+
+  if (!fallback) fallback = buildSettingsSourceUiFallback_(settings);
+  const catalogAll = (fallback.catalog && fallback.catalog.all || []).map(item => ({
+    title: String(item.title || ''),
+    type: item.type === 'activity' ? 'activity' : 'course',
+    period: item.period === 'vacation' ? 'vacation' : 'term'
+  }));
+  return Object.assign({}, fallback, {
+    gradeName: settings.gradeName,
+    catalog: {
+      all: catalogAll,
+      courses: catalogAll.filter(item => item.type === 'course'),
+      activities: catalogAll.filter(item => item.type === 'activity'),
+      vacationItems: catalogAll.filter(item => item.period === 'vacation')
+    },
+    events: [],
+    initialSetupSnapshot: true,
+    sourceUnavailable: true,
+    sourceUnavailableMessage: '課表來源暫時無法連線；目前顯示上次可用摘要，恢復連線後才能儲存或同步。',
+    sourceUnavailableDetail: userFacingError_(sourceError),
+    sourceCacheSavedAt: String(fallback.cachedAt || '')
+  });
+}
+
+function buildSettingsSourceUiFallback_(settings) {
+  const activityKeys = (settings.excludedActivities || []).map(normalizeTitle_);
+  const titles = uniqueStrings_([].concat(
+    settings.knownTitles || [],
+    settings.selectedCourses || [],
+    settings.pendingTitles || [],
+    settings.excludedActivities || []
+  ));
+  const catalogAll = titles.map(title => ({
+    title,
+    type: activityKeys.indexOf(normalizeTitle_(title)) !== -1 ? 'activity' : 'course',
+    period: 'term'
+  }));
+  return {
+    gradeName: settings.gradeName,
+    firstDateKey: '',
+    lastDateKey: '',
+    termKey: String(settings.pendingTermKey || settings.termKey || ''),
+    catalogFingerprintVersion: 0,
+    catalogFingerprint: '',
+    scheduleFingerprint: String(settings.scheduleFingerprint || ''),
+    sourceUpdatedLabel: '',
+    sourceStale: true,
+    catalog: { all: catalogAll },
+    cachedAt: ''
+  };
+}
+
+function compareCanonicalStrings_(left, right) {
+  const leftText = String(left == null ? '' : left);
+  const rightText = String(right == null ? '' : right);
+  return leftText < rightText ? -1 : (leftText > rightText ? 1 : 0);
+}
+
+function sortCanonicalRows_(rows) {
+  return (Array.isArray(rows) ? rows : []).slice().sort((left, right) =>
+    compareCanonicalStrings_(JSON.stringify(left), JSON.stringify(right))
+  );
+}
+
+function makeCatalogFingerprintRows_(catalogItems) {
+  return sortCanonicalRows_((Array.isArray(catalogItems) ? catalogItems : []).map(item => [
+    String(item && item.title || ''),
+    item && item.type === 'activity' ? 'activity' : 'course',
+    item && item.period === 'vacation' ? 'vacation' : 'term'
+  ]));
+}
+
+function makeSetupCatalogFingerprint_(termKey, lastDateKey, catalogItems) {
+  return hashText_(JSON.stringify([
+    'setup-catalog',
+    SETUP_CATALOG_FINGERPRINT_VERSION,
+    String(termKey || ''),
+    String(lastDateKey || ''),
+    makeCatalogFingerprintRows_(catalogItems)
+  ]));
+}
+
+function makeLegacySetupCatalogFingerprint_(termKey, lastDateKey, catalogItems) {
+  const titles = (Array.isArray(catalogItems) ? catalogItems : [])
+    .map(item => String(item && item.title || ''))
+    .sort((left, right) => left.localeCompare(right, 'zh-Hant'));
+  return hashText_(JSON.stringify([
+    String(termKey || ''),
+    String(lastDateKey || ''),
+    titles
+  ]));
+}
+
+function makeSetupContextFingerprint_(source) {
+  return hashText_(JSON.stringify([
+    'setup-context',
+    SETUP_CONTEXT_FINGERPRINT_VERSION,
+    String(source && source.gradeName || ''),
+    String(source && source.termKey || ''),
+    String(source && source.firstDateKey || ''),
+    String(source && source.lastDateKey || ''),
+    Number(source && source.catalogFingerprintVersion) || 0,
+    String(source && source.catalogFingerprint || ''),
+    makeCatalogFingerprintRows_(source && source.catalog && source.catalog.all)
+  ]));
+}
+
+function normalizeSetupSourceContext_(source, gradeName) {
+  if (!source || !source.catalog || !Array.isArray(source.catalog.all)) {
+    throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
+  }
+  const seen = {};
+  const catalogAll = source.catalog.all.map(item => {
+    const title = String(item && item.title || '').trim().slice(0, 300);
+    const type = item && item.type;
+    const period = item && item.period;
+    const key = normalizeTitle_(title);
+    if (!key || seen[key] || ['course', 'activity'].indexOf(type) === -1 ||
+        ['term', 'vacation'].indexOf(period) === -1) {
+      throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
+    }
+    seen[key] = true;
+    return { title, type, period };
+  }).sort((left, right) => left.title.localeCompare(right.title, 'zh-Hant'));
+  const normalized = {
+    gradeName: String(source.gradeName || gradeName || ''),
+    firstDateKey: String(source.firstDateKey || ''),
+    lastDateKey: String(source.lastDateKey || ''),
+    sourceUpdatedLabel: String(source.sourceUpdatedLabel || ''),
+    sourceStale: Boolean(source.sourceStale),
+    catalog: {
+      all: catalogAll,
+      courses: catalogAll.filter(item => item.type === 'course'),
+      activities: catalogAll.filter(item => item.type === 'activity'),
+      vacationItems: catalogAll.filter(item => item.period === 'vacation')
+    },
+    termKey: String(source.termKey || ''),
+    catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
+    catalogFingerprint: String(source.catalogFingerprint || source.fingerprint || ''),
+    events: [],
+    initialSetupSnapshot: true
+  };
+  if (normalized.catalogFingerprintVersion === SETUP_CATALOG_FINGERPRINT_VERSION) {
+    const expected = makeSetupCatalogFingerprint_(
+      normalized.termKey,
+      normalized.lastDateKey,
+      catalogAll
+    );
+    if (!normalized.catalogFingerprint || normalized.catalogFingerprint !== expected) {
+      throw new Error('設定碼的課表摘要指紋不一致，請回網站重新產生。');
+    }
+  } else if (normalized.catalogFingerprintVersion !== 0) {
+    throw new Error('設定碼的課表摘要版本無法辨識，請回網站重新產生。');
+  }
+  normalized.setupContextFingerprint = makeSetupContextFingerprint_(normalized);
+  if ((source.setupContextFingerprint || source.contextFingerprint) &&
+      String(source.setupContextFingerprint || source.contextFingerprint) !==
+        normalized.setupContextFingerprint) {
+    throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
+  }
+  return normalized;
+}
+
+function getSetupPayloadCatalogFingerprint_(payload) {
+  return String(payload && (payload.catalogFingerprint || payload.sourceFingerprint) || '').trim();
+}
+
+function setupPayloadCatalogMatchesSource_(payload, source) {
+  const supplied = getSetupPayloadCatalogFingerprint_(payload);
+  const version = Number(payload && payload.catalogFingerprintVersion) || 0;
+  if (!supplied) return false;
+  if (version === SETUP_CATALOG_FINGERPRINT_VERSION) {
+    return Number(source.catalogFingerprintVersion) === version &&
+      supplied === source.catalogFingerprint;
+  }
+  if (version !== 0) return false;
+  return supplied === source.catalogFingerprint || supplied === makeLegacySetupCatalogFingerprint_(
+    source.termKey,
+    source.lastDateKey,
+    source.catalog.all
+  );
 }
 
 function hasSetupSourceContext_(settings) {
@@ -1304,7 +1599,7 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
   if (!GRADE_API_NAMES[payload.gradeName]) {
     throw new Error('設定碼的年級無法辨識，請回網站重新產生。');
   }
-  if (!String(payload.termKey || '').trim() || !String(payload.sourceFingerprint || '').trim()) {
+  if (!String(payload.termKey || '').trim() || !getSetupPayloadCatalogFingerprint_(payload)) {
     throw new Error('設定碼缺少課表版本，請回網站重新產生。');
   }
   if (!Array.isArray(payload.selectedCourses) || !Array.isArray(payload.excludedActivities) ||
@@ -1342,11 +1637,12 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
   }).filter(Boolean);
   const sourceChanged = Boolean(
     missingItems.length ||
-    payload.sourceFingerprint && payload.sourceFingerprint !== source.fingerprint
+    !setupPayloadCatalogMatchesSource_(payload, source)
   );
   const confirmationToken = hashText_([
     decoded.codeHash,
-    source.fingerprint,
+    source.catalogFingerprint,
+    source.setupContextFingerprint || '',
     payload.gradeName,
     selectedCourses.join('|'),
     excludedActivities.join('|'),
@@ -1394,11 +1690,11 @@ function buildSetupSourceContextFromPayload_(payload) {
     }
     seen[key] = true;
     return { title, type, period };
-  }).sort((left, right) => left.title.localeCompare(right.title, 'zh-Hant'));
+  });
   const updateMatch = String(snapshot.sourceUpdatedLabel || '').match(/(\\d{8})/);
   const sourceUpdatedLabel = updateMatch ? updateMatch[1] : '';
 
-  return {
+  return normalizeSetupSourceContext_({
     gradeName: payload.gradeName,
     firstDateKey,
     lastDateKey,
@@ -1411,13 +1707,15 @@ function buildSetupSourceContextFromPayload_(payload) {
       vacationItems: catalogAll.filter(item => item.period === 'vacation')
     },
     termKey: String(payload.termKey || ''),
-    fingerprint: String(payload.sourceFingerprint || ''),
+    catalogFingerprintVersion: Number(payload.catalogFingerprintVersion) || 0,
+    catalogFingerprint: getSetupPayloadCatalogFingerprint_(payload),
     events: [],
     initialSetupSnapshot: true
-  };
+  }, payload.gradeName);
 }
 
 function setupImportPreviewForClient_(preview) {
+  const accountCheck = getActiveGoogleAccountCheck_(preview.notificationEmail);
   return {
     gradeName: preview.gradeName,
     selectedCourses: preview.selectedCourses,
@@ -1426,7 +1724,8 @@ function setupImportPreviewForClient_(preview) {
     notificationEmail: preview.notificationEmail,
     instantNotificationsEnabled: preview.instantNotificationsEnabled,
     notificationHours: preview.notificationHours,
-    accountMismatch: activeGoogleAccountDoesNotMatch_(preview.notificationEmail),
+    accountMismatch: accountCheck.accountMismatch,
+    accountVerificationUnavailable: accountCheck.accountVerificationUnavailable,
     sourceChanged: preview.sourceChanged,
     missingItems: preview.missingItems,
     confirmationToken: preview.confirmationToken
@@ -1434,15 +1733,25 @@ function setupImportPreviewForClient_(preview) {
 }
 
 function activeGoogleAccountDoesNotMatch_(notificationEmail) {
+  return getActiveGoogleAccountCheck_(notificationEmail).accountMismatch;
+}
+
+function getActiveGoogleAccountCheck_(notificationEmail) {
+  const expectedEmail = String(notificationEmail || '').trim().toLowerCase();
   try {
     const activeUser = Session.getActiveUser();
     const activeEmail = String(activeUser && activeUser.getEmail
       ? activeUser.getEmail()
       : '').trim().toLowerCase();
-    const expectedEmail = String(notificationEmail || '').trim().toLowerCase();
-    return Boolean(activeEmail && expectedEmail && activeEmail !== expectedEmail);
+    return {
+      accountMismatch: Boolean(activeEmail && expectedEmail && activeEmail !== expectedEmail),
+      accountVerificationUnavailable: Boolean(expectedEmail && !activeEmail)
+    };
   } catch (error) {
-    return false;
+    return {
+      accountMismatch: false,
+      accountVerificationUnavailable: Boolean(expectedEmail)
+    };
   }
 }
 
@@ -1534,11 +1843,22 @@ function getSourceCatalogForUi(gradeName) {
 
 function saveSettingsFromUi(input) {
   const result = saveSettingsCore_(input);
-  scheduleCourseOutlineRefreshIfNeeded_(result.settings, result.source);
-  return {
+  const response = {
     message: '設定已儲存',
-    uiData: buildUiData_(result.settings, result.source)
+    operationWarning: result.operationWarning || ''
   };
+  try {
+    scheduleCourseOutlineRefreshIfNeeded_(result.settings, result.source);
+  } catch (error) {
+    response.operationWarning = appendWarning_(
+      response.operationWarning,
+      '設定已儲存，但課綱背景更新暫時無法排程。'
+    );
+    Logger.log('設定儲存後無法排程課綱背景更新：' + userFacingError_(error));
+  }
+  return attachUiDataSafely_(response, () =>
+    buildUiData_(result.settings, result.source)
+  );
 }
 
 function previewSettingsImpactFromUi(input) {
@@ -1587,77 +1907,99 @@ function previewSettingsImpactFromUi(input) {
 
 function prepareFirstSyncCourseOutlinesFromUi(input) {
   const startedAt = Date.now();
-  try {
-    const previous = loadSettings_();
-    assertSetupImported_(previous);
-    if (previous.setupComplete) {
-      return { prepared: false, skipped: true, message: '已完成第一次同步，不需要再次預先載入課綱資料。' };
-    }
-    const gradeName = sanitizeGrade_(input && input.gradeName);
-    const source = loadSourceContext_(gradeName);
-    const settings = sanitizeSettingsInput_(input || {}, previous, source);
-    const desiredEvents = getDesiredCourseOutlineEvents_(settings, source, scheduleBusinessNow_());
-    const sourceSets = getRelevantCourseOutlineSourceSets_(settings.gradeName, desiredEvents);
-    if (!sourceSets.length || !desiredEvents.length) {
-      return {
-        prepared: false,
-        skipped: true,
-        elapsedMs: Date.now() - startedAt,
-        message: '近期沒有需要在第一次同步前載入的課綱資料。'
-      };
-    }
-
-    const snapshot = collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSets);
-    const elapsedMs = Date.now() - startedAt;
-    if (elapsedMs > COURSE_OUTLINE_FIRST_SETUP_MAX_MS) {
-      return {
-        prepared: false,
-        skipped: false,
-        elapsedMs,
-        message: '課綱讀取超過 1 分鐘，為了保護第一次同步，將改由背景工作更新。'
-      };
-    }
-
-    const published = publishCourseOutlineSnapshot_(snapshot);
-    saveCourseOutlineState_({
-      status: 'idle',
-      attempt: 0,
-      incidentId: '',
-      runId: '',
-      scheduledAt: '',
-      startedAt: '',
-      watchdogTriggerId: '',
-      retryTriggerId: '',
-      failureNotifiedAt: '',
-      notificationPending: false,
-      lastError: '',
-      lastSuccessAt: new Date().toISOString(),
-      activeVersion: published.version
-    });
-    return {
-      prepared: true,
-      skipped: false,
-      elapsedMs,
-      matchedRecordCount: snapshot.diagnostics.matchedRecordCount,
-      missingSheetNames: snapshot.diagnostics.missingSheetNames,
-      message: '未來 30 天的課綱資料已準備完成，第一批行程會直接帶入。'
-    };
-  } catch (error) {
-    Logger.log('第一次同步前無法預先載入課綱，將改由背景工作更新：' + userFacingError_(error));
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) {
     return {
       prepared: false,
       skipped: false,
+      busy: true,
       elapsedMs: Date.now() - startedAt,
-      message: '課綱資料暫時無法預先載入，基本行程會先同步，課綱稍後在背景補上。'
+      message: '另一個同步或課綱工作正在保存資料；基本行程可先同步，課綱稍後在背景補上。'
     };
+  }
+  try {
+    try {
+      const previous = loadSettings_();
+      assertSetupImported_(previous);
+      if (previous.setupComplete) {
+        return { prepared: false, skipped: true, message: '已完成第一次同步，不需要再次預先載入課綱資料。' };
+      }
+      const gradeName = sanitizeGrade_(input && input.gradeName);
+      const source = loadSourceContext_(gradeName);
+      const settings = sanitizeSettingsInput_(input || {}, previous, source);
+      const desiredEvents = getDesiredCourseOutlineEvents_(settings, source, scheduleBusinessNow_());
+      const sourceSets = getRelevantCourseOutlineSourceSets_(settings.gradeName, desiredEvents);
+      if (!sourceSets.length || !desiredEvents.length) {
+        return {
+          prepared: false,
+          skipped: true,
+          elapsedMs: Date.now() - startedAt,
+          message: '近期沒有需要在第一次同步前載入的課綱資料。'
+        };
+      }
+
+      const snapshot = collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSets);
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs > COURSE_OUTLINE_FIRST_SETUP_MAX_MS) {
+        return {
+          prepared: false,
+          skipped: false,
+          elapsedMs,
+          message: '課綱讀取超過 1 分鐘，為了保護第一次同步，將改由背景工作更新。'
+        };
+      }
+
+      const published = publishCourseOutlineSnapshot_(snapshot);
+      let stateWarning = '';
+      try {
+        saveCourseOutlineState_({
+          status: 'idle',
+          attempt: 0,
+          incidentId: '',
+          runId: '',
+          scheduledAt: '',
+          startedAt: '',
+          watchdogTriggerId: '',
+          retryTriggerId: '',
+          failureNotifiedAt: '',
+          notificationPending: false,
+          lastError: '',
+          lastSuccessAt: new Date().toISOString(),
+          activeVersion: published.version
+        });
+      } catch (stateError) {
+        stateWarning = '課綱快照已準備，但背景狀態暫時無法更新。';
+        Logger.log('課綱快照發佈後無法儲存狀態：' + userFacingError_(stateError));
+      }
+      return {
+        prepared: true,
+        skipped: false,
+        elapsedMs,
+        matchedRecordCount: snapshot.diagnostics.matchedRecordCount,
+        missingSheetNames: snapshot.diagnostics.missingSheetNames,
+        message: '未來 30 天的課綱資料已準備完成，第一批行程會直接帶入。' +
+          (stateWarning ? '\\n' + stateWarning : '')
+      };
+    } catch (error) {
+      Logger.log('第一次同步前無法預先載入課綱，將改由背景工作更新：' + userFacingError_(error));
+      return {
+        prepared: false,
+        skipped: false,
+        elapsedMs: Date.now() - startedAt,
+        message: '課綱資料暫時無法預先載入，基本行程會先同步，課綱稍後在背景補上。'
+      };
+    }
+  } finally {
+    lock.releaseLock();
   }
 }
 
 function saveSettingsAndSyncFromUi(input) {
   const result = saveSettingsCore_(input);
   const firstSetup = !result.previousSetupComplete;
+  let syncResult;
   try {
-    const syncResult = syncSchedule_({
+    syncResult = syncSchedule_({
       reason: firstSetup ? 'setup' : 'settings',
       firstSetup,
       forceCalendarCheck: true,
@@ -1665,39 +2007,65 @@ function saveSettingsAndSyncFromUi(input) {
       trackProgress: true,
       approvalToken: String(input && input.syncApprovalToken || '')
     });
-    return buildSyncUiResponse_(
-      syncResult,
-      firstSetup ? '第一次同步完成，請檢查專用日曆' : '設定已儲存並同步'
-    );
   } catch (error) {
     notifySyncFailureUnlessActionRequired_(error);
     throw error;
   }
+  const response = buildSyncUiResponse_(
+    syncResult,
+    firstSetup ? '第一次同步完成，請檢查專用日曆' : '設定已儲存並同步'
+  );
+  response.operationWarning = appendWarning_(
+    result.operationWarning,
+    response.operationWarning
+  );
+  return response;
 }
 
 function runSyncFromUi() {
+  let result;
   try {
-    const result = syncSchedule_({ reason: 'manual', trackProgress: true });
-    return buildSyncUiResponse_(result, formatSyncResultMessage_(result));
+    result = syncSchedule_({ reason: 'manual', trackProgress: true });
   } catch (error) {
     notifySyncFailureUnlessActionRequired_(error);
     throw error;
   }
+  return buildSyncUiResponse_(result, formatSyncResultMessage_(result));
 }
 
 function forceRepairFromUi() {
+  let result;
   try {
-    const result = syncSchedule_({ reason: 'repair', forceCalendarCheck: true, trackProgress: true });
-    return buildSyncUiResponse_(result, '修復完成：' + formatSyncResultMessage_(result));
+    result = syncSchedule_({ reason: 'repair', forceCalendarCheck: true, trackProgress: true });
   } catch (error) {
     notifySyncFailureUnlessActionRequired_(error);
     throw error;
   }
+  return buildSyncUiResponse_(result, '修復完成：' + formatSyncResultMessage_(result));
+}
+
+function attachUiDataSafely_(response, loadUiData) {
+  const result = Object.assign({}, response || {});
+  try {
+    result.uiData = loadUiData();
+  } catch (error) {
+    Logger.log('主要操作已完成，但控制臺資料重新載入失敗：' + userFacingError_(error));
+    result.uiData = null;
+    result.uiRefreshWarning = '操作已完成，但控制臺資料暫時無法重新載入；請稍後重新開啟控制臺。';
+  }
+  return result;
+}
+
+function appendWarning_(current, next) {
+  return [String(current || '').trim(), String(next || '').trim()]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join('\\n');
 }
 
 function buildSyncUiResponse_(result, completeMessage) {
   const pending = Boolean(result && result.pending);
-  return {
+  return attachUiDataSafely_({
     pending,
     jobId: result && result.jobId || '',
     message: pending
@@ -1705,8 +2073,10 @@ function buildSyncUiResponse_(result, completeMessage) {
         ? 'Google 服務暫時無法完成，已保存進度並安排重試。'
         : '第一批已安全保存，剩餘行程會在背景分批完成；現在可以關閉控制臺。')
       : completeMessage,
-    uiData: getSettingsUiData()
-  };
+    operationWarning: result && Array.isArray(result.completionWarnings)
+      ? result.completionWarnings.join('\\n')
+      : ''
+  }, getSettingsUiData);
 }
 
 function createDedicatedCalendarForUi(input) {
@@ -1715,12 +2085,26 @@ function createDedicatedCalendarForUi(input) {
   const gradeName = sanitizeGrade_(input && input.gradeName || settings.gradeName);
   const calendarName = sanitizeCalendarName_(input && input.calendarName, gradeName);
   const calendar = CalendarApp.createCalendar(calendarName, { selected: true });
-  return {
+  try {
+    if (typeof calendar.setDescription === 'function') {
+      calendar.setDescription(MANAGED_CALENDAR_DESCRIPTION);
+    }
+  } catch (descriptionError) {
+    Logger.log('專用日曆已建立，但無法寫入復原標記：' + userFacingError_(descriptionError));
+  }
+  const result = {
     message: '已建立專用日曆',
     calendarId: calendar.getId(),
-    calendarName,
-    calendars: listOwnedCalendars_()
+    calendarName
   };
+  try {
+    result.calendars = listOwnedCalendars_();
+  } catch (error) {
+    Logger.log('專用日曆已建立，但日曆清單重新載入失敗：' + userFacingError_(error));
+    result.calendars = [{ id: result.calendarId, name: calendarName }];
+    result.calendarListWarning = '專用日曆已建立，但日曆清單暫時無法重新載入。';
+  }
+  return result;
 }
 
 function confirmPendingTitleFromUi(title) {
@@ -1740,7 +2124,7 @@ function confirmPendingTitleFromUi(title) {
   } finally {
     lock.releaseLock();
   }
-  return { message: '已保留「' + title + '」', uiData: getSettingsUiData() };
+  return attachUiDataSafely_({ message: '已保留「' + title + '」' }, getSettingsUiData);
 }
 
 function rejectPendingTitleFromUi(title) {
@@ -1760,7 +2144,9 @@ function rejectPendingTitleFromUi(title) {
   } finally {
     lock.releaseLock();
   }
-  return { message: '已排除「' + title + '」，下次同步會移除同名活動', uiData: getSettingsUiData() };
+  return attachUiDataSafely_({
+    message: '已排除「' + title + '」，下次同步會移除同名活動'
+  }, getSettingsUiData);
 }
 
 function saveSettingsCore_(input) {
@@ -1775,17 +2161,24 @@ function saveSettingsCore_(input) {
     assertFirstSetupTermStillCurrent_(oldSettings, source);
     const next = sanitizeSettingsInput_(input, oldSettings, source);
 
-    cancelActiveSyncJob_('設定已更新，將依新設定重新規劃。');
     saveSettings_(next);
-    if (!next.pendingTermKey) {
-      deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+    const operationWarnings = [];
+    try {
+      cancelActiveSyncJob_('設定已更新，將依新設定重新規劃。');
+      if (!next.pendingTermKey) {
+        deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+      }
+      if (next.setupComplete) refreshAutoSyncTriggers_(next);
+      else deleteAutoSyncTriggersUnlocked_();
+    } catch (automationError) {
+      operationWarnings.push('設定已儲存，但自動同步觸發器暫時無法更新。');
+      Logger.log('設定儲存後無法更新自動同步觸發器：' + userFacingError_(automationError));
     }
-    if (next.setupComplete) refreshAutoSyncTriggers_(next);
-    else deleteAutoSyncTriggersUnlocked_();
     return {
       settings: next,
       source,
-      previousSetupComplete: Boolean(oldSettings.setupComplete)
+      previousSetupComplete: Boolean(oldSettings.setupComplete),
+      operationWarning: operationWarnings.join('\\n')
     };
   } finally {
     lock.releaseLock();
@@ -1909,7 +2302,7 @@ function sanitizeSettingsInput_(input, previous, source) {
     pendingTitles: gradeChanged ? [] : previous.pendingTitles.filter(title => sourceKeys.indexOf(normalizeTitle_(title)) !== -1),
     excludedTitles: gradeChanged ? [] : previous.excludedTitles,
     termKey: source.termKey,
-    sourceFingerprint: source.fingerprint,
+    scheduleFingerprint: String(source.scheduleFingerprint || previous.scheduleFingerprint || ''),
     pendingTermKey: '',
     pausedReason: '',
     autoSyncEnabledBeforeTermTransition: null,
@@ -1929,7 +2322,7 @@ function buildUiData_(settings, source) {
     status: loadStatus_(),
     courseOutlineStatus: buildCourseOutlineUiStatus_(
       settings,
-      source && source.initialSetupSnapshot ? null : source,
+      source && (source.initialSetupSnapshot || source.sourceUnavailable) ? null : source,
       loadCourseOutlineSourceIndexForUi_()
     ),
     termTransition: buildTermTransitionUiModel_(settings, source)
@@ -1964,10 +2357,15 @@ function buildSourceUiModel_(source, gradeName) {
     courseCount: source.catalog.courses.length,
     activityCount: source.catalog.activities.length,
     updateLabel: source.sourceUpdatedLabel,
-    warning: source.sourceStale,
+    warning: source.sourceStale || source.sourceUnavailable,
+    unavailable: Boolean(source.sourceUnavailable),
+    unavailableMessage: String(source.sourceUnavailableMessage || ''),
+    cacheSavedAt: String(source.sourceCacheSavedAt || ''),
     catalog: source.catalog,
     termKey: source.termKey,
-    fingerprint: source.fingerprint
+    catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
+    catalogFingerprint: source.catalogFingerprint || '',
+    scheduleFingerprint: source.scheduleFingerprint || ''
   };
 }
 
@@ -1991,12 +2389,48 @@ function ensureDedicatedCalendar_(settings) {
     return assertDedicatedCalendar_(settings.calendarId);
   }
 
-  const calendar = CalendarApp.createCalendar(buildDedicatedCalendarName_(settings), {
+  const calendarName = buildDedicatedCalendarName_(settings);
+  const recoverableCalendars = findRecoverableDedicatedCalendars_(calendarName);
+  if (recoverableCalendars.length > 1) {
+    throw new Error(
+      '[ACTION_REQUIRED] 找到多個先前建立但尚未綁定的專用日曆，' +
+      '請在控制臺手動選擇要使用的日曆。'
+    );
+  }
+  if (recoverableCalendars.length === 1) {
+    settings.calendarId = recoverableCalendars[0].getId();
+    saveSettings_(settings);
+    return recoverableCalendars[0];
+  }
+
+  const calendar = CalendarApp.createCalendar(calendarName, {
     selected: true
   });
+  try {
+    if (typeof calendar.setDescription === 'function') {
+      calendar.setDescription(MANAGED_CALENDAR_DESCRIPTION);
+    }
+  } catch (descriptionError) {
+    Logger.log('專用日曆已建立，但無法寫入復原標記：' + userFacingError_(descriptionError));
+  }
   settings.calendarId = calendar.getId();
   saveSettings_(settings);
   return calendar;
+}
+
+function findRecoverableDedicatedCalendars_(calendarName) {
+  const defaultId = CalendarApp.getDefaultCalendar().getId();
+  return CalendarApp.getAllOwnedCalendars().filter(calendar => {
+    if (!calendar || calendar.getId() === defaultId || calendar.getName() !== calendarName) {
+      return false;
+    }
+    try {
+      return typeof calendar.getDescription === 'function' &&
+        calendar.getDescription() === MANAGED_CALENDAR_DESCRIPTION;
+    } catch (error) {
+      return false;
+    }
+  });
 }
 
 function assertDedicatedCalendar_(calendarId) {
@@ -2184,7 +2618,7 @@ function syncSchedule_(options) {
       job.runStartedAt = new Date().toISOString();
       job.updatedAt = job.runStartedAt;
       saveSyncJob_(job);
-      ensureOneTimeTrigger_(SYNC_WATCHDOG_HANDLER, SYNC_WATCHDOG_DELAY_MS);
+      resetSyncWatchdogTrigger_();
     }
     if (trackProgress) writeSyncProgress_(8, '正在讀取控制臺設定…', 'running');
     let settings = loadSettings_();
@@ -2242,7 +2676,7 @@ function syncSchedule_(options) {
     job.runStartedAt = new Date().toISOString();
     job.updatedAt = job.runStartedAt;
     saveSyncJob_(job);
-    ensureOneTimeTrigger_(SYNC_WATCHDOG_HANDLER, SYNC_WATCHDOG_DELAY_MS);
+    resetSyncWatchdogTrigger_();
 
     const batchResult = runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, todayKey);
     try {
@@ -2290,7 +2724,7 @@ function syncSchedule_(options) {
 function buildSyncJobInput_(settings, source, desiredEvents, calendar) {
   const outlineVersion = PropertiesService.getScriptProperties()
     .getProperty(COURSE_OUTLINE_ACTIVE_VERSION_PROPERTY) || '';
-  const scheduleRows = (desiredEvents || []).map(item => [
+  const scheduleRows = sortCanonicalRows_((desiredEvents || []).map(item => [
     item.originalTitle,
     item.type,
     Boolean(item.isAllDay),
@@ -2300,12 +2734,12 @@ function buildSyncJobInput_(settings, source, desiredEvents, calendar) {
     item.start.toISOString(),
     item.end.toISOString(),
     item.location || ''
-  ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-  const desiredRows = (desiredEvents || []).map(item => [
+  ]));
+  const desiredRows = sortCanonicalRows_((desiredEvents || []).map(item => [
     makeOccurrenceKey_(item),
     makeEventSignature_(item, settings),
     item.outlineHash || ''
-  ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  ]));
   const settingsRows = [
     settings.gradeName,
     settings.termKey,
@@ -2323,7 +2757,7 @@ function buildSyncJobInput_(settings, source, desiredEvents, calendar) {
     gradeName: settings.gradeName,
     termKey: source.termKey,
     calendarId: calendar.getId(),
-    scheduleFingerprint: hashText_(JSON.stringify(scheduleRows)),
+    desiredScheduleFingerprint: hashText_(JSON.stringify(scheduleRows)),
     settingsFingerprint: hashText_(JSON.stringify(settingsRows)),
     outlineVersion,
     desiredFingerprint: hashText_(JSON.stringify(desiredRows))
@@ -2334,15 +2768,15 @@ function makeSyncApprovalToken_(settings, source, desiredEvents, plan) {
   return hashText_(JSON.stringify([
     settings.gradeName,
     source.termKey,
-    source.fingerprint,
+    source.scheduleFingerprint,
     uniqueStrings_(settings.selectedCourses).map(normalizeTitle_).sort(),
     Boolean(settings.includeActivities),
     uniqueStrings_(settings.excludedActivities).map(normalizeTitle_).sort(),
     uniqueStrings_(settings.excludedTitles).map(normalizeTitle_).sort(),
-    (desiredEvents || []).map(item => [
+    sortCanonicalRows_((desiredEvents || []).map(item => [
       makeOccurrenceKey_(item),
       makeEventSignature_(item, settings)
-    ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    ])),
     (plan.deletions || []).map(item => item.stateKey).sort()
   ]));
 }
@@ -2353,7 +2787,7 @@ function syncJobInputMatches_(left, right) {
     'gradeName',
     'termKey',
     'calendarId',
-    'scheduleFingerprint',
+    'desiredScheduleFingerprint',
     'settingsFingerprint',
     'outlineVersion',
     'desiredFingerprint'
@@ -2708,6 +3142,17 @@ function appendSyncJobChanges_(job, changes) {
   });
 }
 
+function runPostCommitStep_(warnings, label, userMessage, operation) {
+  try {
+    operation();
+    return true;
+  } catch (error) {
+    Logger.log(label + '：' + userFacingError_(error));
+    if (userMessage && warnings.indexOf(userMessage) === -1) warnings.push(userMessage);
+    return false;
+  }
+}
+
 function finalizeSyncJob_(job, settings, source, state, calendar) {
   job.status = 'finalizing';
   job.updatedAt = new Date().toISOString();
@@ -2715,15 +3160,13 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
   writeSyncJobProgress_(job, '正在完成設定、通知與自動同步…', 'running');
 
   settings.setupComplete = true;
-  settings.sourceFingerprint = source.fingerprint;
+  settings.scheduleFingerprint = source.scheduleFingerprint;
+  settings.setupContextFingerprint = '';
   settings.knownTitles = uniqueStrings_(
     settings.knownTitles.concat(source.catalog.all.map(item => item.title))
   );
   if (job.migrationFromId) settings.calendarMigrationFromId = '';
   saveSettings_(settings);
-  clearChunkedStore_(SETUP_SOURCE_CONTEXT_STORE);
-  refreshAutoSyncTriggers_(settings);
-  scheduleCourseOutlineRefreshIfNeeded_(settings, source);
 
   const result = buildSyncJobResult_(job, false);
   result.state = state;
@@ -2732,6 +3175,7 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
     0,
     job.desiredCount - result.created - result.updated - result.outlineUpdated
   );
+  const completionWarnings = [];
   const status = {
     ok: true,
     message: formatSyncResultMessage_(result),
@@ -2744,32 +3188,81 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
     deleted: result.deleted,
     unchanged: result.unchanged
   };
-  writeChunkedJson_(STATUS_STORE, status);
+  runPostCommitStep_(
+    completionWarnings,
+    '同步完成後無法保存狀態',
+    '行程已同步，但控制臺狀態暫時無法更新。',
+    () => writeChunkedJson_(STATUS_STORE, status)
+  );
+  saveSourceUiCacheSafely_(source);
+  runPostCommitStep_(
+    completionWarnings,
+    '同步完成後無法清除安裝摘要',
+    '',
+    () => clearChunkedStore_(SETUP_SOURCE_CONTEXT_STORE)
+  );
+  runPostCommitStep_(
+    completionWarnings,
+    '同步完成後無法更新自動同步觸發器',
+    '行程已同步，但自動同步觸發器暫時無法更新。',
+    () => refreshAutoSyncTriggers_(settings)
+  );
+  runPostCommitStep_(
+    completionWarnings,
+    '同步完成後無法排程課綱更新',
+    '行程已同步，但課綱背景更新暫時無法排程。',
+    () => scheduleCourseOutlineRefreshIfNeeded_(settings, source)
+  );
 
   if (!job.completionNotificationClaimed) {
-    job.completionNotificationClaimed = true;
-    saveSyncJob_(job);
-    sendSyncNotificationsSafe_(settings, result, {
-      reason: job.reason,
-      notifyOnSuccess: job.notifyOnSuccess,
-      notificationWindow: job.notificationWindow
-    });
-    if (job.firstSetup && !job.setupNotificationClaimed) {
-      job.setupNotificationClaimed = true;
-      saveSyncJob_(job);
-      sendFirstSetupNotificationSafe_(result);
-    }
+    runPostCommitStep_(
+      completionWarnings,
+      '同步完成後無法保存通知進度',
+      '行程已同步，但通知進度暫時無法更新。',
+      () => {
+        job.completionNotificationClaimed = true;
+        saveSyncJob_(job);
+        sendSyncNotificationsSafe_(settings, result, {
+          reason: job.reason,
+          notifyOnSuccess: job.notifyOnSuccess,
+          notificationWindow: job.notificationWindow
+        });
+        if (job.firstSetup && !job.setupNotificationClaimed) {
+          job.setupNotificationClaimed = true;
+          saveSyncJob_(job);
+          if (!sendFirstSetupNotificationSafe_(result)) {
+            completionWarnings.push('行程已同步，但設定完成通知暫時無法寄送。');
+          }
+        }
+      }
+    );
   }
 
-  writeSyncProgress_(100, '同步完成', 'complete', {
-    jobId: job.jobId,
-    processed: job.processedOperations,
-    total: Math.max(job.initialOperationCount, job.processedOperations),
-    remaining: 0
-  });
-  clearChunkedStore_(SYNC_JOB_STORE);
-  deleteTriggersByHandlers_([SYNC_CONTINUATION_HANDLER, SYNC_WATCHDOG_HANDLER]);
-  scheduleRequestedNotificationDeliveryRetry_();
+  runPostCommitStep_(completionWarnings, '同步完成後無法保存進度', '', () =>
+    writeSyncProgress_(100, '同步完成', 'complete', {
+      jobId: job.jobId,
+      processed: job.processedOperations,
+      total: Math.max(job.initialOperationCount, job.processedOperations),
+      remaining: 0
+    })
+  );
+  job.status = 'completed';
+  job.runId = '';
+  job.runStartedAt = '';
+  job.updatedAt = new Date().toISOString();
+  runPostCommitStep_(completionWarnings, '同步完成後無法關閉工作狀態', '', () =>
+    saveSyncJob_(job)
+  );
+  runPostCommitStep_(completionWarnings, '同步完成後無法清除工作狀態', '', () =>
+    clearChunkedStore_(SYNC_JOB_STORE)
+  );
+  runPostCommitStep_(completionWarnings, '同步完成後無法清除續跑觸發器', '', () =>
+    deleteTriggersByHandlers_([SYNC_CONTINUATION_HANDLER, SYNC_WATCHDOG_HANDLER])
+  );
+  runPostCommitStep_(completionWarnings, '同步完成後無法延後通知寄送', '', () =>
+    scheduleRequestedNotificationDeliveryRetry_()
+  );
+  result.completionWarnings = completionWarnings;
   return result;
 }
 
@@ -2841,23 +3334,38 @@ function writeFailedSyncStatus_(message) {
 }
 
 function buildSyncJobResult_(job, pending) {
-  const changes = (job.changes || []).map(hydrateSyncChange_);
+  const omittedChangeCount = Number(job.omittedChangeCount) || 0;
+  const rawChanges = (job.changes || []).map(hydrateSyncChange_);
+  const canNormalizeDetectedChanges = !pending && omittedChangeCount === 0;
+  const changes = canNormalizeDetectedChanges
+    ? normalizeDetectedScheduleChanges_(rawChanges)
+    : rawChanges;
+  const detectedCounts = canNormalizeDetectedChanges
+    ? countDetectedScheduleChanges_(changes)
+    : null;
   return {
     pending: Boolean(pending),
     jobId: job.jobId,
-    created: Number(job.created) || 0,
-    updated: Number(job.updated) || 0,
+    created: detectedCounts ? detectedCounts.created : Number(job.created) || 0,
+    updated: detectedCounts ? detectedCounts.updated : Number(job.updated) || 0,
     outlineUpdated: Number(job.outlineUpdated) || 0,
-    deleted: Number(job.deleted) || 0,
+    deleted: detectedCounts ? detectedCounts.deleted : Number(job.deleted) || 0,
     unchanged: 0,
     changes,
-    omittedChangeCount: Number(job.omittedChangeCount) || 0
+    omittedChangeCount
   };
 }
 
 function loadSyncJob_() {
   const job = readChunkedJson_(SYNC_JOB_STORE, null);
-  return job && job.schemaVersion === SYNC_JOB_SCHEMA_VERSION ? job : null;
+  if (!job) return null;
+  if (job.schemaVersion === 1) {
+    job.schemaVersion = SYNC_JOB_SCHEMA_VERSION;
+    job.input = job.input || {};
+    job.input.desiredScheduleFingerprint = String(job.input.scheduleFingerprint || '');
+    delete job.input.scheduleFingerprint;
+  }
+  return job.schemaVersion === SYNC_JOB_SCHEMA_VERSION ? job : null;
 }
 
 function saveSyncJob_(job) {
@@ -2939,8 +3447,155 @@ function compactSyncChangeItem_(item) {
     periodEnd: Number(item.periodEnd) || 0,
     startTime: item.startTime || '',
     endTime: item.endTime || '',
-    location: item.location || ''
+    location: item.location || '',
+    outlineIdentityHash: item.outlineIdentityHash || ''
   };
+}
+
+function normalizeDetectedScheduleChanges_(changes) {
+  const entries = [];
+  const atomizableTypes = ['調整', '新增', '取消'];
+  (changes || []).forEach((change, index) => {
+    const oldAtoms = makeScheduleChangeAtoms_(change.oldItem, index, 'old');
+    const newAtoms = makeScheduleChangeAtoms_(change.newItem, index, 'new');
+    entries.push({
+      index,
+      change,
+      atomizable: atomizableTypes.indexOf(change.type) !== -1 &&
+        (!change.oldItem || oldAtoms.length > 0) &&
+        (!change.newItem || newAtoms.length > 0),
+      oldAtoms,
+      newAtoms
+    });
+  });
+
+  const oldAtomsByKey = Object.create(null);
+  entries.filter(entry => entry.atomizable).forEach(entry => {
+    entry.oldAtoms.forEach(atom => {
+      const key = makeScheduleChangeAtomKey_(atom);
+      if (!oldAtomsByKey[key]) oldAtomsByKey[key] = [];
+      oldAtomsByKey[key].push(atom);
+    });
+  });
+
+  let cancelledAtomCount = 0;
+  entries.filter(entry => entry.atomizable).forEach(entry => {
+    entry.newAtoms.forEach(newAtom => {
+      const candidates = (oldAtomsByKey[makeScheduleChangeAtomKey_(newAtom)] || [])
+        .filter(oldAtom =>
+          !oldAtom.cancelled &&
+          oldAtom.entryIndex !== newAtom.entryIndex &&
+          haveCompatibleOutlineIdentities_(oldAtom.item, newAtom.item)
+        );
+      const exactIdentityCandidates = candidates.filter(oldAtom =>
+        newAtom.item.outlineIdentityHash &&
+        oldAtom.item.outlineIdentityHash === newAtom.item.outlineIdentityHash
+      );
+      const eligible = exactIdentityCandidates.length ? exactIdentityCandidates : candidates;
+      if (eligible.length !== 1) return;
+      eligible[0].cancelled = true;
+      newAtom.cancelled = true;
+      cancelledAtomCount += 1;
+    });
+  });
+
+  if (!cancelledAtomCount) return changes || [];
+
+  const normalized = [];
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+    const entry = entries[entryIndex];
+    if (!entry.atomizable) {
+      normalized.push(entry.change);
+      continue;
+    }
+    const oldGroups = coalesceScheduleChangeAtoms_(
+      entry.oldAtoms.filter(atom => !atom.cancelled)
+    );
+    const newGroups = coalesceScheduleChangeAtoms_(
+      entry.newAtoms.filter(atom => !atom.cancelled)
+    );
+    if (oldGroups.length > 1 || newGroups.length > 1) {
+      return changes || [];
+    }
+    const oldItem = oldGroups[0] || null;
+    const newItem = newGroups[0] || null;
+    if (!oldItem && !newItem) continue;
+    normalized.push({
+      type: oldItem && newItem ? '調整' : (newItem ? '新增' : '取消'),
+      oldItem,
+      newItem
+    });
+  }
+  return normalized;
+}
+
+function makeScheduleChangeAtoms_(item, entryIndex, side) {
+  if (!item || item.isAllDay) return [];
+  const periodStart = Number(item.periodStart);
+  const periodEnd = Number(item.periodEnd) || periodStart;
+  if (!Number.isInteger(periodStart) || !Number.isInteger(periodEnd) ||
+      periodStart < 1 || periodEnd < periodStart) {
+    return [];
+  }
+  const atoms = [];
+  for (let period = periodStart; period <= periodEnd; period += 1) {
+    atoms.push({ item, entryIndex, side, period, cancelled: false });
+  }
+  return atoms;
+}
+
+function makeScheduleChangeAtomKey_(atom) {
+  return JSON.stringify([
+    normalizeTitle_(atom.item.originalTitle),
+    atom.item.dateKey,
+    atom.period,
+    normalizeTitle_(atom.item.location)
+  ]);
+}
+
+function haveCompatibleOutlineIdentities_(left, right) {
+  const leftIdentity = String(left && left.outlineIdentityHash || '');
+  const rightIdentity = String(right && right.outlineIdentityHash || '');
+  return !leftIdentity || !rightIdentity || leftIdentity === rightIdentity;
+}
+
+function coalesceScheduleChangeAtoms_(atoms) {
+  if (!atoms.length) return [];
+  const sorted = atoms.slice().sort((left, right) => left.period - right.period);
+  const groups = [];
+  let group = [sorted[0]];
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index].period === group[group.length - 1].period + 1) {
+      group.push(sorted[index]);
+    } else {
+      groups.push(group);
+      group = [sorted[index]];
+    }
+  }
+  groups.push(group);
+  return groups.map(makeScheduleChangeFragment_);
+}
+
+function makeScheduleChangeFragment_(atoms) {
+  const item = Object.assign({}, atoms[0].item, {
+    periodStart: atoms[0].period,
+    periodEnd: atoms[atoms.length - 1].period
+  });
+  if (item.periodStart !== Number(atoms[0].item.periodStart) ||
+      item.periodEnd !== Number(atoms[0].item.periodEnd)) {
+    item.startTime = '';
+    item.endTime = '';
+  }
+  return item;
+}
+
+function countDetectedScheduleChanges_(changes) {
+  return (changes || []).reduce((counts, change) => {
+    if (change.type === '新增') counts.created += 1;
+    else if (change.type === '取消') counts.deleted += 1;
+    else if (change.type === '調整' || change.type === '更新') counts.updated += 1;
+    return counts;
+  }, { created: 0, updated: 0, deleted: 0 });
 }
 
 function dedupeAndValidateDesiredEvents_(events) {
@@ -2988,8 +3643,18 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
     settings.termTransitionNoticeSentAt = '';
     settings.termTransitionNoticeLastError = '';
     saveSettings_(settings);
-    deleteAutoSyncTriggersUnlocked_();
-    deliverTermTransitionNotice_(settings, source);
+    try {
+      deleteAutoSyncTriggersUnlocked_();
+    } catch (triggerError) {
+      Logger.log('新學期狀態已儲存，但無法立即整理自動同步觸發器：' +
+        userFacingError_(triggerError));
+    }
+    try {
+      deliverTermTransitionNotice_(settings, source);
+    } catch (noticeError) {
+      Logger.log('新學期狀態已儲存，但通知後處理暫時失敗：' +
+        userFacingError_(noticeError));
+    }
   }
 
   if (!quiet) {
@@ -3096,18 +3761,23 @@ function registerNewTitles_(settings, source) {
     settings.pendingTitles.some(item => normalizeTitle_(item) === normalizeTitle_(title))
   );
   if (pendingDiscovered.length) {
-    sendActionRequiredSafe_(
-      settings,
-      '同步已暫停',
-      '下列項目已先加入日曆，請在控制臺確認是否屬於你：\\n\\n' +
-        pendingDiscovered.join('\\n'),
-      '',
-      'new_schedule_items',
-      {
-        itemCount: pendingDiscovered.length,
-        items: pendingDiscovered.map(label => ({ label }))
-      }
-    );
+    try {
+      sendActionRequiredSafe_(
+        settings,
+        '同步已暫停',
+        '下列項目已先加入日曆，請在控制臺確認是否屬於你：\\n\\n' +
+          pendingDiscovered.join('\\n'),
+        '',
+        'new_schedule_items',
+        {
+          itemCount: pendingDiscovered.length,
+          items: pendingDiscovered.map(label => ({ label }))
+        }
+      );
+    } catch (noticeError) {
+      Logger.log('新項目狀態已儲存，但通知後處理暫時失敗：' +
+        userFacingError_(noticeError));
+    }
   }
   return settings;
 }
@@ -3175,16 +3845,34 @@ function buildSyncPlan_(oldState, desiredEvents, todayKey) {
   const moveWindowMs = 21 * 24 * 60 * 60 * 1000;
 
   unmatchedNew.forEach(newItem => {
-    const candidates = unmatchedOldByTitle[normalizeTitle_(newItem.originalTitle)] || [];
+    const candidates = (unmatchedOldByTitle[normalizeTitle_(newItem.originalTitle)] || [])
+      .filter(oldItem =>
+        !usedOld[oldItem.stateKey] &&
+        haveCompatibleMoveShape_(oldItem, newItem)
+      )
+      .map(oldItem => ({
+        oldItem,
+        distance: Math.abs(
+          new Date(oldItem.start).getTime() - newItem.start.getTime()
+        )
+      }))
+      .filter(candidate => candidate.distance <= moveWindowMs);
+    const newOutlineIdentityHash = String(newItem.outlineIdentityHash || '');
+    let eligibleCandidates = candidates;
+    if (newOutlineIdentityHash) {
+      const sameOutlineCandidates = candidates.filter(candidate =>
+        String(candidate.oldItem.outlineIdentityHash || '') === newOutlineIdentityHash
+      );
+      eligibleCandidates = sameOutlineCandidates.length
+        ? sameOutlineCandidates
+        : candidates.filter(candidate => !candidate.oldItem.outlineIdentityHash);
+    }
     let bestOldItem = null;
     let bestDistance = Infinity;
     let bestIsTied = false;
-    candidates.forEach(oldItem => {
-      if (usedOld[oldItem.stateKey]) return;
-      const distance = Math.abs(
-        new Date(oldItem.start).getTime() - newItem.start.getTime()
-      );
-      if (!(distance <= moveWindowMs)) return;
+    eligibleCandidates.forEach(candidate => {
+      const oldItem = candidate.oldItem;
+      const distance = candidate.distance;
       if (distance < bestDistance) {
         bestOldItem = oldItem;
         bestDistance = distance;
@@ -3210,6 +3898,26 @@ function buildSyncPlan_(oldState, desiredEvents, todayKey) {
     additions: stillNew,
     deletions: unmatchedOld.filter(item => !usedOld[item.stateKey])
   };
+}
+
+function haveCompatibleMoveShape_(oldItem, newItem) {
+  if (Boolean(oldItem && oldItem.isAllDay) !== Boolean(newItem && newItem.isAllDay)) {
+    return false;
+  }
+  if (oldItem && oldItem.isAllDay) return true;
+  const oldPeriodCount = getScheduledPeriodCount_(oldItem);
+  const newPeriodCount = getScheduledPeriodCount_(newItem);
+  return oldPeriodCount > 0 && oldPeriodCount === newPeriodCount;
+}
+
+function getScheduledPeriodCount_(item) {
+  const periodStart = Number(item && item.periodStart);
+  const periodEnd = Number(item && item.periodEnd) || periodStart;
+  if (!Number.isInteger(periodStart) || !Number.isInteger(periodEnd) ||
+      periodStart < 1 || periodEnd < periodStart) {
+    return -1;
+  }
+  return periodEnd - periodStart + 1;
 }
 
 function assertSafeDeletionPlan_(plan, oldState, reason, deletionApproved) {
@@ -3698,7 +4406,8 @@ function serializeStateItem_(item, calendarEventId, signature, settings) {
     calendarEventId,
     syncSignature: signature,
     baseSyncSignature: makeBaseEventSignature_(item, settings),
-    outlineHash: item.outlineHash || ''
+    outlineHash: item.outlineHash || '',
+    outlineIdentityHash: item.outlineIdentityHash || ''
   };
 }
 
@@ -3850,8 +4559,35 @@ function parseCourseOutlineSourceIndexValues_(values) {
 
   return {
     setsByGrade,
-    fingerprint: hashText_(JSON.stringify(setsByGrade))
+    indexFingerprint: makeCourseOutlineSourceIndexFingerprint_(setsByGrade)
   };
+}
+
+function makeCourseOutlineSourceIndexFingerprint_(setsByGrade) {
+  const rows = [];
+  ['高一', '高二', '高三'].forEach(gradeName => {
+    const sourceSets = setsByGrade && Array.isArray(setsByGrade[gradeName])
+      ? setsByGrade[gradeName]
+      : [];
+    sourceSets.forEach(sourceSet => {
+      rows.push([
+        gradeName,
+        String(sourceSet && sourceSet.key || ''),
+        String(sourceSet && sourceSet.label || ''),
+        String(sourceSet && sourceSet.validFrom || ''),
+        String(sourceSet && sourceSet.validUntil || ''),
+        uniqueExactStrings_(sourceSet && sourceSet.outlineNames || [])
+          .sort(compareCanonicalStrings_),
+        uniqueExactStrings_(sourceSet && sourceSet.spreadsheetIds || [])
+          .sort(compareCanonicalStrings_)
+      ]);
+    });
+  });
+  return hashText_(JSON.stringify([
+    'course-outline-source-index',
+    COURSE_OUTLINE_SOURCE_INDEX_FINGERPRINT_VERSION,
+    sortCanonicalRows_(rows)
+  ]));
 }
 
 function assertCourseOutlineSourceIndexPayload_(payload) {
@@ -3871,6 +4607,15 @@ function assertCourseOutlineSourceIndexPayload_(payload) {
       }
     });
   });
+  const expectedIndexFingerprint = makeCourseOutlineSourceIndexFingerprint_(
+    payload.setsByGrade
+  );
+  if (payload.indexFingerprint &&
+      String(payload.indexFingerprint) !== expectedIndexFingerprint) {
+    throw new Error('課綱來源索引快取指紋不一致。');
+  }
+  payload.indexFingerprint = expectedIndexFingerprint;
+  delete payload.fingerprint;
   return payload;
 }
 
@@ -4150,8 +4895,8 @@ function buildCourseOutlineSourceIndexChangeData_(
     ].join('\\n')).join('\\n\\n'),
     omittedNote,
     '',
-    '舊指紋：' + previousPayload.fingerprint,
-    '新指紋：' + nextPayload.fingerprint
+    '舊指紋：' + previousPayload.indexFingerprint,
+    '新指紋：' + nextPayload.indexFingerprint
   ].filter(Boolean).join('\\n');
 
   return {
@@ -4161,8 +4906,8 @@ function buildCourseOutlineSourceIndexChangeData_(
     hasRelevantChanges: visibleRows.length > 0,
     omittedCount,
     omittedNote,
-    previousFingerprint: previousPayload.fingerprint,
-    currentFingerprint: nextPayload.fingerprint,
+    previousFingerprint: previousPayload.indexFingerprint,
+    currentFingerprint: nextPayload.indexFingerprint,
     summary
   };
 }
@@ -4172,14 +4917,13 @@ function summarizeCourseOutlineSourceIndexChange_(previousPayload, nextPayload) 
 }
 
 function prepareCourseOutlineSourceIndexChangeNotice_(previousPayload, nextPayload) {
-  if (!previousPayload || !previousPayload.fingerprint) return null;
-  const fingerprintMatches = previousPayload.fingerprint === nextPayload.fingerprint;
-  const contentMatches =
-    JSON.stringify(previousPayload.setsByGrade) === JSON.stringify(nextPayload.setsByGrade);
-  if (fingerprintMatches && contentMatches) {
+  if (!previousPayload || !previousPayload.indexFingerprint) return null;
+  const indexFingerprintMatches =
+    previousPayload.indexFingerprint === nextPayload.indexFingerprint;
+  if (indexFingerprintMatches) {
     const pending = previousPayload.changeNotice;
     return pending && pending.pending &&
-      pending.currentFingerprint === nextPayload.fingerprint
+      pending.currentFingerprint === nextPayload.indexFingerprint
       ? pending
       : null;
   }
@@ -4193,8 +4937,8 @@ function prepareCourseOutlineSourceIndexChangeNotice_(previousPayload, nextPaylo
   if (!changeData.hasRelevantChanges) return null;
   return {
     pending: true,
-    previousFingerprint: previousPayload.fingerprint,
-    currentFingerprint: nextPayload.fingerprint,
+    previousFingerprint: previousPayload.indexFingerprint,
+    currentFingerprint: nextPayload.indexFingerprint,
     detectedAt: new Date().toISOString(),
     changeCount: changeData.changeCount,
     semesterReviews: changeData.semesterReviews,
@@ -4208,7 +4952,7 @@ function prepareCourseOutlineSourceIndexChangeNotice_(previousPayload, nextPaylo
 function clearPendingCourseOutlineSourceIndexChangeNotice_(payload) {
   delete payload.changeNotice;
   if (courseOutlineSourceIndexRuntimeCache_ &&
-      courseOutlineSourceIndexRuntimeCache_.fingerprint === payload.fingerprint) {
+      courseOutlineSourceIndexRuntimeCache_.indexFingerprint === payload.indexFingerprint) {
     delete courseOutlineSourceIndexRuntimeCache_.changeNotice;
   }
   try {
@@ -4286,7 +5030,7 @@ function loadCourseOutlineSourceIndex_() {
     const live = readCourseOutlineSourceIndexSpreadsheet_();
     const payload = assertCourseOutlineSourceIndexPayload_({
       setsByGrade: live.setsByGrade,
-      fingerprint: live.fingerprint,
+      indexFingerprint: live.indexFingerprint,
       refreshedAt: new Date().toISOString()
     });
     let previousPayload = null;
@@ -4332,7 +5076,9 @@ function loadCourseOutlineSourceIndex_() {
     } catch (cacheError) {
       const fallback = assertCourseOutlineSourceIndexPayload_({
         setsByGrade: JSON.parse(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
-        fingerprint: hashText_(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
+        indexFingerprint: makeCourseOutlineSourceIndexFingerprint_(
+          COURSE_OUTLINE_SOURCE_SETS_BY_GRADE
+        ),
         refreshedAt: ''
       });
       courseOutlineSourceIndexRuntimeCache_ = Object.assign({}, fallback, {
@@ -4356,7 +5102,9 @@ function loadCourseOutlineSourceIndexForUi_() {
   } catch (cacheError) {
     const fallback = assertCourseOutlineSourceIndexPayload_({
       setsByGrade: JSON.parse(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
-      fingerprint: hashText_(JSON.stringify(COURSE_OUTLINE_SOURCE_SETS_BY_GRADE)),
+      indexFingerprint: makeCourseOutlineSourceIndexFingerprint_(
+        COURSE_OUTLINE_SOURCE_SETS_BY_GRADE
+      ),
       refreshedAt: ''
     });
     return Object.assign({}, fallback, {
@@ -4377,12 +5125,16 @@ function getRelevantCourseOutlineSourceSets_(gradeName, events) {
 }
 
 function makeCourseOutlineSourceSetsFingerprint_(sourceSets) {
-  return hashText_(JSON.stringify((sourceSets || []).map(sourceSet => [
+  return hashText_(JSON.stringify([
+    'course-outline-source-sets',
+    1,
+    sortCanonicalRows_((sourceSets || []).map(sourceSet => [
     sourceSet.key,
     sourceSet.validFrom,
     sourceSet.validUntil,
-    sourceSet.spreadsheetIds
-  ])));
+    uniqueExactStrings_(sourceSet.spreadsheetIds || []).sort(compareCanonicalStrings_)
+    ]))
+  ]));
 }
 
 function makeCourseOutlineContextFingerprint_(settings, source, events, sourceSets) {
@@ -4400,6 +5152,13 @@ function makeCourseOutlineContextFingerprint_(settings, source, events, sourceSe
 
 function makeCourseOutlineOccurrenceKey_(sheetName, dateKey, periodStart, periodEnd) {
   return JSON.stringify([String(sheetName || ''), dateKey, Number(periodStart), Number(periodEnd)]);
+}
+
+function makeCourseOutlineIdentityHash_(outline) {
+  const topic = normalizeText_(outline && outline.topic);
+  const content = normalizeText_(outline && outline.content);
+  if (!topic && !content) return '';
+  return hashText_(JSON.stringify(['course-outline-event-identity', 1, topic, content]));
 }
 
 function enrichEventsWithCourseOutlines_(events, settings, source) {
@@ -4428,7 +5187,8 @@ function attachCourseOutlineLookup_(events, lookup) {
         topic: outline.topic || '',
         content: outline.content || ''
       },
-      outlineHash: outline.hash
+      outlineHash: outline.hash,
+      outlineIdentityHash: makeCourseOutlineIdentityHash_(outline)
     });
   });
 }
@@ -4854,6 +5614,7 @@ function hasFreshCourseOutlineSnapshot_(settings, source) {
 function scheduleCourseOutlineRefreshIfNeeded_(settings, source) {
   const activeSettings = settings || loadSettings_();
   if (!activeSettings.setupComplete || !activeSettings.autoSyncEnabled ||
+      activeSettings.pendingTermKey ||
       !getConfiguredCourseOutlineSourceSets_(activeSettings.gradeName).length) {
     return false;
   }
@@ -4915,6 +5676,9 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
     }
     if (!settings.setupComplete) {
       return { ok: true, skipped: true, message: '完成第一次同步後，系統才會更新課綱資料。' };
+    }
+    if (settings.pendingTermKey) {
+      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選課再更新課綱資料。' };
     }
     if (reason !== 'manual' && !settings.autoSyncEnabled) {
       return { ok: true, skipped: true, message: '自動同步已暫停，因此暫時不更新課綱資料。' };
@@ -5309,7 +6073,7 @@ function parseSchedulePayload_(payload, gradeName, now) {
   const lastDateKey = datedHeaders[datedHeaders.length - 1].dateKey;
   const termKey = GRADE_API_NAMES[gradeName] + '|' + firstDateKey;
   const sourceUpdatedLabel = latestUpdateLabel_(events.map(event => event.sourceUpdatedLabel));
-  const sourceEventRows = events.map(event => [
+  const sourceEventRows = sortCanonicalRows_(events.map(event => [
     event.originalTitle,
     event.type,
     Boolean(event.isAllDay),
@@ -5319,19 +6083,25 @@ function parseSchedulePayload_(payload, gradeName, now) {
     eventDateIso_(event.start),
     eventDateIso_(event.end),
     event.location || ''
-  ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  ]));
+  const catalogFingerprint = makeSetupCatalogFingerprint_(termKey, lastDateKey, catalogAll);
+  const scheduleFingerprint = hashText_(JSON.stringify([
+    'schedule',
+    SCHEDULE_FINGERPRINT_VERSION,
+    termKey,
+    lastDateKey,
+    makeCatalogFingerprintRows_(catalogAll),
+    sourceEventRows
+  ]));
 
   return {
     gradeName,
     firstDateKey,
     lastDateKey,
     termKey,
-    fingerprint: hashText_(JSON.stringify([
-      termKey,
-      lastDateKey,
-      catalogAll.map(item => item.title),
-      sourceEventRows
-    ])),
+    catalogFingerprintVersion: SETUP_CATALOG_FINGERPRINT_VERSION,
+    catalogFingerprint,
+    scheduleFingerprint,
     sourceUpdatedLabel,
     sourceStale: isSourceStale_(sourceUpdatedLabel, now),
     catalog: {
@@ -5529,6 +6299,11 @@ function loadSettings_() {
   const stored = readChunkedJson_(SETTINGS_STORE, null);
   const settings = Object.assign({}, DEFAULT_SETTINGS, stored || {});
   settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
+  settings.scheduleFingerprint = String(
+    settings.scheduleFingerprint || settings.sourceFingerprint || ''
+  );
+  settings.setupContextFingerprint = String(settings.setupContextFingerprint || '');
+  delete settings.sourceFingerprint;
   const legacyNotificationHours = stored && Array.isArray(stored.autoSyncHours)
     ? stored.autoSyncHours
     : DEFAULT_SETTINGS.notificationHours;
@@ -5646,18 +6421,18 @@ function writeChunkedJson_(key, value) {
   const properties = PropertiesService.getScriptProperties();
   const raw = JSON.stringify(value);
   const chunks = splitUtf8Chunks_(raw, SCRIPT_PROPERTY_CHUNK_SAFE_BYTES);
-  let oldCount = 0;
   const updates = {};
   chunks.forEach((chunk, index) => { updates[key + '_' + index] = chunk; });
   updates[key + '_COUNT'] = String(chunks.length);
   if (typeof properties.getProperties === 'function') {
     const existing = properties.getProperties();
-    oldCount = Number(existing[key + '_COUNT']) || 0;
     let estimatedBytes = 0;
     Object.keys(existing).forEach(propertyKey => {
-      if (propertyKey === key + '_COUNT' ||
-          propertyKey.indexOf(key + '_') === 0 && /^\\d+$/.test(propertyKey.slice(key.length + 1))) {
-        return;
+      if (propertyKey === key + '_COUNT') return;
+      if (propertyKey.indexOf(key + '_') === 0 &&
+          /^\\d+$/.test(propertyKey.slice(key.length + 1))) {
+        const chunkIndex = Number(propertyKey.slice(key.length + 1));
+        if (chunkIndex < chunks.length) return;
       }
       estimatedBytes += utf8ByteLength_(propertyKey) + utf8ByteLength_(existing[propertyKey]);
     });
@@ -5670,11 +6445,12 @@ function writeChunkedJson_(key, value) {
         '請先保留畫面並聯絡維護者。'
       );
     }
-  } else {
-    oldCount = Number(properties.getProperty(key + '_COUNT')) || 0;
   }
   properties.setProperties(updates, false);
-  for (let index = chunks.length; index < oldCount; index += 1) properties.deleteProperty(key + '_' + index);
+  // Do not delete stale higher-numbered chunks here. A smaller concurrent writer
+  // could otherwise delete chunks that a newer, larger writer has just committed.
+  // COUNT is the commit pointer, so ignored tail chunks are harmless and bounded
+  // by the largest value ever stored under this key.
 }
 
 function splitUtf8Chunks_(value, maxBytes) {
@@ -5727,8 +6503,20 @@ function utf8ByteLength_(value) {
 
 function clearChunkedStore_(key) {
   const properties = PropertiesService.getScriptProperties();
-  const count = Number(properties.getProperty(key + '_COUNT')) || 0;
-  for (let index = 0; index < count; index += 1) properties.deleteProperty(key + '_' + index);
+  const existing = typeof properties.getProperties === 'function'
+    ? properties.getProperties()
+    : null;
+  if (existing) {
+    Object.keys(existing).forEach(propertyKey => {
+      if (propertyKey.indexOf(key + '_') === 0 &&
+          /^\\d+$/.test(propertyKey.slice(key.length + 1))) {
+        properties.deleteProperty(propertyKey);
+      }
+    });
+  } else {
+    const count = Number(properties.getProperty(key + '_COUNT')) || 0;
+    for (let index = 0; index < count; index += 1) properties.deleteProperty(key + '_' + index);
+  }
   properties.deleteProperty(key + '_COUNT');
   if (key === SYNC_STATE_STORE) properties.deleteProperty('SYNC_STATE');
 }
@@ -5736,20 +6524,30 @@ function clearChunkedStore_(key) {
 function setupAutoSyncTriggers() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) throw new Error('背景同步正在保存行程，請稍後再試。');
+  let automationWarning = '';
   try {
     const settings = loadSettings_();
     assertSetupImported_(settings);
+    if (settings.pendingTermKey) {
+      throw new Error('已偵測到新學期，請先在控制臺重新選課，再啟用自動同步。');
+    }
     settings.autoSyncEnabled = true;
     saveSettings_(settings);
-    refreshAutoSyncTriggers_(settings);
+    try {
+      refreshAutoSyncTriggers_(settings);
+    } catch (triggerError) {
+      automationWarning = '設定已啟用，但自動同步觸發器暫時無法完全更新。';
+      Logger.log('啟用自動同步後無法更新觸發器：' + userFacingError_(triggerError));
+    }
   } finally {
     lock.releaseLock();
   }
+  return { ok: true, warning: automationWarning };
 }
 
 function refreshAutoSyncTriggers_(settings) {
   deleteDailySyncTriggers_();
-  if (!settings.autoSyncEnabled) {
+  if (!settings.autoSyncEnabled || settings.pendingTermKey) {
     deleteCourseOutlineMaintenanceTriggers_();
     return;
   }
@@ -5875,6 +6673,11 @@ function ensureOneTimeTrigger_(handler, delayMs) {
   return true;
 }
 
+function resetSyncWatchdogTrigger_() {
+  deleteTriggersByHandlers_([SYNC_WATCHDOG_HANDLER]);
+  ensureOneTimeTrigger_(SYNC_WATCHDOG_HANDLER, SYNC_WATCHDOG_DELAY_MS);
+}
+
 function deleteAutoSyncTriggers() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) throw new Error('背景同步正在保存行程，請稍後再試。');
@@ -5895,17 +6698,29 @@ function toggleAutoSyncFromMenu() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) throw new Error('背景同步正在保存行程，請稍後再試。');
   let settings;
+  let automationWarning = '';
   try {
     settings = loadSettings_();
     assertSetupImported_(settings);
+    if (!settings.autoSyncEnabled && settings.pendingTermKey) {
+      throw new Error('已偵測到新學期，請先在控制臺重新選課，再啟用自動同步。');
+    }
     settings.autoSyncEnabled = !settings.autoSyncEnabled;
     settings.pausedReason = settings.autoSyncEnabled ? '' : '由使用者關閉。';
     saveSettings_(settings);
-    refreshAutoSyncTriggers_(settings);
+    try {
+      refreshAutoSyncTriggers_(settings);
+    } catch (triggerError) {
+      automationWarning = '設定已儲存，但自動同步觸發器暫時無法完全更新。';
+      Logger.log('切換自動同步後無法更新觸發器：' + userFacingError_(triggerError));
+    }
   } finally {
     lock.releaseLock();
   }
-  getControlPanelUi_().alert(settings.autoSyncEnabled ? '已啟用自動同步。' : '已關閉自動同步。');
+  getControlPanelUi_().alert(
+    (settings.autoSyncEnabled ? '已啟用自動同步。' : '已關閉自動同步。') +
+    (automationWarning ? '\\n\\n' + automationWarning : '')
+  );
 }
 
 function showSyncStatus() {
@@ -6379,20 +7194,24 @@ function mergeChangeEmailData_(left, right) {
 function formatChangeDigestFromEmailData_(changeData) {
   const lines = changeData.changes.map(change => change.displayText);
   if (changeData.omittedNote) lines.push(changeData.omittedNote);
-  lines.push('', changeData.summary);
+  lines.push('', changeData.summary, '', COURSE_OUTLINE_DISCLAIMER);
   return lines.join('\\n');
 }
 
 function sendEmail_(settings, templateKind, subject, body, templateData) {
   const recipient = getNotificationEmail_(settings);
   const formattedSubject = formatNotificationSubject_(subject);
+  const baseData = buildEmailBaseData_();
   const cleanTemplateData = sanitizeNotificationTemplateData_(
-    Object.assign(buildEmailBaseData_(), templateData || {})
+    Object.assign({}, baseData, templateData || {})
   );
+  cleanTemplateData.controlPanelName = baseData.controlPanelName;
+  const plainBody = stripNotificationSentencePeriods_(body || '');
+  const plainFooter = cleanTemplateData.controlPanelName;
   const message = {
     to: recipient,
     subject: formattedSubject,
-    body: stripNotificationSentencePeriods_(body || ''),
+    body: plainBody ? plainBody + '\\n\\n' + plainFooter : plainFooter,
     name: 'T-SCHOOL Schedule Sync'
   };
   const htmlBody = buildEmailHtmlSafe_(
@@ -6437,6 +7256,7 @@ function buildEmailBaseData_() {
   return {
     sentAt: formatDateTime_(new Date()),
     controlUrl: getControlPanelUrl_(),
+    controlPanelName: getControlPanelName_(),
     calendarUrl: 'https://calendar.google.com/calendar/u/0/r'
   };
 }

@@ -47,6 +47,7 @@
 - 優先延伸既有模式，避免重複工具函式、平行狀態來源或第二套設定格式。
 - 除非任務需要，不進行與目標無關的大規模重構。
 - 不得自行 commit 或 push；使用者明確要求時才執行。
+- Git commit 訊息統一使用英文描述，採用 Conventional Commits 格式（如 `feat: refine notifications and control panel`、`fix: tighten notification scheduling`）。
 
 ## 視覺驗證邊界
 
