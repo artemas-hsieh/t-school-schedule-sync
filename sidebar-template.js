@@ -614,7 +614,9 @@
       var includeActivities = true;
       var busy = false;
       var syncProgressTimer = null;
+      var syncProgressPollGeneration = 0;
       var activeSyncJobId = '';
+      var lastSyncProgressJobId = '';
       var lastSyncProgressPercent = 0;
       var termTransitionAnnounced = false;
       var MAX_NOTIFY_HOURS = 4;
@@ -674,6 +676,11 @@
       }
       function getCheckedGrade() { var input = document.querySelector('input[name="grade"]:checked'); return input ? input.value : '高一'; }
       function renderSyncProgress(progress) {
+        var progressJobId = String(progress && progress.jobId || '');
+        if (progressJobId && progressJobId !== lastSyncProgressJobId) {
+          lastSyncProgressJobId = progressJobId;
+          lastSyncProgressPercent = 0;
+        }
         var reportedValue = Math.max(0, Math.min(100, Number(progress && progress.percent) || 0));
         var value = Math.max(lastSyncProgressPercent, reportedValue);
         lastSyncProgressPercent = value;
@@ -686,17 +693,23 @@
         if (syncProgressTimer) clearTimeout(syncProgressTimer);
         syncProgressTimer = null;
       }
-      function pollSyncProgress() {
+      function scheduleSyncProgressPoll(delay, generation) {
+        syncProgressTimer = setTimeout(function () { pollSyncProgress(generation); }, delay);
+      }
+      function pollSyncProgress(generation) {
+        var pollGeneration = generation === undefined ? syncProgressPollGeneration : generation;
         stopSyncProgressPolling();
         server('getSyncProgressForUi', activeSyncJobId || null).then(function (progress) {
-          renderSyncProgress(progress);
+          if (pollGeneration !== syncProgressPollGeneration) return;
           if (!busy || !progress) return;
           var terminal = progress.state === 'complete' || progress.state === 'error';
-          if (progress.jobId && !terminal) activeSyncJobId = progress.jobId;
+          var progressJobId = String(progress.jobId || '');
           if (terminal && (!activeSyncJobId || progress.jobId !== activeSyncJobId)) {
-            syncProgressTimer = setTimeout(pollSyncProgress, 2500);
+            scheduleSyncProgressPoll(2500, pollGeneration);
             return;
           }
+          if (progressJobId && !terminal) activeSyncJobId = progressJobId;
+          renderSyncProgress(progress);
           if (terminal) {
             activeSyncJobId = '';
             server('getSettingsUiData', null).then(render).catch(function () {});
@@ -705,18 +718,22 @@
             return;
           }
           var waiting = progress.state === 'queued' || progress.state === 'retry_pending';
-          syncProgressTimer = setTimeout(pollSyncProgress, waiting ? 8000 : 2500);
+          scheduleSyncProgressPoll(waiting ? 8000 : 2500, pollGeneration);
         }).catch(function () {
-          if (busy) syncProgressTimer = setTimeout(pollSyncProgress, 8000);
+          if (pollGeneration === syncProgressPollGeneration && busy) {
+            scheduleSyncProgressPoll(8000, pollGeneration);
+          }
         });
       }
       function startSyncProgress(label) {
+        syncProgressPollGeneration += 1;
+        var pollGeneration = syncProgressPollGeneration;
         activeSyncJobId = '';
         lastSyncProgressPercent = 0;
         renderSyncProgress({ percent: 1, message: label || '正在準備同步…' });
         setBusy(true, '正在同步行程', true, true);
         stopSyncProgressPolling();
-        syncProgressTimer = setTimeout(pollSyncProgress, 1000);
+        scheduleSyncProgressPoll(1000, pollGeneration);
       }
 
       function render(data) {

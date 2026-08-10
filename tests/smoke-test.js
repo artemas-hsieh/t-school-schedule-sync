@@ -232,7 +232,7 @@ assert.equal(sidebarHtml.includes('<span>說明格式</span>'), false);
 assert.equal(sidebarHtml.includes('id="hours"'), false, '控制臺不應顯示與實際設定不一致的固定同步時段');
 assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
-assert.equal(sidebarHtml.includes('function pollSyncProgress()'), true);
+assert.equal(sidebarHtml.includes('function pollSyncProgress(generation)'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress-warning"'), true);
 assert.equal(sidebarHtml.includes('請勿現在關閉控制臺！'), true);
 assert.equal(sidebarHtml.includes('側欄'), false, '控制臺內的使用者提示不應再稱為側欄');
@@ -345,10 +345,32 @@ assert.equal(sidebarHtml.includes("server('getGradeContextForUi', event.target.v
 assert.equal(sidebarHtml.includes('var missingGradeConfirmation ='), true);
 assert.equal(sidebarHtml.includes('function updateActionAvailability()'), true);
 assert.equal(sidebarHtml.includes('var lastSyncProgressPercent = 0;'), true);
+assert.equal(sidebarHtml.includes('var syncProgressPollGeneration = 0;'), true);
+assert.equal(sidebarHtml.includes("var lastSyncProgressJobId = '';"), true);
 assert.equal(
   sidebarHtml.includes('var value = Math.max(lastSyncProgressPercent, reportedValue);'),
   true,
   '同一同步工作顯示過的百分比不得因後端輪詢尚未建立進度而倒退'
+);
+assert.match(
+  sidebarHtml,
+  /if \(progressJobId && progressJobId !== lastSyncProgressJobId\) \{\s*lastSyncProgressJobId = progressJobId;\s*lastSyncProgressPercent = 0;/,
+  '進度單調保護只能適用於同一 jobId，新工作必須重設百分比'
+);
+const sidebarPollStart = sidebarHtml.indexOf('function pollSyncProgress(generation)');
+const sidebarPollEnd = sidebarHtml.indexOf('function startSyncProgress(label)', sidebarPollStart);
+const sidebarPollSource = sidebarHtml.slice(sidebarPollStart, sidebarPollEnd);
+assert.equal(sidebarPollStart >= 0 && sidebarPollEnd > sidebarPollStart, true);
+assert.equal(
+  sidebarPollSource.indexOf("if (terminal && (!activeSyncJobId || progress.jobId !== activeSyncJobId))") <
+    sidebarPollSource.indexOf('renderSyncProgress(progress);'),
+  true,
+  '新同步建立前讀到的舊 complete/error 進度必須先丟棄，不得先渲染為 100%'
+);
+assert.match(
+  sidebarPollSource,
+  /if \(pollGeneration !== syncProgressPollGeneration\) return;/,
+  '上一輪尚在途中的輪詢回應不得覆蓋新同步工作'
 );
 assert.equal(sidebarHtml.includes('@media (max-width: 340px)'), true);
 assert.equal(sidebarHtml.includes('@media (prefers-reduced-motion: reduce)'), true);
