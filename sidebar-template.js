@@ -17,8 +17,8 @@
       --surface-green: #dff2eb;
       --line: #bac6be;
       --line-dark: #75847c;
-      --warning: #9a5b00;
-      --warning-surface: #fff0d5;
+      --warning: #f05a47;
+      --warning-surface: #fae3df;
       --error: #a62d23;
       --error-surface: #ffe5e0;
       --display: "Noto Sans TC Variable", "Noto Sans TC", sans-serif;
@@ -121,30 +121,26 @@
       display: grid;
       grid-template-columns: var(--space-1) minmax(0, 1fr);
       gap: var(--space-3);
-      padding: var(--space-4);
-      border-bottom: 1px solid var(--warning);
+      margin: var(--space-3) var(--space-3) 0;
+      padding: var(--space-3);
+      border-top: 1px solid var(--line);
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      border-left: 0;
       background: var(--warning-surface);
     }
     .term-transition::before { content: ""; background: var(--warning); }
     .term-transition:focus-visible { outline: 2px solid var(--warning); outline-offset: -4px; }
-    .term-transition-kicker {
-      margin: 0;
-      color: var(--warning);
-      font-family: var(--technical);
-      font-size: 10px;
-      font-weight: 640;
-      line-height: 16px;
-    }
-    .term-transition h2 { margin: var(--space-1) 0 0; font-size: 16px; line-height: 22px; }
+    .term-transition h2 { margin: 0; font-size: 16px; line-height: 22px; }
     .term-transition p { margin: var(--space-2) 0 0; color: var(--ink-soft); font-size: 11px; line-height: 17px; }
     .term-transition button {
-      min-height: 40px;
+      min-height: 36px;
       margin-top: var(--space-3);
       padding: 0 var(--space-3);
-      border: 1px solid var(--ink);
+      border: 1px solid var(--line-dark);
       border-radius: var(--radius-control);
-      background: var(--ink);
-      color: var(--paper-bright);
+      background: var(--paper-bright);
+      color: var(--ink);
       cursor: pointer;
       font-size: 11px;
       font-weight: 640;
@@ -287,6 +283,8 @@
     .choice input:focus-visible + span { outline: 2px solid var(--sync); outline-offset: 2px; }
     .choice-copy { display: grid; }
     .choice-copy strong { font-size: 12px; line-height: 16px; }
+    .choice-copy small { margin-top: var(--space-1); color: var(--ink-soft); font-size: 10px; line-height: 16px; }
+    .term-grade-confirmation { margin-top: var(--space-3); }
     .choice input:disabled + span { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
     .empty { margin: var(--space-3) 0 0; padding: var(--space-4); border: 1px dashed var(--line-dark); border-radius: var(--radius-control); color: var(--ink-soft); font-size: 11px; text-align: center; }
 
@@ -507,11 +505,10 @@
 
     <section class="term-transition" id="term-transition" role="alert" aria-live="assertive" tabindex="-1" hidden>
       <div>
-        <p class="term-transition-kicker">NEW TERM / 重新確認</p>
-        <h2>新學期需要重新選課</h2>
-        <p id="term-transition-message">舊學期行程已保留。請重新選擇本學期課程，儲存後才會恢復同步。</p>
+        <h2>請完成新學期設定</h2>
+        <p id="term-transition-message">確認新學期年級 → 選擇新課程或活動 → 完成選課並同步</p>
         <p id="term-transition-outline-message" hidden></p>
-        <button type="button" id="term-transition-action">前往重新選課</button>
+        <button type="button" id="term-transition-action">前往確認年級</button>
       </div>
     </section>
 
@@ -554,6 +551,10 @@
           <label class="choice grade-choice"><input type="radio" name="grade" value="高二"><span><span class="choice-copy"><strong>高二</strong></span></span></label>
           <label class="choice grade-choice"><input type="radio" name="grade" value="高三"><span><span class="choice-copy"><strong>高三</strong></span></span></label>
         </div>
+        <label class="choice term-grade-confirmation" id="term-grade-confirmation" hidden>
+          <input type="checkbox" id="term-grade-confirmed">
+          <span><span class="choice-copy"><strong>我已確認這是新學期就讀年級</strong><small>若已升年級，請先切換上方年級再勾選。</small></span></span>
+        </label>
         <div class="source-health grade-source-health" id="source-health"><div><strong id="source-title">讀取中</strong><span id="source-detail"></span></div></div>
       </section>
 
@@ -767,15 +768,14 @@
         var panel = byId('term-transition');
         var required = Boolean(transition && transition.required);
         panel.hidden = !required;
+        byId('term-grade-confirmation').hidden = !required;
         if (!required) {
+          byId('term-grade-confirmed').checked = false;
           termTransitionAnnounced = false;
           return;
         }
-        var dateRange = transition.firstDate
-          ? transition.firstDate + (transition.lastDate ? '–' + transition.lastDate : '')
-          : (source && source.firstDate ? source.firstDate : '新學期');
         byId('term-transition-message').textContent =
-          '已偵測到 ' + dateRange + ' 的新學期行程。舊學期行程會保留；請重新選擇至少一門課程，儲存後才恢復同步。';
+          '確認新學期年級 → 選擇新課程或活動 → 完成選課並同步';
         var outlineMessage = byId('term-transition-outline-message');
         var indexWarning = outlineStatus && outlineStatus.indexWarning || '';
         var missingCurrentOutline = outlineStatus && !outlineStatus.enabled;
@@ -785,7 +785,7 @@
           : (indexWarning
             ? indexWarning
             : (missingCurrentOutline
-              ? '這學期的課綱尚未加入中央索引；可先同步基本行程，課綱上架後會再補入。'
+              ? '這學期的課綱尚未加入中央索引；可先同步基本行程。上架後，自動同步或下一次手動同步會補入課綱。'
               : ''));
       }
 
@@ -794,10 +794,13 @@
         var requiresSelection = Boolean(model.termTransition && model.termTransition.required);
         var sourceUnavailable = Boolean(model.source && model.source.unavailable);
         var missingSelection = requiresSelection && selectedCourses.size === 0;
+        var missingGradeConfirmation = requiresSelection && !byId('term-grade-confirmed').checked;
         ['save', 'save-sync'].forEach(function (id) {
           var button = byId(id);
-          button.disabled = missingSelection || sourceUnavailable;
-          button.dataset.validationDisabled = String(missingSelection || sourceUnavailable);
+          button.disabled = missingSelection || missingGradeConfirmation || sourceUnavailable;
+          button.dataset.validationDisabled = String(
+            missingSelection || missingGradeConfirmation || sourceUnavailable
+          );
         });
         ['run-sync', 'repair-sync'].forEach(function (id) {
           var button = byId(id);
@@ -1063,7 +1066,8 @@
           notificationHours: notificationHours,
           notifySyncHour: Math.max.apply(null, notificationHours),
           reminderMode: byId('reminder-mode').value,
-          reminderMinutes: Number(byId('reminder-minutes').value)
+          reminderMinutes: Number(byId('reminder-minutes').value),
+          termGradeConfirmed: byId('term-grade-confirmed').checked
         };
       }
 
@@ -1167,16 +1171,25 @@
           renderNotificationPreferences();
         }
         if (event.target.id === 'calendar') updateCalendarFields();
+        if (event.target.id === 'term-grade-confirmed') updateActionAvailability();
         if (event.target.name === 'grade') {
           if (byId('calendar-name').dataset.autoName === 'true') byId('calendar-name').value = defaultCalendarName(event.target.value);
+          byId('term-grade-confirmed').checked = false;
           setBusy(true, '正在讀取年級課表…');
-          server('getSourceCatalogForUi', event.target.value).then(function (data) {
+          server('getGradeContextForUi', event.target.value).then(function (gradeContext) {
+            var data = gradeContext.source;
             model.source = data;
+            model.courseOutlineStatus = gradeContext.courseOutlineStatus;
+            model.termTransition = gradeContext.termTransition;
             selectedCourses = new Set();
             excludedActivities = new Set();
             includeActivities = true;
             renderSource(data);
-            renderTermTransition(model.termTransition, model.courseOutlineStatus, data);
+            renderTermTransition(
+              gradeContext.termTransition,
+              gradeContext.courseOutlineStatus,
+              data
+            );
             renderCourses();
           }).catch(function (error) {
             showToast(error.message);
@@ -1226,7 +1239,8 @@
         if (nextFocus) nextFocus.focus();
       });
       byId('term-transition-action').addEventListener('click', function () {
-        byId('course-search').focus();
+        var selectedGrade = document.querySelector('input[name="grade"]:checked');
+        if (selectedGrade) selectedGrade.focus();
       });
       byId('save').addEventListener('click', function () { save(false); });
       byId('save-sync').addEventListener('click', function () { save(true); });

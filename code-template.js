@@ -989,6 +989,9 @@ const NOTIFICATION_DELIVERY_RETRY_HANDLER = 'retryScheduledNotificationDelivery'
 const SYNC_INITIAL_SETUP_BATCH_OPERATIONS = 40;
 const SYNC_BATCH_MAX_CALENDAR_OPERATIONS = 80;
 const SYNC_BATCH_SOFT_LIMIT_MS = 150 * 1000;
+const SYNC_PROGRESS_CALENDAR_START_PERCENT = 35;
+const SYNC_PROGRESS_CALENDAR_END_PERCENT = 90;
+const SYNC_PROGRESS_REPORT_INTERVAL_MS = 10 * 1000;
 const SYNC_CONTINUATION_DELAY_MS = 60 * 1000;
 const SYNC_RETRY_DELAY_MS = 2 * 60 * 1000;
 const SYNC_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
@@ -1010,6 +1013,7 @@ const COURSE_OUTLINE_WATCHDOG_DELAY_MS = 8 * 60 * 1000;
 const COURSE_OUTLINE_RUNNING_STALE_MS = 7 * 60 * 1000;
 const COURSE_OUTLINE_DAILY_HANDLER = 'refreshCourseOutlinesDaily';
 const COURSE_OUTLINE_ONCE_HANDLER = 'refreshCourseOutlinesOnce';
+const COURSE_OUTLINE_MANUAL_ONCE_HANDLER = 'refreshCourseOutlinesManualOnce';
 const COURSE_OUTLINE_RETRY_HANDLER = 'retryCourseOutlineRefresh';
 const COURSE_OUTLINE_WATCHDOG_HANDLER = 'watchCourseOutlineRefresh';
 const COURSE_OUTLINE_APPLY_HANDLER = 'applyCourseOutlineSnapshotToCalendar';
@@ -1807,22 +1811,25 @@ function getSyncProgressForUi(jobId) {
        progress.jobId !== job.jobId ||
        progress.state === 'complete' ||
        progress.state === 'error')) {
-    const total = Math.max(Number(job.initialOperationCount) || 0, Number(job.processedOperations) || 0);
-    const processed = Math.min(total, Number(job.processedOperations) || 0);
+    const detail = getSyncJobProgressDetail_(job);
     return {
       state: job.status === 'retry_pending' ? 'retry_pending' :
         (job.status === 'queued' ? 'queued' : 'running'),
-      percent: total ? Math.min(95, Math.round(40 + processed / total * 55)) : 40,
+      percent: job.status === 'finalizing'
+        ? 92
+        : calculateSyncJobProgressPercent_(job),
       jobId: job.jobId,
-      processed,
-      total,
-      remaining: Math.max(0, total - processed),
+      processed: detail.processed,
+      total: detail.total,
+      remaining: detail.remaining,
       nextAttemptAt: job.nextAttemptAt || '',
       message: job.status === 'retry_pending'
         ? '已保存進度，正在等待 Google 服務重試。'
         : (job.status === 'queued'
           ? '本批已保存，正在等待下一批背景續跑。'
-          : '正在分批同步行程。'),
+          : (job.status === 'finalizing'
+            ? '行程已寫入，正在完成控制臺設定。'
+            : '正在分批同步行程。')),
       updatedAt: job.updatedAt
     };
   }
@@ -1839,6 +1846,24 @@ function getSourceCatalogForUi(gradeName) {
   assertSetupImported_(loadSettings_());
   const cleanGrade = sanitizeGrade_(gradeName);
   return buildSourceUiModel_(loadSourceContext_(cleanGrade), cleanGrade);
+}
+
+function getGradeContextForUi(gradeName) {
+  const settings = loadSettings_();
+  assertSetupImported_(settings);
+  const cleanGrade = sanitizeGrade_(gradeName);
+  const source = loadSourceContext_(cleanGrade);
+  const prospectiveSettings = Object.assign({}, settings, { gradeName: cleanGrade });
+  const sourceIndex = loadCourseOutlineSourceIndex_();
+  return {
+    source: buildSourceUiModel_(source, cleanGrade),
+    courseOutlineStatus: buildCourseOutlineUiStatus_(
+      prospectiveSettings,
+      source,
+      sourceIndex
+    ),
+    termTransition: buildTermTransitionUiModel_(settings, source)
+  };
 }
 
 function saveSettingsFromUi(input) {
@@ -2220,6 +2245,9 @@ function sanitizeSettingsInput_(input, previous, source) {
 
   if (previous.pendingTermKey && cleanSelected.length === 0) {
     throw new Error('新學期必須重新選擇至少一門課程後才能儲存。');
+  }
+  if (previous.pendingTermKey && value.termGradeConfirmed !== true) {
+    throw new Error('請先確認新學期就讀年級，再儲存選課。');
   }
 
   const calendarId = String(value.calendarId || '').trim();
@@ -2620,14 +2648,14 @@ function syncSchedule_(options) {
       saveSyncJob_(job);
       resetSyncWatchdogTrigger_();
     }
-    if (trackProgress) writeSyncProgress_(8, '正在讀取控制臺設定…', 'running');
+    if (trackProgress) writeSyncProgress_(7, '正在讀取控制臺設定…', 'running');
     let settings = loadSettings_();
     assertSetupImported_(settings);
-    if (trackProgress) writeSyncProgress_(16, '正在取得最新課表…', 'running');
+    if (trackProgress) writeSyncProgress_(15, '正在取得最新課表…', 'running');
     const source = loadSourceContext_(settings.gradeName);
     settings = applyTermTransitionIfNeeded_(settings, source, false);
     settings = registerNewTitles_(settings, source);
-    if (trackProgress) writeSyncProgress_(30, '正在確認專用日曆…', 'running');
+    if (trackProgress) writeSyncProgress_(24, '正在確認專用日曆…', 'running');
     const calendar = ensureDedicatedCalendar_(settings);
     const businessNow = scheduleBusinessNow_();
     const todayKey = formatDateKey_(businessNow);
@@ -2649,7 +2677,7 @@ function syncSchedule_(options) {
 
     if (!isActiveSyncJob_(job)) {
       const plan = buildSyncPlan_(oldState, desiredEvents, todayKey);
-      if (trackProgress) writeSyncProgress_(42, '正在比對課表與日曆…', 'running');
+      if (trackProgress) writeSyncProgress_(32, '正在比對課表與日曆…', 'running');
       const expectedApprovalToken = makeSyncApprovalToken_(settings, source, desiredEvents, plan);
       const deletionApproved = Boolean(
         options && options.reason === 'settings' &&
@@ -2865,6 +2893,7 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
 
 function runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, todayKey) {
   const startedAt = Date.now();
+  let lastProgressReportedAt = startedAt;
   const batchOperationLimit = job.firstSetup && Number(job.processedOperations) === 0
     ? SYNC_INITIAL_SETUP_BATCH_OPERATIONS
     : SYNC_BATCH_MAX_CALENDAR_OPERATIONS;
@@ -2906,6 +2935,19 @@ function runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, toda
     const operation = operations[index];
     applySyncOperation_(operation, state, calendar, settings, recovering, stats, changes, job);
     completed.push(operation);
+    const progressNow = Date.now();
+    if (progressNow - lastProgressReportedAt >= SYNC_PROGRESS_REPORT_INTERVAL_MS) {
+      const processed = (Number(job.processedOperations) || 0) + completed.length;
+      const detail = getSyncJobProgressDetail_(job, processed);
+      writeSyncJobProgressSafely_(
+        job,
+        calculateSyncJobProgressPercent_(job, processed),
+        '正在分批同步行程（已處理 ' + detail.processed + ' / ' + detail.total + ' 項）…',
+        'running',
+        processed
+      );
+      lastProgressReportedAt = progressNow;
+    }
   }
 
   const remainingInFlight = operations.slice(completed.length);
@@ -3157,7 +3199,7 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
   job.status = 'finalizing';
   job.updatedAt = new Date().toISOString();
   saveSyncJob_(job);
-  writeSyncJobProgress_(job, '正在完成設定、通知與自動同步…', 'running');
+  writeSyncJobProgressSafely_(job, 92, '行程已寫入，正在保存控制臺狀態…', 'running');
 
   settings.setupComplete = true;
   settings.scheduleFingerprint = source.scheduleFingerprint;
@@ -3201,6 +3243,7 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
     '',
     () => clearChunkedStore_(SETUP_SOURCE_CONTEXT_STORE)
   );
+  writeSyncJobProgressSafely_(job, 95, '正在更新自動同步與課綱排程…', 'running');
   runPostCommitStep_(
     completionWarnings,
     '同步完成後無法更新自動同步觸發器',
@@ -3211,9 +3254,12 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
     completionWarnings,
     '同步完成後無法排程課綱更新',
     '行程已同步，但課綱背景更新暫時無法排程。',
-    () => scheduleCourseOutlineRefreshIfNeeded_(settings, source)
+    () => scheduleCourseOutlineRefreshIfNeeded_(settings, source, {
+      allowWhenAutoSyncDisabled: job.reason === 'manual' || job.reason === 'settings'
+    })
   );
 
+  writeSyncJobProgressSafely_(job, 97, '正在處理同步通知…', 'running');
   if (!job.completionNotificationClaimed) {
     runPostCommitStep_(
       completionWarnings,
@@ -3238,14 +3284,7 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
     );
   }
 
-  runPostCommitStep_(completionWarnings, '同步完成後無法保存進度', '', () =>
-    writeSyncProgress_(100, '同步完成', 'complete', {
-      jobId: job.jobId,
-      processed: job.processedOperations,
-      total: Math.max(job.initialOperationCount, job.processedOperations),
-      remaining: 0
-    })
-  );
+  writeSyncJobProgressSafely_(job, 99, '正在完成背景工作清理…', 'running');
   job.status = 'completed';
   job.runId = '';
   job.runStartedAt = '';
@@ -3261,6 +3300,9 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
   );
   runPostCommitStep_(completionWarnings, '同步完成後無法延後通知寄送', '', () =>
     scheduleRequestedNotificationDeliveryRetry_()
+  );
+  runPostCommitStep_(completionWarnings, '同步完成後無法保存進度', '', () =>
+    writeSyncJobProgressAtPercent_(job, 100, '同步完成', 'complete')
   );
   result.completionWarnings = completionWarnings;
   return result;
@@ -3395,17 +3437,59 @@ function cancelActiveSyncJob_(message) {
   return true;
 }
 
-function writeSyncJobProgress_(job, message, state) {
-  const total = Math.max(Number(job.initialOperationCount) || 0, Number(job.processedOperations) || 0);
-  const processed = Math.min(total, Number(job.processedOperations) || 0);
-  const percent = total ? Math.min(95, Math.round(40 + processed / total * 55)) : 90;
-  writeSyncProgress_(percent, message, state || 'running', {
-    jobId: job.jobId,
+function getSyncJobProgressDetail_(job, processedOverride) {
+  const rawProcessed = processedOverride === undefined
+    ? Number(job.processedOperations) || 0
+    : Number(processedOverride) || 0;
+  const total = Math.max(Number(job.initialOperationCount) || 0, rawProcessed);
+  const processed = Math.min(total, Math.max(0, rawProcessed));
+  return {
     processed,
     total,
-    remaining: Math.max(0, total - processed),
+    remaining: Math.max(0, total - processed)
+  };
+}
+
+function calculateSyncJobProgressPercent_(job, processedOverride) {
+  const detail = getSyncJobProgressDetail_(job, processedOverride);
+  if (!detail.total) return SYNC_PROGRESS_CALENDAR_END_PERCENT;
+  const calendarRange = SYNC_PROGRESS_CALENDAR_END_PERCENT -
+    SYNC_PROGRESS_CALENDAR_START_PERCENT;
+  return Math.min(
+    SYNC_PROGRESS_CALENDAR_END_PERCENT,
+    Math.round(
+      SYNC_PROGRESS_CALENDAR_START_PERCENT +
+      detail.processed / detail.total * calendarRange
+    )
+  );
+}
+
+function writeSyncJobProgressAtPercent_(job, percent, message, state, processedOverride) {
+  const detail = getSyncJobProgressDetail_(job, processedOverride);
+  writeSyncProgress_(percent, message, state || 'running', {
+    jobId: job.jobId,
+    processed: detail.processed,
+    total: detail.total,
+    remaining: detail.remaining,
     nextAttemptAt: job.nextAttemptAt || ''
   });
+}
+
+function writeSyncJobProgressSafely_(job, percent, message, state, processedOverride) {
+  try {
+    writeSyncJobProgressAtPercent_(job, percent, message, state, processedOverride);
+  } catch (error) {
+    Logger.log('無法更新同步進度：' + userFacingError_(error));
+  }
+}
+
+function writeSyncJobProgress_(job, message, state) {
+  writeSyncJobProgressAtPercent_(
+    job,
+    calculateSyncJobProgressPercent_(job),
+    message,
+    state || 'running'
+  );
 }
 
 function serializeSyncOperation_(operation) {
@@ -3674,8 +3758,8 @@ function buildTermTransitionNotice_(settings, source) {
     body:
       '系統偵測到 ' + dateRange + ' 的新學期行程\\n\\n' +
       '已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課\\n' +
-      '既有日曆事件會完整保留\\n' +
-      '在行程同步控制臺選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」，重新選擇本學期課程並儲存'
+      '完成新學期同步前，系統不會改動現有日曆事件\\n' +
+      '請在控制臺確認新學期就讀年級、重新選課，並在同步前檢查新增與移除預覽'
   };
 }
 
@@ -4412,8 +4496,17 @@ function serializeStateItem_(item, calendarEventId, signature, settings) {
 }
 
 function getConfiguredCourseOutlineSourceSets_(gradeName) {
-  const sourceIndex = loadCourseOutlineSourceIndex_();
-  const sets = sourceIndex.setsByGrade[sanitizeGrade_(gradeName)];
+  return getConfiguredCourseOutlineSourceSetsFromIndex_(
+    gradeName,
+    loadCourseOutlineSourceIndex_()
+  );
+}
+
+function getConfiguredCourseOutlineSourceSetsFromIndex_(gradeName, sourceIndex) {
+  const safeIndex = sourceIndex && sourceIndex.setsByGrade
+    ? sourceIndex
+    : { setsByGrade: {} };
+  const sets = safeIndex.setsByGrade[sanitizeGrade_(gradeName)];
   return (Array.isArray(sets) ? sets : []).filter(set =>
     set &&
     set.key &&
@@ -5119,8 +5212,16 @@ function isDateInCourseOutlineSourceSet_(dateKey, sourceSet) {
 }
 
 function getRelevantCourseOutlineSourceSets_(gradeName, events) {
+  return getRelevantCourseOutlineSourceSetsFromIndex_(
+    gradeName,
+    events,
+    loadCourseOutlineSourceIndex_()
+  );
+}
+
+function getRelevantCourseOutlineSourceSetsFromIndex_(gradeName, events, sourceIndex) {
   const datedEvents = (events || []).filter(event => event && event.type === 'course' && !event.isAllDay && event.dateKey);
-  return getConfiguredCourseOutlineSourceSets_(gradeName)
+  return getConfiguredCourseOutlineSourceSetsFromIndex_(gradeName, sourceIndex)
     .filter(sourceSet => datedEvents.some(event => isDateInCourseOutlineSourceSet_(event.dateKey, sourceSet)));
 }
 
@@ -5520,6 +5621,8 @@ function cleanupInactiveCourseOutlineSnapshotStores_(activeVersion) {
 function loadCourseOutlineState_() {
   return readChunkedJson_(COURSE_OUTLINE_STATE_STORE, {
     status: 'idle',
+    gradeName: '',
+    termKey: '',
     attempt: 0,
     incidentId: '',
     runId: '',
@@ -5540,31 +5643,56 @@ function saveCourseOutlineState_(state) {
 
 function buildCourseOutlineUiStatus_(settings, source, sourceIndexOverride) {
   const sourceIndex = sourceIndexOverride || loadCourseOutlineSourceIndex_();
-  const configuredSets = getConfiguredCourseOutlineSourceSets_(settings.gradeName);
+  const configuredSets = getConfiguredCourseOutlineSourceSetsFromIndex_(
+    settings.gradeName,
+    sourceIndex
+  );
   const relevantSets = source && Array.isArray(source.events)
-    ? getRelevantCourseOutlineSourceSets_(settings.gradeName, source.events)
+    ? getRelevantCourseOutlineSourceSetsFromIndex_(
+      settings.gradeName,
+      source.events,
+      sourceIndex
+    )
     : configuredSets;
   const state = loadCourseOutlineState_();
   const snapshot = readActiveCourseOutlineSnapshot_();
+  const requestedTermKey = source && source.termKey || '';
+  const snapshotMatches = Boolean(
+    snapshot &&
+    snapshot.gradeName === settings.gradeName &&
+    (!requestedTermKey || snapshot.termKey === requestedTermKey) &&
+    relevantSets.length > 0 &&
+    snapshot.sourceSetsFingerprint ===
+      makeCourseOutlineSourceSetsFingerprint_(relevantSets)
+  );
+  const visibleSnapshot = snapshotMatches ? snapshot : null;
+  const stateGradeName = state.gradeName || (snapshot && snapshot.gradeName) || '';
+  const stateTermKey = state.termKey || (snapshot && snapshot.termKey) || '';
+  const stateMatches = (!stateGradeName || stateGradeName === settings.gradeName) &&
+    (!requestedTermKey || !stateTermKey || stateTermKey === requestedTermKey);
+  const visibleState = stateMatches ? state : { status: 'idle' };
   return {
     enabled: relevantSets.length > 0,
     configured: configuredSets.length > 0,
     sourceSetLabels: relevantSets.map(sourceSet => sourceSet.label),
     indexSource: sourceIndex.source || '',
     indexWarning: sourceIndex.warning || '',
-    state: state.status || 'idle',
-    lastSuccessAt: state.lastSuccessAt || snapshot && snapshot.refreshedAt || '',
-    lastSuccessLabel: snapshot && snapshot.refreshedAtLabel ||
-      (state.lastSuccessAt ? formatDateTime_(new Date(state.lastSuccessAt)) : ''),
-    lastError: state.lastError || '',
-    matchedRecordCount: snapshot && snapshot.diagnostics
-      ? Number(snapshot.diagnostics.matchedRecordCount) || 0
+    state: visibleState.status || 'idle',
+    lastSuccessAt: visibleState.lastSuccessAt ||
+      visibleSnapshot && visibleSnapshot.refreshedAt || '',
+    lastSuccessLabel: visibleSnapshot && visibleSnapshot.refreshedAtLabel ||
+      (visibleState.lastSuccessAt
+        ? formatDateTime_(new Date(visibleState.lastSuccessAt))
+        : ''),
+    lastError: visibleState.lastError || '',
+    matchedRecordCount: visibleSnapshot && visibleSnapshot.diagnostics
+      ? Number(visibleSnapshot.diagnostics.matchedRecordCount) || 0
       : 0,
-    missingSheetNames: snapshot && snapshot.diagnostics
-      ? snapshot.diagnostics.missingSheetNames || []
+    missingSheetNames: visibleSnapshot && visibleSnapshot.diagnostics
+      ? visibleSnapshot.diagnostics.missingSheetNames || []
       : [],
-    nearMatchSheetNames: snapshot && snapshot.diagnostics
-      ? snapshot.diagnostics.nearMatchSheetNames || []
+    nearMatchSheetNames: visibleSnapshot && visibleSnapshot.diagnostics
+      ? visibleSnapshot.diagnostics.nearMatchSheetNames || []
       : []
   };
 }
@@ -5611,9 +5739,13 @@ function hasFreshCourseOutlineSnapshot_(settings, source) {
   );
 }
 
-function scheduleCourseOutlineRefreshIfNeeded_(settings, source) {
+function scheduleCourseOutlineRefreshIfNeeded_(settings, source, options) {
   const activeSettings = settings || loadSettings_();
-  if (!activeSettings.setupComplete || !activeSettings.autoSyncEnabled ||
+  const allowWhenAutoSyncDisabled = Boolean(
+    options && options.allowWhenAutoSyncDisabled
+  );
+  if (!activeSettings.setupComplete ||
+      (!activeSettings.autoSyncEnabled && !allowWhenAutoSyncDisabled) ||
       activeSettings.pendingTermKey ||
       !getConfiguredCourseOutlineSourceSets_(activeSettings.gradeName).length) {
     return false;
@@ -5621,9 +5753,19 @@ function scheduleCourseOutlineRefreshIfNeeded_(settings, source) {
   if (source && hasFreshCourseOutlineSnapshot_(activeSettings, source)) return false;
   const state = loadCourseOutlineState_();
   if (state.status === 'running' || state.status === 'retry_pending') return false;
-  const created = ensureOneTimeTrigger_(COURSE_OUTLINE_ONCE_HANDLER, 60 * 1000);
+  const handler = activeSettings.autoSyncEnabled
+    ? COURSE_OUTLINE_ONCE_HANDLER
+    : COURSE_OUTLINE_MANUAL_ONCE_HANDLER;
+  deleteTriggersByHandlers_([
+    handler === COURSE_OUTLINE_ONCE_HANDLER
+      ? COURSE_OUTLINE_MANUAL_ONCE_HANDLER
+      : COURSE_OUTLINE_ONCE_HANDLER
+  ]);
+  const created = ensureOneTimeTrigger_(handler, 60 * 1000);
   saveCourseOutlineState_(Object.assign({}, state, {
     status: 'queued',
+    gradeName: activeSettings.gradeName,
+    termKey: activeSettings.termKey || (source && source.termKey) || '',
     scheduledAt: new Date().toISOString(),
     lastError: ''
   }));
@@ -5636,6 +5778,10 @@ function refreshCourseOutlinesDaily() {
 
 function refreshCourseOutlinesOnce() {
   return runCourseOutlineRefreshAttempt_(1, 'scheduled');
+}
+
+function refreshCourseOutlinesManualOnce() {
+  return runCourseOutlineRefreshAttempt_(1, 'manual');
 }
 
 function retryCourseOutlineRefresh() {
@@ -5656,6 +5802,11 @@ function refreshCourseOutlinesNow() {
   return result;
 }
 
+function canRunCourseOutlineRefreshWhileAutoSyncDisabled_(reason, state) {
+  return reason === 'manual' ||
+    (reason === 'retry' && state && state.reason === 'manual');
+}
+
 function applyCourseOutlineSnapshotToCalendar() {
   try {
     return syncSchedule_({ reason: 'outline' });
@@ -5670,6 +5821,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
   let run = null;
   try {
     settings = loadSettings_();
+    const existingState = loadCourseOutlineState_();
     const configuredSets = getConfiguredCourseOutlineSourceSets_(settings.gradeName);
     if (!configuredSets.length) {
       return { ok: true, skipped: true, message: '這個年級目前沒有可使用的課綱資料。' };
@@ -5680,7 +5832,8 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
     if (settings.pendingTermKey) {
       return { ok: true, skipped: true, message: '偵測到新學期，請先重新選課再更新課綱資料。' };
     }
-    if (reason !== 'manual' && !settings.autoSyncEnabled) {
+    if (!settings.autoSyncEnabled &&
+        !canRunCourseOutlineRefreshWhileAutoSyncDisabled_(reason, existingState)) {
       return { ok: true, skipped: true, message: '自動同步已暫停，因此暫時不更新課綱資料。' };
     }
 
@@ -5720,12 +5873,12 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
     };
   } catch (error) {
     if (run) handleCourseOutlineRefreshFailure_(run, error);
-    else handleCourseOutlineRefreshStartupFailure_(attempt, reason, error);
+    else handleCourseOutlineRefreshStartupFailure_(settings, attempt, reason, error);
     return { ok: false, skipped: false, message: userFacingError_(error) };
   }
 }
 
-function handleCourseOutlineRefreshStartupFailure_(attempt, reason, error) {
+function handleCourseOutlineRefreshStartupFailure_(settings, attempt, reason, error) {
   try {
     const state = loadCourseOutlineState_();
     const incidentId = state.incidentId ||
@@ -5733,6 +5886,8 @@ function handleCourseOutlineRefreshStartupFailure_(attempt, reason, error) {
     const runId = hashText_(incidentId + '|' + attempt + '|' + Date.now() + '|' + Math.random());
     const run = Object.assign({}, state, {
       status: 'running',
+      gradeName: (settings && settings.gradeName) || state.gradeName || '',
+      termKey: (settings && settings.termKey) || state.termKey || '',
       attempt,
       incidentId,
       runId,
@@ -5774,6 +5929,8 @@ function beginCourseOutlineRefreshRun_(settings, attempt, reason) {
       .create();
     const next = Object.assign({}, state, {
       status: 'running',
+      gradeName: settings.gradeName,
+      termKey: settings.termKey || '',
       attempt,
       incidentId,
       runId,
@@ -5801,6 +5958,8 @@ function finishCourseOutlineRefreshRun_(run, activeVersion) {
     if (state.retryTriggerId) deleteProjectTriggerById_(state.retryTriggerId);
     saveCourseOutlineState_({
       status: 'idle',
+      gradeName: state.gradeName || '',
+      termKey: state.termKey || '',
       attempt: 0,
       incidentId: '',
       runId: '',
@@ -6623,6 +6782,7 @@ function deleteDailySyncTriggers_() {
 function deleteCourseOutlineMaintenanceTriggers_() {
   deleteTriggersByHandlers_([
     COURSE_OUTLINE_ONCE_HANDLER,
+    COURSE_OUTLINE_MANUAL_ONCE_HANDLER,
     COURSE_OUTLINE_RETRY_HANDLER,
     COURSE_OUTLINE_WATCHDOG_HANDLER,
     COURSE_OUTLINE_APPLY_HANDLER

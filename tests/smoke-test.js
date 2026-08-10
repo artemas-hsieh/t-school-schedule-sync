@@ -340,6 +340,9 @@ assert.equal(sidebarHtml.includes('關閉後仍可從下方選單手動同步'),
 assert.equal(sidebarHtml.includes('content: "✓"'), false);
 assert.equal(sidebarHtml.includes('id="term-transition" role="alert"'), true);
 assert.equal(sidebarHtml.includes('id="term-transition-action"'), true);
+assert.equal(sidebarHtml.includes('id="term-grade-confirmed"'), true);
+assert.equal(sidebarHtml.includes("server('getGradeContextForUi', event.target.value)"), true);
+assert.equal(sidebarHtml.includes('var missingGradeConfirmation ='), true);
 assert.equal(sidebarHtml.includes('function updateActionAvailability()'), true);
 assert.equal(sidebarHtml.includes('var lastSyncProgressPercent = 0;'), true);
 assert.equal(
@@ -580,6 +583,16 @@ assert.equal(
 assert.equal(
   emailTemplateManifest.notifications.term_transition.lede,
   '已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課'
+);
+assert.equal(
+  emailTemplateManifest.notifications.term_transition.content.includes('完整保留'),
+  false,
+  '新學期通知不得宣稱所有舊學期未來事件都會永久保留'
+);
+assert.equal(
+  emailTemplateManifest.notifications.term_transition.content.includes('確認新學期就讀年級'),
+  true,
+  '新學期通知必須提醒使用者明確確認升年級後的年級'
 );
 assert.equal(
   emailTemplateManifest.notifications.sync_stopped.headline,
@@ -1413,6 +1426,7 @@ assert.equal(
   'getSettingsUiData',
   'importSetupCodeFromUi',
   'getSourceCatalogForUi',
+  'getGradeContextForUi',
   'getSyncProgressForUi',
   'previewSettingsImpactFromUi',
   'prepareFirstSyncCourseOutlinesFromUi',
@@ -1561,6 +1575,16 @@ assert.match(
   /function buildUiData_\([\s\S]*?loadCourseOutlineSourceIndexForUi_\(\)/,
   '控制臺初次顯示不得同步開啟中央課綱索引試算表'
 );
+assert.equal(
+  generatedCode.includes('function getConfiguredCourseOutlineSourceSetsFromIndex_('),
+  true,
+  '控制臺課綱狀態必須能只使用已傳入的索引快取'
+);
+assert.match(
+  generatedCode,
+  /function getGradeContextForUi\(gradeName\)[\s\S]*?loadSourceContext_\(cleanGrade\)[\s\S]*?loadCourseOutlineSourceIndex_\(\)[\s\S]*?buildCourseOutlineUiStatus_/,
+  '使用者主動切換年級時必須同時重讀最新課表與課綱索引狀態'
+);
 assert.equal(generatedCode.includes('function isTransientInitialLoadError(error)'), true);
 assert.match(
   generatedCode,
@@ -1645,6 +1669,28 @@ assert.equal(
 );
 assert.equal(generatedCode.includes('function getSyncProgressForUi('), true);
 assert.equal(generatedCode.includes('SYNC_PROGRESS_STORE'), true);
+assert.equal(
+  generatedCode.includes('const SYNC_PROGRESS_CALENDAR_START_PERCENT = 35;') &&
+    generatedCode.includes('const SYNC_PROGRESS_CALENDAR_END_PERCENT = 90;') &&
+    generatedCode.includes('const SYNC_PROGRESS_REPORT_INTERVAL_MS = 10 * 1000;'),
+  true,
+  '同步進度應分開準備、Calendar 操作與收尾區間，並限制進度寫入頻率'
+);
+const finalizeSyncJobSource = generatedCode.slice(
+  generatedCode.indexOf('function finalizeSyncJob_('),
+  generatedCode.indexOf('function handleSyncJobFailure_(')
+);
+assert.equal(
+  finalizeSyncJobSource.indexOf("writeSyncJobProgressAtPercent_(job, 100, '同步完成', 'complete')") >
+    finalizeSyncJobSource.indexOf('scheduleRequestedNotificationDeliveryRetry_()'),
+  true,
+  '100% 必須在工作狀態、續跑觸發器與通知清理完成後才回報'
+);
+assert.match(
+  finalizeSyncJobSource,
+  /allowWhenAutoSyncDisabled:\s*job\.reason === 'manual' \|\| job\.reason === 'settings'/,
+  '手動同步完成後必須允許在自動同步關閉時排定一次課綱更新'
+);
 assert.equal(
   generatedCode.includes("'\\\\n\\\\n課綱狀態：' + outline.state"),
   false,
@@ -1818,6 +1864,16 @@ const context = vm.createContext({
 });
 
 vm.runInContext(generatedCode, context);
+
+const progressTestJob = { initialOperationCount: 100, processedOperations: 0 };
+assert.equal(context.calculateSyncJobProgressPercent_(progressTestJob), 35);
+assert.equal(context.calculateSyncJobProgressPercent_(progressTestJob, 50), 63);
+assert.equal(context.calculateSyncJobProgressPercent_(progressTestJob, 100), 90);
+assert.equal(
+  context.calculateSyncJobProgressPercent_({ initialOperationCount: 0, processedOperations: 0 }),
+  90,
+  '沒有 Calendar 操作時應直接進入收尾，不應卡在規劃區間'
+);
 
 function makeOwnedCalendarForListTest(id, name) {
   const calls = { getId: 0, getName: 0 };
@@ -4663,6 +4719,96 @@ assert.equal(
   emailsBeforeInitialOutlineIndex,
   '第一次成功讀取課綱來源索引時不應誤寄變動通知'
 );
+const loadCourseOutlineSourceIndexBeforeCachedUiTest = context.loadCourseOutlineSourceIndex_;
+context.loadCourseOutlineSourceIndex_ = function () {
+  throw new Error('控制臺初始顯示不應開啟中央課綱索引');
+};
+try {
+  const cachedOnlyUiStatus = context.buildCourseOutlineUiStatus_(
+    { gradeName: '高一' },
+    {
+      events: [{
+        type: 'course',
+        isAllDay: false,
+        dateKey: '2026-09-15'
+      }]
+    },
+    Object.assign({}, liveOutlineIndex, {
+      source: 'last_success',
+      warning: '模擬快取提示'
+    })
+  );
+  assert.equal(cachedOnlyUiStatus.enabled, true);
+  assert.equal(cachedOnlyUiStatus.configured, true);
+  assert.equal(cachedOnlyUiStatus.indexSource, 'last_success');
+  assert.equal(cachedOnlyUiStatus.indexWarning, '模擬快取提示');
+} finally {
+  context.loadCourseOutlineSourceIndex_ = loadCourseOutlineSourceIndexBeforeCachedUiTest;
+}
+
+const loadSettingsBeforeGradeContextTest = context.loadSettings_;
+const loadSourceContextBeforeGradeContextTest = context.loadSourceContext_;
+const loadIndexBeforeGradeContextTest = context.loadCourseOutlineSourceIndex_;
+context.loadSettings_ = function () {
+  return {
+    setupImportedAt: '2026-01-01T00:00:00.000Z',
+    setupCodeVersion: 1,
+    gradeName: '高一',
+    pendingTermKey: '一年級|2026-09-01',
+    autoSyncEnabled: false,
+    autoSyncEnabledBeforeTermTransition: true,
+    termTransitionNoticeAttempts: 0,
+    termTransitionNoticeSentAt: '',
+    termTransitionNoticeLastError: ''
+  };
+};
+context.loadSourceContext_ = function (gradeName) {
+  assert.equal(gradeName, '高二');
+  return {
+    termKey: '二年級|2026-09-01',
+    firstDateKey: '2026-09-01',
+    lastDateKey: '2027-01-31',
+    sourceUpdatedLabel: '08102026',
+    events: [{ type: 'course', isAllDay: false, dateKey: '2026-09-15' }],
+    catalog: {
+      all: [{ title: '高二新課程', type: 'course' }],
+      courses: [{ title: '高二新課程', type: 'course' }],
+      activities: [],
+      vacation: []
+    }
+  };
+};
+context.loadCourseOutlineSourceIndex_ = function () {
+  return context.parseCourseOutlineSourceIndexValues_([
+    simulatedOutlineIndexHeader,
+    [
+      'TRUE',
+      '115-1-high2-grade-context',
+      '115-1 高二—必修',
+      '高二',
+      '2026-09-01',
+      '2027-01-31',
+      'https://docs.google.com/spreadsheets/d/grade-context-sheet/edit'
+    ]
+  ]);
+};
+try {
+  const switchedGradeContext = context.getGradeContextForUi('高二');
+  assert.equal(switchedGradeContext.source.gradeName, '高二');
+  assert.equal(switchedGradeContext.source.courseCount, 1);
+  assert.equal(switchedGradeContext.courseOutlineStatus.enabled, true);
+  assert.deepEqual(
+    Array.from(switchedGradeContext.courseOutlineStatus.sourceSetLabels),
+    ['115-1 高二—必修']
+  );
+  assert.equal(switchedGradeContext.termTransition.required, true);
+  assert.equal(switchedGradeContext.termTransition.firstDate, '2026-09-01');
+  assert.equal(switchedGradeContext.termTransition.lastDate, '2027-01-31');
+} finally {
+  context.loadSettings_ = loadSettingsBeforeGradeContextTest;
+  context.loadSourceContext_ = loadSourceContextBeforeGradeContextTest;
+  context.loadCourseOutlineSourceIndex_ = loadIndexBeforeGradeContextTest;
+}
 
 liveOutlineIndexValues.push([
   'TRUE',
@@ -5392,8 +5538,10 @@ assert.match(
 );
 assert.match(
   sentEmailMessages.at(-1).htmlBody,
-  /在行程同步控制臺選擇「T-SCHOOL Schedule Sync」→「開啟控制臺介面」/
+  /在行程同步控制臺確認新學期就讀年級、重新選課/
 );
+assert.match(sentEmailMessages.at(-1).body, /完成新學期同步前/);
+assert.match(sentEmailMessages.at(-1).body, /確認新學期就讀年級/);
 assert.match(sentEmailMessages.at(-1).htmlBody, /2026-09-01–2027-01-31/);
 context.deliverTermTransitionNotice_(transitionedSettings, newTermSource);
 assert.equal(
@@ -5449,7 +5597,8 @@ const restoredAfterSelection = context.sanitizeSettingsInput_(
     calendarId: '',
     calendarName: '新專用日曆',
     calendarMigrationFromId: '',
-    autoSyncEnabled: true
+    autoSyncEnabled: true,
+    termGradeConfirmed: true
   }),
   Object.assign({}, failedTransition, {
     calendarId: '',
@@ -5460,6 +5609,25 @@ const restoredAfterSelection = context.sanitizeSettingsInput_(
 assert.equal(restoredAfterSelection.pendingTermKey, '');
 assert.equal(restoredAfterSelection.autoSyncEnabled, true);
 assert.equal(restoredAfterSelection.autoSyncEnabledBeforeTermTransition, null);
+assert.throws(
+  () => context.sanitizeSettingsInput_(
+    Object.assign({}, migrationSanitized, {
+      gradeName: '高二',
+      selectedCourses: ['新學期課程'],
+      calendarId: '',
+      calendarName: '新專用日曆',
+      calendarMigrationFromId: '',
+      autoSyncEnabled: true
+    }),
+    Object.assign({}, failedTransition, {
+      calendarId: '',
+      calendarMigrationFromId: ''
+    }),
+    newTermSource
+  ),
+  /確認新學期就讀年級/,
+  '新學期不得只沿用舊年級；使用者必須明確確認目前年級'
+);
 context.clearChunkedStore_('TSCHOOL_SETTINGS');
 context.clearChunkedStore_('TSCHOOL_NOTICE_STATE');
 projectTriggers = projectTriggers.filter(trigger =>
@@ -5687,6 +5855,39 @@ const enrichedFromSnapshot = context.enrichEventsWithCourseOutlines_(
 );
 assert.equal(enrichedFromSnapshot[0].courseOutline.topic, '快照主題');
 assert.equal(enrichedFromSnapshot[0].outlineHash, 'snapshot-hash');
+const currentGradeOutlineStatus = context.buildCourseOutlineUiStatus_(
+  { gradeName: '高二' },
+  { termKey: '二年級|2026-02-23', events: [outlineBaseItem] },
+  {
+    source: 'live',
+    warning: '',
+    setsByGrade: { '高一': [], '高二': high2OutlineSets, '高三': [] }
+  }
+);
+assert.equal(
+  currentGradeOutlineStatus.matchedRecordCount,
+  1,
+  '目前年級與學期相符時仍應顯示課綱快照結果'
+);
+assert.equal(currentGradeOutlineStatus.lastSuccessLabel, '2026/07/24 20:00');
+const switchedGradeOutlineStatus = context.buildCourseOutlineUiStatus_(
+  { gradeName: '高一' },
+  {
+    termKey: '一年級|2026-09-01',
+    events: [{ type: 'course', isAllDay: false, dateKey: '2026-09-15' }]
+  },
+  changedOutlineIndex
+);
+assert.equal(
+  switchedGradeOutlineStatus.matchedRecordCount,
+  0,
+  '切換年級後不得顯示前一個年級課綱快照的命中筆數'
+);
+assert.equal(
+  switchedGradeOutlineStatus.lastSuccessAt,
+  '',
+  '切換年級後不得沿用前一個年級的課綱成功時間'
+);
 assert.equal(
   context.enrichEventsWithCourseOutlines_(
     [outlineBaseItem],
@@ -5844,6 +6045,64 @@ assert.equal(
 );
 projectTriggers = projectTriggers.filter(trigger =>
   trigger.getHandlerFunction() !== 'refreshCourseOutlinesOnce'
+);
+
+assert.equal(context.scheduleCourseOutlineRefreshIfNeeded_({
+  gradeName: '高二',
+  setupComplete: true,
+  autoSyncEnabled: false,
+  pendingTermKey: ''
+}), false);
+assert.equal(
+  projectTriggers.some(trigger =>
+    trigger.getHandlerFunction() === 'refreshCourseOutlinesManualOnce'
+  ),
+  false,
+  '關閉自動同步且沒有手動要求時，不應自行建立課綱工作'
+);
+assert.equal(context.scheduleCourseOutlineRefreshIfNeeded_({
+  gradeName: '高二',
+  setupComplete: true,
+  autoSyncEnabled: false,
+  pendingTermKey: ''
+}, null, { allowWhenAutoSyncDisabled: true }), true);
+assert.equal(
+  projectTriggers.filter(trigger =>
+    trigger.getHandlerFunction() === 'refreshCourseOutlinesManualOnce'
+  ).length,
+  1,
+  '使用者手動同步時，即使自動同步關閉也應排定一次手動課綱更新'
+);
+assert.equal(
+  projectTriggers.some(trigger => [
+    'syncMyScheduleToCalendar',
+    'refreshCourseOutlinesDaily'
+  ].includes(trigger.getHandlerFunction())),
+  false,
+  '一次性手動課綱更新不得偷偷恢復每日課表或課綱觸發器'
+);
+assert.equal(
+  context.canRunCourseOutlineRefreshWhileAutoSyncDisabled_('manual', {}),
+  true
+);
+assert.equal(
+  context.canRunCourseOutlineRefreshWhileAutoSyncDisabled_(
+    'retry',
+    { reason: 'manual' }
+  ),
+  true,
+  '手動課綱更新第一次失敗後，即使自動同步關閉也必須允許第二次重試'
+);
+assert.equal(
+  context.canRunCourseOutlineRefreshWhileAutoSyncDisabled_(
+    'retry',
+    { reason: 'scheduled' }
+  ),
+  false
+);
+projectTriggers = projectTriggers.filter(trigger =>
+  !['refreshCourseOutlinesOnce', 'refreshCourseOutlinesManualOnce']
+    .includes(trigger.getHandlerFunction())
 );
 
 const settingsBeforePendingTermOutline = context.loadSettings_();
