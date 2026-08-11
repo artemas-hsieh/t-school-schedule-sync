@@ -619,7 +619,7 @@ Google 的 Properties 限制可能調整，正式數值以 [Apps Script 官方�
 
 降低尖峰的方式包括：
 
-- 課表偵測與 Calendar 同步固定於每日 03:00、11:00、18:00、21:00，使用 `atHour(hour).nearMinute(0)`；依 [Apps Script 官方觸發器說明](https://developers.google.com/apps-script/reference/script/clock-trigger-builder#nearMinute(Integer))，Google 會在各整點前後約 15 分鐘啟動。即時通知預設開啟：偵測到異動並完整套用 Calendar 後立即嘗試寄出，每日摘要觸發器固定 06:00。關閉後，使用者自訂時間才會建立只負責寄信的排程；異動會持續保存，後續零異動同步不會清除，直到寄送成功。
+- 課表偵測與 Calendar 同步以每日 03:00、11:00、18:00、21:00 為四個中心。每份 Apps Script 副本依固定識別把 Trigger 中心分配在各中心前後 45 分鐘內，再保留 `nearMinute` 約 ±15 分鐘誤差，因此實際課表 API 讀取落在各中心前後一小時內；同一副本重建 Trigger 時維持相同時間。即時通知預設開啟：偵測到異動並完整套用 Calendar 後立即嘗試寄出，每日摘要觸發器固定使用 06:00 的 `nearMinute(0)`。關閉後，使用者自訂時間仍以 `nearMinute(0)` 建立只負責寄信的排程；異動會持續保存，後續零異動同步不會清除，直到寄送成功。
 - 課綱每日更新仍只指定小時、不固定分鐘，讓共用課綱的讀取分散在完整一小時內，避免所有使用者集中於整點。
 - 課綱每日只讀一次，不綁在每次 Calendar 同步。
 - 每位使用者的日常 Calendar 同步只寫異動。

@@ -352,6 +352,21 @@ assert.equal(
   true,
   '同一同步工作顯示過的百分比不得因後端輪詢尚未建立進度而倒退'
 );
+assert.equal(
+  sidebarHtml.includes("byId('loading-label').hidden = Boolean(showProgress);"),
+  true,
+  '顯示同步進度時不得在上方重複顯示「正在同步行程」'
+);
+assert.match(
+  sidebarHtml,
+  /function startSyncProgress\(label\)[\s\S]*?renderSyncProgress\(\{ percent: 0,/,
+  '真正開始同步前，進度必須從 0% 顯示'
+);
+assert.equal(
+  sidebarHtml.includes("message: '正在儲存設定並準備同步（可能需等待 0–10 分鐘）'"),
+  true,
+  '儲存設定的同步前階段應顯示固定等待時間提示'
+);
 assert.match(
   sidebarHtml,
   /if \(progressJobId && progressJobId !== lastSyncProgressJobId\) \{\s*lastSyncProgressJobId = progressJobId;\s*lastSyncProgressPercent = 0;/,
@@ -438,7 +453,7 @@ assert.match(
   '課表來源離線時除同步與儲存外，也不得建立額外 Calendar 或切換年級'
 );
 assert.equal(
-  sidebarHtml.includes('正在準備未來 30 天的課綱資料…'),
+  sidebarHtml.includes('正在準備未來 30 天的課綱資料（可能需等待 0–10 分鐘）'),
   true
 );
 assert.equal(sidebarHtml.includes('<span>每日成功摘要</span>'), false);
@@ -1743,6 +1758,14 @@ assert.equal(
   generatedCode.includes('const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];'),
   true,
   '產生的 Code.gs 應固定保存四個課表偵測與 Calendar 同步時段'
+);
+assert.equal(
+  generatedCode.includes('const SCHEDULE_SYNC_WINDOW_HALF_MINUTES = 60;'),
+  true
+);
+assert.equal(
+  generatedCode.includes('const TIME_TRIGGER_NEAR_MINUTE_TOLERANCE = 15;'),
+  true
 );
 assert.equal(
   generatedCode.includes("function sendScheduledNotifications()"),
@@ -3738,6 +3761,9 @@ assert.throws(
 );
 context.clearChunkedStore_('TSCHOOL_SETTINGS');
 context.ScriptApp = {
+  getScriptId() {
+    return 'test-script-id';
+  },
   getProjectTriggers() {
     return projectTriggers.slice();
   },
@@ -5930,22 +5956,39 @@ context.refreshAutoSyncTriggers_({
 const fixedScheduleTriggers = projectTriggers
   .filter(trigger => trigger.getHandlerFunction() === 'syncMyScheduleToCalendar');
 assert.equal(fixedScheduleTriggers.length, 4);
+const expectedScheduleTriggerTimes = [3, 11, 18, 21].map(hour => {
+  const triggerTime = context.getScheduleSyncTriggerTime_(hour);
+  return [Number(triggerTime.hour), Number(triggerTime.minute)];
+});
 assert.deepEqual(
-  fixedScheduleTriggers.map(trigger => trigger.schedule.hour).sort((a, b) => a - b),
-  [3, 11, 18, 21],
-  '通知設定不得改變固定的四個課表偵測與 Calendar 同步時段'
+  fixedScheduleTriggers.map(trigger => [trigger.schedule.hour, trigger.schedule.nearMinute]),
+  expectedScheduleTriggerTimes,
+  '通知設定不得改變固定四個窗口內分配到的課表偵測時間'
 );
-assert.deepEqual(
-  fixedScheduleTriggers.map(trigger => trigger.schedule.nearMinute),
-  [0, 0, 0, 0],
-  '固定同步時段應使用整點前後約 15 分鐘的 time-driven trigger'
-);
+[3, 11, 18, 21].forEach((anchorHour, index) => {
+  const scheduledMinute = expectedScheduleTriggerTimes[index][0] * 60 +
+    expectedScheduleTriggerTimes[index][1];
+  const anchorMinute = anchorHour * 60;
+  const centeredOffset = (scheduledMinute - anchorMinute + 12 * 60) % (24 * 60) - 12 * 60;
+  assert.equal(
+    Math.abs(centeredOffset) <= 45,
+    true,
+    '同步 Trigger 的中心時間必須保留 Google ±15 分鐘誤差，確保實際執行不超過 ±1 小時窗口'
+  );
+});
 assert.deepEqual(
   projectTriggers
     .filter(trigger => trigger.getHandlerFunction() === 'sendScheduledNotifications')
     .map(trigger => trigger.schedule.hour),
   [5],
   '非最後通知時間只能建立通知寄送 Trigger'
+);
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger => trigger.getHandlerFunction() === 'sendScheduledNotifications')
+    .map(trigger => trigger.schedule.nearMinute),
+  [0],
+  '通知 Trigger 應維持整點前後約 15 分鐘的既有精度'
 );
 assert.deepEqual(
   projectTriggers
@@ -5956,6 +5999,15 @@ assert.deepEqual(
   [22],
   '最後一個通知時間應寄送待寄異動，無異動時才寄每日成功摘要'
 );
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger =>
+      trigger.getHandlerFunction() === 'sendScheduledNotificationsWithDailySummary'
+    )
+    .map(trigger => trigger.schedule.nearMinute),
+  [0],
+  '每日摘要 Trigger 應維持整點前後約 15 分鐘的既有精度'
+);
 context.refreshAutoSyncTriggers_({
   gradeName: '高一',
   autoSyncEnabled: true,
@@ -5963,6 +6015,13 @@ context.refreshAutoSyncTriggers_({
   notificationHours: [5, 22],
   notifySyncHour: 22
 });
+assert.deepEqual(
+  projectTriggers
+    .filter(trigger => trigger.getHandlerFunction() === 'syncMyScheduleToCalendar')
+    .map(trigger => [trigger.schedule.hour, trigger.schedule.nearMinute]),
+  expectedScheduleTriggerTimes,
+  '同一份控制臺重新建立 Trigger 時必須維持相同分配，避免同一窗口內重複同步'
+);
 assert.deepEqual(
   projectTriggers
     .filter(trigger =>

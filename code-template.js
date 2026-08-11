@@ -958,6 +958,8 @@ const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-rc.2')};
 const SETTINGS_SCHEMA_VERSION = 8;
 const TIMEZONE = 'Asia/Taipei';
 const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];
+const SCHEDULE_SYNC_WINDOW_HALF_MINUTES = 60;
+const TIME_TRIGGER_NEAR_MINUTE_TOLERANCE = 15;
 const INSTANT_NOTIFICATION_SUMMARY_HOUR = 6;
 const SOURCE_API_URL = ${formatString(sourceApiUrl)};
 const SOURCE_FETCH_MAX_ATTEMPTS = 3;
@@ -2611,7 +2613,9 @@ function watchScheduleSync() {
 
 function syncSchedule_(options) {
   const trackProgress = Boolean(options && options.trackProgress);
-  if (trackProgress) writeSyncProgress_(2, '正在等待同步資源…', 'running');
+  if (trackProgress) {
+    writeSyncProgress_(2, '正在等待同步資源（可能需等待 0–10 分鐘）', 'running');
+  }
   if (options && options.continuation) {
     deleteTriggersByHandlers_([SYNC_CONTINUATION_HANDLER]);
   }
@@ -2648,14 +2652,20 @@ function syncSchedule_(options) {
       saveSyncJob_(job);
       resetSyncWatchdogTrigger_();
     }
-    if (trackProgress) writeSyncProgress_(7, '正在讀取控制臺設定…', 'running');
+    if (trackProgress) {
+      writeSyncProgress_(7, '正在讀取控制臺設定（可能需等待 0–10 分鐘）', 'running');
+    }
     let settings = loadSettings_();
     assertSetupImported_(settings);
-    if (trackProgress) writeSyncProgress_(15, '正在取得最新課表…', 'running');
+    if (trackProgress) {
+      writeSyncProgress_(15, '正在取得最新課表（可能需等待 0–10 分鐘）', 'running');
+    }
     const source = loadSourceContext_(settings.gradeName);
     settings = applyTermTransitionIfNeeded_(settings, source, false);
     settings = registerNewTitles_(settings, source);
-    if (trackProgress) writeSyncProgress_(24, '正在確認專用日曆…', 'running');
+    if (trackProgress) {
+      writeSyncProgress_(24, '正在確認專用日曆（可能需等待 0–10 分鐘）', 'running');
+    }
     const calendar = ensureDedicatedCalendar_(settings);
     const businessNow = scheduleBusinessNow_();
     const todayKey = formatDateKey_(businessNow);
@@ -2677,7 +2687,9 @@ function syncSchedule_(options) {
 
     if (!isActiveSyncJob_(job)) {
       const plan = buildSyncPlan_(oldState, desiredEvents, todayKey);
-      if (trackProgress) writeSyncProgress_(32, '正在比對課表與日曆…', 'running');
+      if (trackProgress) {
+        writeSyncProgress_(32, '正在比對課表與日曆（可能需等待 0–10 分鐘）', 'running');
+      }
       const expectedApprovalToken = makeSyncApprovalToken_(settings, source, desiredEvents, plan);
       const deletionApproved = Boolean(
         options && options.reason === 'settings' &&
@@ -6711,10 +6723,11 @@ function refreshAutoSyncTriggers_(settings) {
     return;
   }
   SCHEDULE_SYNC_HOURS.forEach(hour => {
+    const triggerTime = getScheduleSyncTriggerTime_(hour);
     ScriptApp.newTrigger('syncMyScheduleToCalendar')
       .timeBased()
-      .atHour(hour)
-      .nearMinute(0)
+      .atHour(triggerTime.hour)
+      .nearMinute(triggerTime.minute)
       .everyDays(1)
       .inTimezone(TIMEZONE)
       .create();
@@ -6744,6 +6757,25 @@ function refreshAutoSyncTriggers_(settings) {
   } else {
     deleteCourseOutlineMaintenanceTriggers_();
   }
+}
+
+function getScheduleSyncTriggerTime_(anchorHour) {
+  const cleanAnchorHour = normalizeHour_(anchorHour, 0);
+  const centerOffsetLimit = Math.max(
+    0,
+    SCHEDULE_SYNC_WINDOW_HALF_MINUTES - TIME_TRIGGER_NEAR_MINUTE_TOLERANCE
+  );
+  const offsetSlotCount = centerOffsetLimit * 2 + 1;
+  const seed = ScriptApp.getScriptId() + '|schedule-sync|' + cleanAnchorHour;
+  const offsetMinutes = parseInt(hashText_(seed), 36) % offsetSlotCount - centerOffsetLimit;
+  const minutesInDay = 24 * 60;
+  const triggerMinuteOfDay = (
+    cleanAnchorHour * 60 + offsetMinutes + minutesInDay
+  ) % minutesInDay;
+  return {
+    hour: Math.floor(triggerMinuteOfDay / 60),
+    minute: triggerMinuteOfDay % 60
+  };
 }
 
 function getEffectiveNotificationHours_(settings) {

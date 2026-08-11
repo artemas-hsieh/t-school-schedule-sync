@@ -42,7 +42,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 ## 產品流程
 
 1. 安裝器從 API 載入所選年級，並建立去除重複項目的課程目錄。
-2. 使用者搜尋並選擇課程與活動、排除個別活動，並設定通知 Email 與通知偏好。「即時通知」預設開啟，偵測到行程調整並完成 Calendar 同步後盡快寄出，每日成功摘要固定 06:00；關閉後可設定一至四個通知時間，最後一個時段兼作每日成功摘要。課表偵測與 Calendar 同步固定於每日 03:00、11:00、18:00、21:00，與通知設定彼此獨立。活動提醒等未顯示於安裝器的選項先採預設值，安裝後可由側欄調整；事件說明格式固定使用標準格式。
+2. 使用者搜尋並選擇課程與活動、排除個別活動，並設定通知 Email 與通知偏好。「即時通知」預設開啟，偵測到行程調整並完成 Calendar 同步後盡快寄出，每日成功摘要固定 06:00；關閉後可設定一至四個通知時間，最後一個時段兼作每日成功摘要。課表偵測與 Calendar 同步以每日 03:00、11:00、18:00、21:00 為中心，在各自前後一小時內依控制臺副本分散執行，與通知設定彼此獨立。活動提醒等未顯示於安裝器的選項先採預設值，安裝後可由側欄調整；事件說明格式固定使用標準格式。
 3. 安裝器產生 `TSCHOOL_SETUP_V1.<Base64URL JSON>.<FNV-1a checksum>` 設定碼。Payload 包含版本、產生時間、產生器版本、年級、學期與版本化的設定目錄指紋 `catalogFingerprint`、選課與活動設定、通知 Email、即時通知、一至四個通知時間，以及供首次控制臺顯示使用的日期與課程分類摘要；不包含完整課表事件、Calendar ID、API URL、測試開關、權杖或可執行內容。設定碼上限 32 KiB，checksum 只檢查複製完整性，並非加密或信任機制。為相容舊版 `Code.gs`，payload 暫時保留同值的 `sourceFingerprint` 別名；新程式不得把它當成完整課表指紋。
 4. 使用者在電腦建立 Google Docs 母版副本，從 `T-SCHOOL Schedule Sync` 選單開啟控制臺；入口會先以 `ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL)` 要求 manifest 中既定的最小權限，授權完成後才讀取設定並顯示單頁匯入對話框。使用者貼上「行程同步設定碼」並直接開啟控制臺。新版設定碼先以內嵌的小型來源摘要驗證欄位，避免匯入時再次等待課表 API；舊版設定碼仍會即時讀取來源。第一次 Calendar 同步前一定重新讀取最新課表並再次套用 sanitizer；同學期來源變動時保留仍有效的選項，跨學期則在寫入前拒絕。若 Apps Script 能取得目前 Google 帳號，且與設定碼中的通知 Email 不同，匯入頁顯示帳號切換提醒並停止保存，待帳號正確後再繼續；若 Workspace 隱私政策使 Email 為空，則明確告知無法驗證，要求使用者自行確認一次後才開啟控制臺。
 5. 匯入只保存設定與初次控制臺顯示所需的小型來源快照，不建立 Calendar、觸發器或同步工作；完成後開啟設定側欄，讓使用者選擇或建立專用 Calendar。來源快照避免側欄再次等待課表 API 或中央課綱索引，首次同步完成後即清除。完成首次同步後，控制臺另保存最後成功的精簡課表摘要；若課表 API 暫時失敗，側欄仍以該摘要或既有設定開啟唯讀畫面，並停用儲存、同步、修復與待確認項目寫入，不能把快取當成正式同步來源或用來判定新學期。首次同步前可重新匯入；`setupComplete=true` 後禁止覆寫設定碼。
@@ -90,7 +90,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 - 指紋契約按資料域分離：`catalogFingerprint` 只保護安裝選項目錄，`scheduleFingerprint` 保護完整 API 課表，`setupContextFingerprint` 保護首次同步前的內嵌設定快照，同步工作單的 `desiredScheduleFingerprint` 則只保護篩選後的目標事件。跨網站與 Apps Script 的目錄列使用明確的字典序正規化，不依賴執行環境的 `localeCompare` 預設值。每次續傳均比對目標行程、設定、目標 Calendar、課綱版本與應有事件指紋。輸入漂移時由已提交狀態重新規劃，不沿用過時操作清單。
 - 主同步第一次暫時失敗保存進度並重試一次，下一次仍失敗才寄信；watchdog 亦採相同的連續兩次失敗規則。每次新批次開始都先刪除舊 watchdog 再建立完整 5 分鐘的新觸發器，不能沿用前一批殘留時間。
 - 分塊 Script Properties 以 `<key>_COUNT` 作為目前值的提交指標。一般寫入不得刪除超出目前 count 的歷史尾端 chunk，以免舊的小寫入與新的大寫入交錯時破壞 JSON；只有明確清除整個 store 時才掃描並移除所有數字 chunk。需要讀改寫語意的設定仍由上層 Script Lock 保護。
-- 課表偵測與 Calendar 同步固定建立 03:00、11:00、18:00、21:00 四個 `atHour(hour).nearMinute(0)` Trigger，由 Apps Script 在各整點前後約 15 分鐘啟動，完全不受通知偏好影響。即時通知開啟時，異動在當次同步完成後直接嘗試寄送，並另建立 06:00 每日摘要 Trigger；關閉時才依使用者選擇的一至四個時間建立獨立通知 Trigger。通知 Trigger 只寄送佇列內容，不重新讀取課表或更新 Calendar。課綱每日更新仍只指定小時、不固定分鐘，以分散共用 Sheets 的讀取尖峰。
+- 課表偵測與 Calendar 同步以 03:00、11:00、18:00、21:00 為四個中心，依每份 Apps Script 副本的固定識別分配 Trigger 中心分鐘，再保留 Apps Script `nearMinute` 約 ±15 分鐘誤差，確保實際執行落在各中心前後一小時內。重新建立 Trigger 時同一副本維持相同分配，且完全不受通知偏好影響。即時通知開啟時，異動在當次同步完成後直接嘗試寄送，並另建立 06:00、`nearMinute(0)` 的每日摘要 Trigger；關閉時才依使用者選擇的一至四個時間建立同精度的獨立通知 Trigger。通知 Trigger 只寄送佇列內容，不重新讀取課表或更新 Calendar。課綱每日更新仍只指定小時、不固定分鐘，以分散共用 Sheets 的讀取尖峰。
 - 中央課綱索引依標頭定位欄位並驗證啟用值、來源組、年級、起訖日期與一般 Google Sheets `/edit` 連結；同一來源組的列必須使用相同年級與日期，試算表不得重複。
 - 課綱只以課表的原始課程名稱一字不差對應工作表分頁名稱，再以日期與節次起訖配對；不得使用分頁內「中文名稱」、標題正規化或模糊比對作 fallback。
 - 課綱找不到精確分頁時可回報只差空白／全形字元的近似名稱，但不得自動套用；跨校課程不列入缺頁錯誤。
@@ -125,7 +125,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 - 設定、狀態、通知狀態、受管理事件狀態與課綱最後成功快照儲存在 Script Properties；大型 JSON 會依 UTF-8 位元組切成每塊至多 7,500 bytes。分塊寫入以同一份 Properties 快照同時計算舊分塊數與容量，不再為舊計數增加一次服務呼叫。事件簽章只保存短雜湊、異動明細設上限、超過 120 天的歷史索引會移除，預估總量超過 430 KiB 時停止寫入。課綱快照以版本化 staging 寫入，完整驗證後才切換 active pointer，失敗不得覆蓋上一版。
 - 每份 Google Docs 控制臺副本支援一個年級、一個通知信箱與一個專用 Calendar；拒絕使用主要 Calendar。通用程式的 `DEFAULT_SETTINGS` 不得內含測試使用者 Email、選課、Calendar ID 或預設年級；匯入前也不得讀課表、建立 Calendar、建立觸發器、同步、修復或刪除。
 - Production 通用程式固定不含高負載測試函式與選單。開發者只有在執行 `scripts/generate-google-docs-control-panel.js --test-build` 時才會建立測試 artifact；測試版仍以單一「模擬控制臺首次同步」情境沿用正式分批、背景續跑與 watchdog 路徑。
-- 控制臺不提供同步時段選項；`autoSyncHours` 固定保存 `[3, 11, 18, 21]`，`instantNotificationsEnabled` 保存即時通知開關，`notificationHours` 保留使用者關閉即時通知後使用的自訂時間。讀取舊版設定時，會先把既有 `autoSyncHours` 遷移為 `notificationHours`，再套用固定同步時段；沒有新欄位的安裝預設開啟即時通知。
+- 控制臺不提供同步時段選項；`autoSyncHours` 固定保存四個窗口中心 `[3, 11, 18, 21]`，實際課表讀取時間由每份 Apps Script 副本固定分配在各中心前後一小時內。`instantNotificationsEnabled` 保存即時通知開關，`notificationHours` 保留使用者關閉即時通知後使用的自訂時間。讀取舊版設定時，會先把既有 `autoSyncHours` 遷移為 `notificationHours`，再套用固定同步窗口；沒有新欄位的安裝預設開啟即時通知。
 - 刪除工具只處理已儲存的事件 ID，並驗證管理標記；「移除受管理事件」與「重設同步狀態」會持有同一把 Script Lock 完成背景工作檢查與變更，避免檢查後才開始同步的競態。
 - `quickDeleteAllCalendarEvents()` 保持由 `ALLOW_QUICK_DELETE_ALL = false` 停用。
 - 使用者輸入透過 `JSON.stringify` 與 U+2028／U+2029 escaping 安全序列化，不得將使用者字串直接串接進可執行程式碼。

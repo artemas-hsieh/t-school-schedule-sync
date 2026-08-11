@@ -126,7 +126,7 @@ node scripts/generate-google-docs-control-panel.js \
 - 課綱索引與分頁只能使用 Sheets v4 的 `Spreadsheets.get` metadata 與 `Values.batchGet` 唯讀方法；每份試算表只取一次 metadata，並批次讀取實際命中的分頁。空表仍保留原錯誤，API 的零起算合併範圍仍能向下展開；每張課綱分頁的日期候選只去重一次。
 - 既有 `retryScheduledNotificationDelivery` 在每日排程重整及關閉後續自動同步時都必須保留同一 Trigger ID；已保存的通知寄出後才清除 request、佇列與 retry。
 - 通知版型只保留標準版本，沒有句號、單側厚色框或可自訂通知格式；標籤使用直角，底部只保留指定的自動寄送說明。
-- 課表偵測與 Calendar 同步固定建立 03:00、11:00、18:00、21:00 四個 `atHour(hour).nearMinute(0)` Trigger，不得隨通知偏好改變。即時通知開啟時只另建立 06:00 每日摘要 Trigger；關閉時才依使用者選擇的每個通知時間建立獨立 Trigger。
+- 課表偵測與 Calendar 同步以 03:00、11:00、18:00、21:00 為四個中心；同一份 Apps Script 副本每次重建時應取得相同的中心分鐘，並預留 `nearMinute` 約 ±15 分鐘誤差，使實際執行維持在各中心前後一小時內，不得隨通知偏好改變。即時通知開啟時只另建立 06:00、`nearMinute(0)` 的每日摘要 Trigger；關閉時才依使用者選擇的每個通知時間建立同精度的獨立 Trigger。
 - 即時通知開啟時，固定同步偵測到行程調整並完整套用 Calendar 後應立即嘗試寄出；失敗時必須保留異動並排程重試。關閉時，設定時間外只排入佇列；後續無新異動的同步不得清除先前待寄的行程調整。通知 Trigger 與背景同步重疊時必須延後重試；錯誤與「行程同步設定完成」通知可立即寄出。
 - 即時通知開啟時，06:00 才可寄每日成功摘要；關閉時則由最後一個自訂通知時間寄出。當日已有行程調整時只寄行程調整通知。
 - 即時通知成功後必須立即清除 `pendingChangeData`；排程通知與同步工作以 active job 檢查及同一 Script Lock 串行，普通重疊不得重寄。同時保留「寄信成功但狀態提交失敗」無法跨兩個 Google 服務達成嚴格 exactly-once 的既有限制，優先避免遺失通知。

@@ -646,6 +646,7 @@
         if (value) setSyncMenuOpen(false);
         byId('loading').hidden = !value;
         byId('loading-label').textContent = label || '處理中…';
+        byId('loading-label').hidden = Boolean(showProgress);
         byId('loader-track').hidden = Boolean(showProgress);
         byId('sync-progress').hidden = !showProgress;
         byId('sync-progress-warning').hidden = !(value && showProgress && requiresSidebarOpen);
@@ -730,7 +731,7 @@
         var pollGeneration = syncProgressPollGeneration;
         activeSyncJobId = '';
         lastSyncProgressPercent = 0;
-        renderSyncProgress({ percent: 1, message: label || '正在準備同步…' });
+        renderSyncProgress({ percent: 0, message: label || '正在準備同步（可能需等待 0–10 分鐘）' });
         setBusy(true, '正在同步行程', true, true);
         stopSyncProgressPolling();
         scheduleSyncProgressPoll(1000, pollGeneration);
@@ -1102,8 +1103,8 @@
             if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
             startSyncProgress(
               model && model.settings && !model.settings.setupComplete
-                ? '正在準備未來 30 天的課綱資料…'
-                : '正在儲存設定並準備同步…'
+                ? '正在準備未來 30 天的課綱資料（可能需等待 0–10 分鐘）'
+                : '正在儲存設定並準備同步（可能需等待 0–10 分鐘）'
             );
             if (model && model.settings && !model.settings.setupComplete) {
               var outlinePreparation = await server(
@@ -1115,7 +1116,10 @@
               }
             }
             settings.syncApprovalToken = preview.approvalToken || '';
-            renderSyncProgress({ percent: 1, message: '正在儲存設定並準備同步…' });
+            renderSyncProgress({
+              percent: 0,
+              message: '正在儲存設定並準備同步（可能需等待 0–10 分鐘）'
+            });
           }
           var result = await server(runSync ? 'saveSettingsAndSyncFromUi' : 'saveSettingsFromUi', settings);
           renderUiResult(result);
@@ -1295,8 +1299,20 @@
       document.addEventListener('click', function (event) {
         if (!event.target.closest('.sync-actions')) setSyncMenuOpen(false);
       });
-      byId('run-sync').addEventListener('click', function () { runAction('runSyncFromUi', '正在同步行程…', true); });
-      byId('repair-sync').addEventListener('click', function () { runAction('forceRepairFromUi', '正在檢查並修復事件…', true); });
+      byId('run-sync').addEventListener('click', function () {
+        runAction(
+          'runSyncFromUi',
+          '正在讀取課表並準備同步（可能需等待 0–10 分鐘）',
+          true
+        );
+      });
+      byId('repair-sync').addEventListener('click', function () {
+        runAction(
+          'forceRepairFromUi',
+          '正在讀取課表並準備修復（可能需等待 0–10 分鐘）',
+          true
+        );
+      });
       byId('create-calendar').addEventListener('click', async function () {
         var calendarName = byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade());
         setBusy(true, '正在建立專用日曆…');
