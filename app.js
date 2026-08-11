@@ -131,7 +131,6 @@ const state = {
   sourceSummary: null,
   sourceLoading: false,
   sourceError: null,
-  expiredSourceAcknowledgedFingerprint: '',
   requestId: 0,
   generatedCodeReady: false,
   emailSetupTransferEnabled: false,
@@ -159,7 +158,6 @@ const elements = {
   sourceStatus: document.querySelector('#source-status'),
   sourceStatusTitle: document.querySelector('#source-status-title'),
   sourceStatusDetail: document.querySelector('#source-status-detail'),
-  sourceExpiredConfirm: document.querySelector('#source-expired-confirm'),
   sourceRefresh: document.querySelector('#source-refresh'),
   settingsSummary: document.querySelector('#settings-summary'),
   stageMenu: document.querySelector('#stage-menu'),
@@ -405,13 +403,6 @@ function bindEvents() {
     const grade = getCurrentGrade();
     if (grade) loadGradeSchedule(grade, { force: true });
   });
-  elements.sourceExpiredConfirm?.addEventListener('click', () => {
-    if (!state.sourceSummary || state.sourceSummary.sourceHealth?.status !== 'expired') return;
-    state.expiredSourceAcknowledgedFingerprint =
-      state.sourceSummary.sourceRevisionFingerprint || state.sourceSummary.coverageFingerprint || '';
-    renderSourceStatus();
-    updateOutput();
-  });
 }
 
 function updateCourseSearchAction() {
@@ -447,10 +438,6 @@ async function loadGradeSchedule(gradeName, options) {
   const cached = state.sourceByGrade.get(gradeName);
 
   if (cached && !force) {
-    if ((cached.summary.sourceRevisionFingerprint || cached.summary.coverageFingerprint || '') !==
-        state.expiredSourceAcknowledgedFingerprint) {
-      state.expiredSourceAcknowledgedFingerprint = '';
-    }
     state.sourceSummary = cached.summary;
     state.sourceError = null;
     renderSourceStatus();
@@ -469,20 +456,12 @@ async function loadGradeSchedule(gradeName, options) {
 
   try {
     const payload = await window.TSchoolScheduleData.fetchGradeSchedule(gradeName);
-    const summary = window.TSchoolScheduleData.summarizePayload(
-      payload,
-      new Date(),
-      window.TSchoolScheduleData.GRADE_API_NAMES[gradeName]
-    );
+    const summary = window.TSchoolScheduleData.summarizePayload(payload, new Date());
 
     if (requestId !== state.requestId) {
       return;
     }
 
-    if ((summary.sourceRevisionFingerprint || summary.coverageFingerprint || '') !==
-        state.expiredSourceAcknowledgedFingerprint) {
-      state.expiredSourceAcknowledgedFingerprint = '';
-    }
     state.sourceByGrade.set(gradeName, { payload, summary });
     state.sourceSummary = summary;
   } catch (error) {
@@ -511,7 +490,6 @@ function announceGradeReady(gradeName) {
 }
 
 function renderSourceStatus() {
-  if (elements.sourceExpiredConfirm) elements.sourceExpiredConfirm.hidden = true;
   if (state.sourceLoading) {
     elements.sourceStatus.dataset.state = 'loading';
     elements.sourceStatusTitle.textContent = '正在讀取課表';
@@ -537,31 +515,9 @@ function renderSourceStatus() {
     return;
   }
 
-  if (state.sourceSummary.sourceHealth?.status === 'expired') {
-    const acknowledged = isExpiredSourceAcknowledged();
-    elements.sourceStatus.dataset.state = 'warning';
-    elements.sourceStatusTitle.textContent = acknowledged
-      ? `${getCurrentGrade()}舊課表已確認`
-      : `${getCurrentGrade()}課表目前沒有未來日期`;
-    elements.sourceStatusDetail.textContent = acknowledged
-      ? `資料只到 ${state.sourceSummary.lastDateKey}；設定碼仍會在控制臺再次確認`
-      : `資料只到 ${state.sourceSummary.lastDateKey}；確認後仍可查看並產生設定碼`;
-    if (elements.sourceExpiredConfirm) {
-      elements.sourceExpiredConfirm.hidden = acknowledged;
-    }
-    return;
-  }
-
   elements.sourceStatus.dataset.state = 'success';
   elements.sourceStatusTitle.textContent = `${getCurrentGrade()}課表可用`;
   elements.sourceStatusDetail.textContent = '系統將整理出對應的課程、活動給你選擇';
-}
-
-function isExpiredSourceAcknowledged() {
-  if (!state.sourceSummary || state.sourceSummary.sourceHealth?.status !== 'expired') return true;
-  const fingerprint = state.sourceSummary.sourceRevisionFingerprint ||
-    state.sourceSummary.coverageFingerprint || '';
-  return Boolean(fingerprint && fingerprint === state.expiredSourceAcknowledgedFingerprint);
 }
 
 function initMobileOutput() {
@@ -1082,13 +1038,6 @@ function getSettings() {
       firstDateKey: summary.firstDateKey,
       lastDateKey: summary.lastDateKey,
       sourceUpdatedLabel: summary.updateValues[summary.updateValues.length - 1] || '',
-      coverageFingerprintVersion: summary.coverageFingerprintVersion || 0,
-      coverageFingerprint: summary.coverageFingerprint || '',
-      sourceRevisionFingerprintVersion: summary.sourceRevisionFingerprintVersion || 0,
-      sourceRevisionFingerprint: summary.sourceRevisionFingerprint || '',
-      dateKeys: summary.dateKeys || [],
-      weekSignatures: summary.weekSignatures || [],
-      sourceHealth: summary.sourceHealth || { status: 'trusted', reasons: [] },
       items: summary.catalog.all
     } : null
   };
@@ -1116,14 +1065,6 @@ function updateOutput() {
 async function generateOutput() {
   const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
   if (!ready) {
-    updateGeneratedCodeAvailability(false);
-    return false;
-  }
-
-  if (!isExpiredSourceAcknowledged()) {
-    renderSourceStatus();
-    elements.sourceExpiredConfirm?.focus({ preventScroll: false });
-    showToast('這份課表沒有未來日期，請先確認後再產生設定碼');
     updateGeneratedCodeAvailability(false);
     return false;
   }

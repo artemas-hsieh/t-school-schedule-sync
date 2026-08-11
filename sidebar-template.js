@@ -763,22 +763,16 @@
         updateConditionalFields();
         var needsTermSelection = Boolean(data.termTransition && data.termTransition.required);
         var sourceUnavailable = Boolean(data.source && data.source.unavailable);
-        var sourceUntrusted = Boolean(data.source && data.source.sourceHealth && data.source.sourceHealth.status === 'untrusted');
-        var sourceExpired = Boolean(data.source && data.source.sourceHealth && data.source.sourceHealth.status === 'expired');
-        byId('top-status').dataset.state = !needsTermSelection && !sourceUnavailable && !sourceUntrusted && !sourceExpired && data.status && data.status.ok
+        byId('top-status').dataset.state = !needsTermSelection && !sourceUnavailable && data.status && data.status.ok
           ? 'success'
           : 'attention';
         byId('top-status').textContent = needsTermSelection
           ? '待重新選課'
           : (sourceUnavailable
             ? '課表來源暫時離線'
-          : (sourceUntrusted
-            ? '課表來源需檢查'
-          : (sourceExpired
-            ? '課表沒有未來日期'
           : (data.status && data.status.ok
             ? '狀態正常'
-            : (settings.setupComplete ? '需檢查狀態' : '待首次同步')))));
+            : (settings.setupComplete ? '需檢查狀態' : '待首次同步')));
         byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
           ? '完成選課並同步'
@@ -816,51 +810,41 @@
         if (!model || busy) return;
         var requiresSelection = Boolean(model.termTransition && model.termTransition.required);
         var sourceUnavailable = Boolean(model.source && model.source.unavailable);
-        var sourceUntrusted = Boolean(model.source && model.source.sourceHealth && model.source.sourceHealth.status === 'untrusted');
-        var sourceExpired = Boolean(model.source && model.source.sourceHealth && model.source.sourceHealth.status === 'expired');
-        var sourceBlocked = sourceUnavailable || sourceUntrusted;
         var missingSelection = requiresSelection && selectedCourses.size === 0;
         var missingGradeConfirmation = requiresSelection && !byId('term-grade-confirmed').checked;
         ['save', 'save-sync'].forEach(function (id) {
           var button = byId(id);
-          button.disabled = missingSelection || missingGradeConfirmation || sourceBlocked;
+          button.disabled = missingSelection || missingGradeConfirmation || sourceUnavailable;
           button.dataset.validationDisabled = String(
-            missingSelection || missingGradeConfirmation || sourceBlocked
+            missingSelection || missingGradeConfirmation || sourceUnavailable
           );
         });
         ['run-sync', 'repair-sync'].forEach(function (id) {
           var button = byId(id);
-          button.disabled = requiresSelection || sourceBlocked;
-          button.dataset.validationDisabled = String(requiresSelection || sourceBlocked);
+          button.disabled = requiresSelection || sourceUnavailable;
+          button.dataset.validationDisabled = String(requiresSelection || sourceUnavailable);
         });
-        byId('sync-menu-toggle').disabled = requiresSelection || sourceBlocked;
-        byId('sync-menu-toggle').dataset.validationDisabled = String(requiresSelection || sourceBlocked);
-        byId('create-calendar').disabled = sourceBlocked || sourceExpired;
-        byId('create-calendar').dataset.validationDisabled = String(sourceBlocked || sourceExpired);
+        byId('sync-menu-toggle').disabled = requiresSelection || sourceUnavailable;
+        byId('sync-menu-toggle').dataset.validationDisabled = String(requiresSelection || sourceUnavailable);
+        byId('create-calendar').disabled = sourceUnavailable;
+        byId('create-calendar').dataset.validationDisabled = String(sourceUnavailable);
         Array.prototype.forEach.call(
           document.querySelectorAll('input[name="grade"]'),
-          function (input) { input.disabled = sourceBlocked; }
+          function (input) { input.disabled = sourceUnavailable; }
         );
         Array.prototype.forEach.call(
           document.querySelectorAll('[data-keep],[data-remove]'),
-          function (button) { button.disabled = sourceBlocked; }
+          function (button) { button.disabled = sourceUnavailable; }
         );
-        if (requiresSelection || sourceBlocked) setSyncMenuOpen(false);
+        if (requiresSelection || sourceUnavailable) setSyncMenuOpen(false);
       }
 
       function renderSource(source) {
         var health = byId('source-health');
-        var healthStatus = source.sourceHealth && source.sourceHealth.status || 'trusted';
-        health.dataset.state = source.unavailable || healthStatus === 'untrusted'
-          ? 'error'
-          : (source.warning || healthStatus === 'expired' ? 'warning' : 'success');
+        health.dataset.state = source.unavailable ? 'error' : (source.warning ? 'warning' : 'success');
         byId('source-title').textContent = source.unavailable
           ? source.gradeName + '課表來源暫時無法連線'
-          : (healthStatus === 'untrusted'
-            ? source.gradeName + '課表範圍比上次成功版本更少'
-            : (healthStatus === 'expired'
-              ? source.gradeName + '課表目前沒有未來日期'
-              : source.gradeName + '課表可用'));
+          : source.gradeName + '課表可用';
         var dateRange = source.firstDate
           ? source.firstDate + (source.lastDate ? '–' + source.lastDate : '') + ' · '
           : '';
@@ -868,11 +852,7 @@
         byId('source-detail').textContent = source.unavailable
           ? (source.unavailableMessage || '目前顯示上次可用摘要，恢復連線後才能儲存或同步。') +
             (summary ? ' ' + summary : '')
-          : (healthStatus === 'untrusted'
-            ? '同步已停止，既有日曆不會變動。請稍後重新讀取完整課表。 ' + summary
-            : (healthStatus === 'expired'
-              ? '資料只到 ' + source.lastDate + '；同步前會再次列出變更並要求確認。 ' + summary
-              : summary));
+          : summary;
       }
 
       function normalizeNotifyHours(hours) {
@@ -1118,8 +1098,8 @@
         try {
           if (runSync) {
             var preview = await server('previewSettingsImpactFromUi', settings);
-            var previewMessage = buildSyncConfirmationMessage(preview);
-            if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged || preview.requiresApproval) && !window.confirm(previewMessage)) return;
+            var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
+            if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
             startSyncProgress(
               model && model.settings && !model.settings.setupComplete
                 ? '正在準備未來 30 天的課綱資料…'
@@ -1134,7 +1114,7 @@
                 showToast(outlinePreparation.message);
               }
             }
-            settings.syncApprovalId = preview.approvalId || '';
+            settings.syncApprovalToken = preview.approvalToken || '';
             renderSyncProgress({ percent: 1, message: '正在儲存設定並準備同步…' });
           }
           var result = await server(runSync ? 'saveSettingsAndSyncFromUi' : 'saveSettingsFromUi', settings);
@@ -1155,32 +1135,13 @@
         }
       }
 
-      function buildSyncConfirmationMessage(preview) {
-        var lines = [];
-        if (preview.calendarChanged) lines.push('將搬移至新的專用日曆。');
-        if ((preview.approvalReasons || []).indexOf('EXPIRED_SOURCE') !== -1) {
-          lines.push('這份課表沒有未來日期，繼續後可能沒有任何新行程。');
-        }
-        if ((preview.approvalReasons || []).indexOf('BULK_DELETION') !== -1) {
-          lines.push('這次會移除至少 40% 的受管理未來事件。');
-        }
-        lines.push('預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。');
-        lines.push('私人事件不會受影響。');
-        lines.push(preview.requiresApproval ? '這次確認只能使用一次，且 10 分鐘後失效。' : '');
-        lines.push('是否套用？');
-        return lines.filter(Boolean).join('\n\n');
-      }
-
-      async function runAction(method, label, trackProgress, reason) {
+      async function runAction(method, label, trackProgress) {
         if (busy) return;
         var keepPolling = false;
-        setBusy(true, '正在計算變更…');
+        if (trackProgress) startSyncProgress(label);
+        else setBusy(true, label);
         try {
-          var preview = await server('previewSyncImpactFromUi', reason || 'manual');
-          if ((preview.created || preview.updated || preview.deleted || preview.requiresApproval) &&
-              !window.confirm(buildSyncConfirmationMessage(preview))) return;
-          if (trackProgress) startSyncProgress(label);
-          var result = await server(method, { approvalId: preview.approvalId || '' });
+          var result = await server(method, null);
           renderUiResult(result);
           if (result.pending) {
             keepPolling = true;
@@ -1334,8 +1295,8 @@
       document.addEventListener('click', function (event) {
         if (!event.target.closest('.sync-actions')) setSyncMenuOpen(false);
       });
-      byId('run-sync').addEventListener('click', function () { runAction('runSyncFromUi', '正在同步行程…', true, 'manual'); });
-      byId('repair-sync').addEventListener('click', function () { runAction('forceRepairFromUi', '正在檢查並修復事件…', true, 'repair'); });
+      byId('run-sync').addEventListener('click', function () { runAction('runSyncFromUi', '正在同步行程…', true); });
+      byId('repair-sync').addEventListener('click', function () { runAction('forceRepairFromUi', '正在檢查並修復事件…', true); });
       byId('create-calendar').addEventListener('click', async function () {
         var calendarName = byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade());
         setBusy(true, '正在建立專用日曆…');

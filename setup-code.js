@@ -50,34 +50,12 @@
     })).filter(item => item.title);
 
     if (!cleanItems.length) return null;
-    const snapshot = {
+    return {
       firstDateKey: String(source.firstDateKey || ''),
       lastDateKey: String(source.lastDateKey || ''),
       sourceUpdatedLabel: String(source.sourceUpdatedLabel || ''),
       items: cleanItems
     };
-    if (Number(source.coverageFingerprintVersion) && source.coverageFingerprint) {
-      snapshot.coverageFingerprintVersion = Number(source.coverageFingerprintVersion);
-      snapshot.coverageFingerprint = String(source.coverageFingerprint);
-      snapshot.dateKeys = (Array.isArray(source.dateKeys) ? source.dateKeys : [])
-        .slice(0, 500)
-        .map(value => String(value || ''))
-        .filter(Boolean);
-      snapshot.weekSignatures = (Array.isArray(source.weekSignatures) ? source.weekSignatures : [])
-        .slice(0, 100)
-        .map(value => Array.isArray(value) ? value.slice(0, 3).map(part => String(part || '')) : [])
-        .filter(value => value.length === 3);
-    }
-    if (Number(source.sourceRevisionFingerprintVersion) && source.sourceRevisionFingerprint) {
-      snapshot.sourceRevisionFingerprintVersion = Number(source.sourceRevisionFingerprintVersion);
-      snapshot.sourceRevisionFingerprint = String(source.sourceRevisionFingerprint);
-    }
-    if (source.sourceHealth) {
-      snapshot.sourceHealth = source.sourceHealth.status === 'expired'
-        ? { status: 'expired', reasons: ['NO_FUTURE_DATES'] }
-        : { status: 'trusted', reasons: [] };
-    }
-    return snapshot;
   }
 
   function makePayload(settings, options) {

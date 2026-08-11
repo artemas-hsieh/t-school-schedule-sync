@@ -768,10 +768,6 @@ textarea::placeholder {
   background: #e2f3ec;
 }
 
-.source-status[data-state="warning"] {
-  background: var(--surface-loading);
-}
-
 .source-status[data-state="error"] {
   background: #fae3df;
 }
@@ -788,10 +784,6 @@ textarea::placeholder {
 
 .source-status[data-state="success"] .source-status-indicator {
   background: var(--sync);
-}
-
-.source-status[data-state="warning"] .source-status-indicator {
-  background: var(--shift);
 }
 
 .source-status[data-state="error"] .source-status-indicator {
@@ -817,31 +809,6 @@ textarea::placeholder {
 .source-note {
   color: var(--ink-soft);
   font-size: 0.76rem;
-}
-
-.source-status-action {
-  width: max-content;
-  min-height: 36px;
-  margin-top: var(--space-2);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--shift);
-  border-radius: var(--radius-control);
-  background: var(--paper-bright);
-  color: var(--ink);
-  cursor: pointer;
-  font-size: var(--text-small, 0.8125rem);
-  font-weight: 700;
-  transition: box-shadow 160ms var(--ease-out), transform 160ms var(--ease-out);
-}
-
-.source-status-action:hover {
-  box-shadow: var(--shadow-small);
-  transform: translate(-1px, -1px);
-}
-
-.source-status-action:active {
-  box-shadow: none;
-  transform: translate(1px, 1px);
 }
 
 .source-note {
@@ -2068,10 +2035,6 @@ textarea::placeholder {
 
 .source-status[data-state="success"] {
   background: var(--surface-green);
-}
-
-.source-status[data-state="warning"] {
-  background: var(--surface-loading);
 }
 
 .source-status[data-state="error"] {
