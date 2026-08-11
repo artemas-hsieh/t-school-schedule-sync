@@ -1,0 +1,356 @@
+{
+  "currentGrade": "二年級",
+  "weekDataList": [
+    {
+      "week": 1,
+      "date": "7/20"
+    }
+  ],
+  "tableData": [
+    {
+      "isHeader": true,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "週次"
+        },
+        {
+          "value": "日期"
+        },
+        {
+          "value": "(7/20)"
+        },
+        {
+          "value": "(7/21)"
+        },
+        {
+          "value": "(7/22)"
+        },
+        {
+          "value": "(7/23)"
+        },
+        {
+          "value": "(7/24)"
+        },
+        {
+          "value": "(7/25)"
+        },
+        {
+          "value": "(7/26)"
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "09:00~10:00"
+        },
+        {
+          "value": "1"
+        },
+        {
+          "value": "測試課程",
+          "day": 1,
+          "period": 1,
+          "rowSpan": 1
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "10:00~11:00"
+        },
+        {
+          "value": "2"
+        },
+        {
+          "value": "測試課程",
+          "day": 1,
+          "period": 2,
+          "rowSpan": 1
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "11:00~12:00"
+        },
+        {
+          "value": "3"
+        },
+        {
+          "value": "測試課程",
+          "day": 1,
+          "period": 3,
+          "rowSpan": 1
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "12:00~13:00"
+        },
+        {
+          "value": "4"
+        },
+        {
+          "value": "測試課程",
+          "day": 1,
+          "period": 4,
+          "rowSpan": 1
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "13:00~14:00"
+        },
+        {
+          "value": "5"
+        },
+        {
+          "value": "測試課程",
+          "day": 1,
+          "period": 5,
+          "rowSpan": 1
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "14:00~15:00"
+        },
+        {
+          "value": "6"
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "15:00~16:00"
+        },
+        {
+          "value": "7"
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "16:00~17:00"
+        },
+        {
+          "value": "8"
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        }
+      ]
+    },
+    {
+      "isHeader": false,
+      "weekNum": "1",
+      "cells": [
+        {
+          "value": "備註"
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": "全校活動"
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": ""
+        },
+        {
+          "value": "更新時間 20260720"
+        }
+      ]
+    }
+  ]
+}

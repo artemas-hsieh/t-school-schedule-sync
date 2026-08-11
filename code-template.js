@@ -972,6 +972,8 @@ const EMAIL_LINK_ALLOWED_HOSTS = ['calendar.google.com', 'docs.google.com'];
 const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
 const SETUP_SOURCE_CONTEXT_STORE = 'TSCHOOL_SETUP_SOURCE_CONTEXT';
 const SOURCE_UI_CACHE_STORE = 'TSCHOOL_SOURCE_UI_CACHE';
+const SOURCE_ACCEPTED_BASELINE_STORE = 'TSCHOOL_SOURCE_ACCEPTED_BASELINE';
+const SYNC_APPROVAL_STORE = 'TSCHOOL_SYNC_APPROVAL';
 const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
 const SYNC_JOB_STORE = 'TSCHOOL_SYNC_JOB';
 const STATUS_STORE = 'TSCHOOL_STATUS';
@@ -996,6 +998,7 @@ const SYNC_CONTINUATION_DELAY_MS = 60 * 1000;
 const SYNC_RETRY_DELAY_MS = 2 * 60 * 1000;
 const SYNC_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
 const SYNC_RUNNING_STALE_MS = 4 * 60 * 1000;
+const SYNC_APPROVAL_TTL_MS = 10 * 60 * 1000;
 const SYNC_CHANGE_DETAIL_LIMIT = 100;
 const SYNC_STATE_PAST_RETENTION_DAYS = 120;
 const SCRIPT_PROPERTY_CHUNK_SAFE_BYTES = 7500;
@@ -1048,6 +1051,9 @@ const SETUP_CODE_MAX_LENGTH = 32 * 1024;
 const SETUP_CATALOG_FINGERPRINT_VERSION = 1;
 const SETUP_CONTEXT_FINGERPRINT_VERSION = 1;
 const SCHEDULE_FINGERPRINT_VERSION = 1;
+const SOURCE_COVERAGE_FINGERPRINT_VERSION = 1;
+const SOURCE_REVISION_FINGERPRINT_VERSION = 1;
+const SOURCE_ACCEPTED_BASELINE_SCHEMA_VERSION = 1;
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const MANUAL_MERGE_EXCEPTIONS = {};
@@ -1366,6 +1372,15 @@ function saveSourceUiCacheSafely_(source) {
     catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
     catalogFingerprint: String(source.catalogFingerprint || ''),
     scheduleFingerprint: String(source.scheduleFingerprint || ''),
+    coverageFingerprintVersion: Number(source.coverageFingerprintVersion) || 0,
+    coverageFingerprint: String(source.coverageFingerprint || ''),
+    sourceRevisionFingerprintVersion: Number(source.sourceRevisionFingerprintVersion) || 0,
+    sourceRevisionFingerprint: String(source.sourceRevisionFingerprint || ''),
+    dateKeys: uniqueStrings_(source.dateKeys || []),
+    weekSignatures: (source.weekSignatures || []).map(value =>
+      Array.isArray(value) ? value.slice(0, 3).map(part => String(part || '')) : []
+    ).filter(value => value.length === 3),
+    sourceHealth: source.sourceHealth || { status: 'trusted', reasons: [], futureDateCount: 0 },
     sourceUpdatedLabel: String(source.sourceUpdatedLabel || ''),
     sourceStale: Boolean(source.sourceStale),
     catalog: {
@@ -1387,6 +1402,105 @@ function saveSourceUiCacheSafely_(source) {
     Logger.log('無法更新控制臺課表備援摘要：' + userFacingError_(error));
     return false;
   }
+}
+
+function makeAcceptedSourceBaseline_(source) {
+  return {
+    schemaVersion: SOURCE_ACCEPTED_BASELINE_SCHEMA_VERSION,
+    gradeName: String(source && source.gradeName || ''),
+    termKey: String(source && source.termKey || ''),
+    firstDateKey: String(source && source.firstDateKey || ''),
+    lastDateKey: String(source && source.lastDateKey || ''),
+    dateKeys: uniqueStrings_(source && source.dateKeys || []),
+    weekSignatures: (source && source.weekSignatures || []).map(value =>
+      Array.isArray(value) ? value.slice(0, 3).map(part => String(part || '')) : []
+    ).filter(value => value.length === 3),
+    coverageFingerprintVersion: Number(source && source.coverageFingerprintVersion) || 0,
+    coverageFingerprint: String(source && source.coverageFingerprint || ''),
+    sourceRevisionFingerprintVersion: Number(source && source.sourceRevisionFingerprintVersion) || 0,
+    sourceRevisionFingerprint: String(source && source.sourceRevisionFingerprint || ''),
+    acceptedAt: new Date().toISOString()
+  };
+}
+
+function saveAcceptedSourceBaseline_(source) {
+  writeChunkedJson_(SOURCE_ACCEPTED_BASELINE_STORE, makeAcceptedSourceBaseline_(source));
+}
+
+function rangesOverlap_(leftFirst, leftLast, rightFirst, rightLast) {
+  return Boolean(leftFirst && leftLast && rightFirst && rightLast &&
+    leftFirst <= rightLast && rightFirst <= leftLast);
+}
+
+function assessSourceForSync_(source, settings, oldState, now) {
+  const todayKey = formatDateKey_(now || scheduleBusinessNow_());
+  const reasons = [];
+  const liveDateKeys = uniqueStrings_(source && source.dateKeys || []);
+  const liveDateSet = {};
+  liveDateKeys.forEach(dateKey => { liveDateSet[dateKey] = true; });
+  let baseline = readChunkedJson_(SOURCE_ACCEPTED_BASELINE_STORE, null);
+
+  if (!baseline || baseline.gradeName !== source.gradeName) {
+    const setupBaseline = readChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, null);
+    baseline = setupBaseline && setupBaseline.gradeName === source.gradeName
+      ? setupBaseline
+      : null;
+  }
+
+  if (baseline && baseline.termKey === source.termKey) {
+    if (baseline.lastDateKey && source.lastDateKey < baseline.lastDateKey) {
+      reasons.push('COVERAGE_REGRESSION');
+    }
+    uniqueStrings_(baseline.dateKeys || [])
+      .filter(dateKey => dateKey >= todayKey)
+      .forEach(dateKey => {
+        if (!liveDateSet[dateKey]) reasons.push('COVERAGE_REGRESSION');
+      });
+  } else if (baseline && baseline.termKey && source.termKey &&
+      rangesOverlap_(
+        baseline.firstDateKey,
+        baseline.lastDateKey,
+        source.firstDateKey,
+        source.lastDateKey
+      )) {
+    reasons.push('AMBIGUOUS_TERM');
+  }
+
+  if ((!baseline || baseline.termKey === source.termKey) &&
+      (!settings || !settings.termKey || settings.termKey === source.termKey)) {
+    const managedFutureDates = uniqueStrings_(Object.keys(oldState || {})
+      .map(key => oldState[key] && oldState[key].dateKey || '')
+      .filter(dateKey => dateKey >= todayKey));
+    managedFutureDates.forEach(dateKey => {
+      if (!liveDateSet[dateKey]) reasons.push('COVERAGE_REGRESSION');
+    });
+  }
+
+  const uniqueReasons = uniqueStrings_(reasons);
+  if (uniqueReasons.length) {
+    return { status: 'untrusted', reasons: uniqueReasons, futureDateCount: 0 };
+  }
+  const intrinsic = source && source.sourceHealth || { status: 'trusted', reasons: [] };
+  const futureDateCount = liveDateKeys.filter(dateKey => dateKey >= todayKey).length;
+  if (intrinsic.status === 'expired' || !futureDateCount) {
+    return { status: 'expired', reasons: ['NO_FUTURE_DATES'], futureDateCount: 0 };
+  }
+  return {
+    status: 'trusted',
+    reasons: [],
+    futureDateCount
+  };
+}
+
+function assertSourceCanSync_(assessment) {
+  if (!assessment || assessment.status !== 'untrusted') return;
+  const reason = assessment.reasons && assessment.reasons.indexOf('AMBIGUOUS_TERM') !== -1
+    ? '課表日期與既有學期重疊，但學期識別不同'
+    : '課表的未來日期或週次比上次成功版本更少';
+  throw new Error(
+    '[ACTION_REQUIRED] ' + reason + '，系統已停止同步以保護既有日曆。' +
+    '請稍後重新讀取來源，確認學校課表完整後再試。'
+  );
 }
 
 function loadSourceUiFallback_(settings, sourceError) {
@@ -1544,6 +1658,22 @@ function normalizeSetupSourceContext_(source, gradeName) {
     termKey: String(source.termKey || ''),
     catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
     catalogFingerprint: String(source.catalogFingerprint || source.fingerprint || ''),
+    coverageFingerprintVersion: Number(source.coverageFingerprintVersion) || 0,
+    coverageFingerprint: String(source.coverageFingerprint || ''),
+    sourceRevisionFingerprintVersion: Number(source.sourceRevisionFingerprintVersion) || 0,
+    sourceRevisionFingerprint: String(source.sourceRevisionFingerprint || ''),
+    dateKeys: uniqueStrings_((Array.isArray(source.dateKeys) ? source.dateKeys : [])
+      .map(value => String(value || ''))),
+    weekSignatures: (Array.isArray(source.weekSignatures) ? source.weekSignatures : [])
+      .map(value => Array.isArray(value) ? value.slice(0, 3).map(part => String(part || '')) : [])
+      .filter(value => value.length === 3),
+    sourceHealth: source.sourceHealth && source.sourceHealth.status === 'expired'
+      ? { status: 'expired', reasons: ['NO_FUTURE_DATES'], futureDateCount: 0 }
+      : {
+        status: 'trusted',
+        reasons: [],
+        futureDateCount: Number(source.sourceHealth && source.sourceHealth.futureDateCount) || 0
+      },
     events: [],
     initialSetupSnapshot: true
   };
@@ -1558,6 +1688,28 @@ function normalizeSetupSourceContext_(source, gradeName) {
     }
   } else if (normalized.catalogFingerprintVersion !== 0) {
     throw new Error('設定碼的課表摘要版本無法辨識，請回網站重新產生。');
+  }
+  if (normalized.coverageFingerprintVersion) {
+    const expectedCoverageFingerprint = hashText_(JSON.stringify([
+      'source-coverage',
+      SOURCE_COVERAGE_FINGERPRINT_VERSION,
+      normalized.dateKeys,
+      normalized.weekSignatures
+    ]));
+    if (normalized.coverageFingerprintVersion !== SOURCE_COVERAGE_FINGERPRINT_VERSION) {
+      throw new Error('設定碼的課表涵蓋版本無法辨識，請回網站重新產生。');
+    }
+    if (!normalized.dateKeys.length ||
+        normalized.dateKeys.some(dateKey => !/^\\d{4}-\\d{2}-\\d{2}$/.test(dateKey))) {
+      throw new Error('設定碼的課表日期涵蓋範圍無法辨識，請回網站重新產生。');
+    }
+    if (normalized.coverageFingerprint !== expectedCoverageFingerprint) {
+      throw new Error('設定碼的課表涵蓋指紋不一致，請回網站重新產生。');
+    }
+  }
+  if (normalized.sourceRevisionFingerprintVersion &&
+      normalized.sourceRevisionFingerprintVersion !== SOURCE_REVISION_FINGERPRINT_VERSION) {
+    throw new Error('設定碼的課表版本無法辨識，請回網站重新產生。');
   }
   normalized.setupContextFingerprint = makeSetupContextFingerprint_(normalized);
   if ((source.setupContextFingerprint || source.contextFingerprint) &&
@@ -1704,6 +1856,13 @@ function buildSetupSourceContextFromPayload_(payload) {
     lastDateKey,
     sourceUpdatedLabel,
     sourceStale: isSourceStale_(sourceUpdatedLabel, scheduleBusinessNow_()),
+    coverageFingerprintVersion: Number(snapshot.coverageFingerprintVersion) || 0,
+    coverageFingerprint: String(snapshot.coverageFingerprint || ''),
+    sourceRevisionFingerprintVersion: Number(snapshot.sourceRevisionFingerprintVersion) || 0,
+    sourceRevisionFingerprint: String(snapshot.sourceRevisionFingerprint || ''),
+    dateKeys: Array.isArray(snapshot.dateKeys) ? snapshot.dateKeys : [],
+    weekSignatures: Array.isArray(snapshot.weekSignatures) ? snapshot.weekSignatures : [],
+    sourceHealth: snapshot.sourceHealth || { status: 'trusted', reasons: [], futureDateCount: 0 },
     catalog: {
       all: catalogAll,
       courses: catalogAll.filter(item => item.type === 'course'),
@@ -1904,16 +2063,33 @@ function previewSettingsImpactFromUi(input) {
     previous.calendarId && previous.calendarId !== next.calendarId
   );
   const plan = buildSyncPlan_(oldState, desiredEvents, todayKey);
-  const approvalToken = makeSyncApprovalToken_(next, source, desiredEvents, plan);
+  const migrationDeletionCount = calendarChanged
+    ? countManagedFutureState_(oldState, todayKey)
+    : 0;
+  const sourceHealth = assessSourceForSync_(source, next, oldState, businessNow);
+  assertSourceCanSync_(sourceHealth);
+  const approvalReasons = [];
+  if (sourceHealth.status === 'expired') approvalReasons.push('EXPIRED_SOURCE');
+  if (isSuspiciousDeletionPlan_(plan, oldState) || migrationDeletionCount > 0) {
+    approvalReasons.push('BULK_DELETION');
+  }
+  const approval = approvalReasons.length
+    ? createSyncApproval_(next, source, desiredEvents, plan, oldState, approvalReasons, 'settings')
+    : null;
 
   if (calendarChanged) {
     return {
       calendarChanged: true,
       created: desiredEvents.length,
       updated: 0,
-      deleted: Object.keys(oldState).filter(key => oldState[key].dateKey >= todayKey).length,
+      deleted: migrationDeletionCount,
       unchanged: 0,
-      approvalToken
+      sourceHealth,
+      requiresApproval: Boolean(approval),
+      approvalReasons,
+      approvalId: approval && approval.approvalId || '',
+      approvalExpiresAt: approval && approval.expiresAt || '',
+      approvalToken: approval && approval.approvalId || ''
     };
   }
 
@@ -1926,7 +2102,63 @@ function previewSettingsImpactFromUi(input) {
     updated: plan.moved.length + changedExact,
     deleted: plan.deletions.length,
     unchanged: plan.exact.length - changedExact,
-    approvalToken
+    sourceHealth,
+    requiresApproval: Boolean(approval),
+    approvalReasons,
+    approvalId: approval && approval.approvalId || '',
+    approvalExpiresAt: approval && approval.expiresAt || '',
+    approvalToken: approval && approval.approvalId || ''
+  };
+}
+
+function previewSyncImpactFromUi(reason) {
+  const settings = loadSettings_();
+  assertSetupImported_(settings);
+  const source = loadSourceContext_(settings.gradeName);
+  const businessNow = scheduleBusinessNow_();
+  const todayKey = formatDateKey_(businessNow);
+  const oldState = pruneExpiredSyncState_(loadSyncState_(), businessNow);
+  const desiredEvents = dedupeAndValidateDesiredEvents_(
+    enrichEventsWithCourseOutlines_(source.events
+      .filter(event => event.dateKey >= todayKey)
+      .filter(event => shouldIncludeEvent_(event, settings)), settings, source)
+  );
+  const plan = buildSyncPlan_(oldState, desiredEvents, todayKey);
+  const migrationDeletionCount = settings.calendarMigrationFromId
+    ? countManagedFutureState_(oldState, todayKey)
+    : 0;
+  const sourceHealth = assessSourceForSync_(source, settings, oldState, businessNow);
+  assertSourceCanSync_(sourceHealth);
+  const approvalReasons = [];
+  if (sourceHealth.status === 'expired') approvalReasons.push('EXPIRED_SOURCE');
+  if (isSuspiciousDeletionPlan_(plan, oldState) || migrationDeletionCount > 0) {
+    approvalReasons.push('BULK_DELETION');
+  }
+  const approval = approvalReasons.length
+    ? createSyncApproval_(
+      settings,
+      source,
+      desiredEvents,
+      plan,
+      oldState,
+      approvalReasons,
+      reason === 'repair' ? 'repair' : 'manual'
+    )
+    : null;
+  const changedExact = plan.exact.filter(pair =>
+    !storedEventSignatureMatches_(pair.oldItem, pair.newItem, settings)
+  ).length;
+  return {
+    reason: reason === 'repair' ? 'repair' : 'manual',
+    created: migrationDeletionCount > 0 ? desiredEvents.length : plan.additions.length,
+    updated: plan.moved.length + changedExact,
+    deleted: migrationDeletionCount > 0 ? migrationDeletionCount : plan.deletions.length,
+    unchanged: plan.exact.length - changedExact,
+    sourceHealth,
+    requiresApproval: Boolean(approval),
+    approvalReasons,
+    approvalId: approval && approval.approvalId || '',
+    approvalExpiresAt: approval && approval.expiresAt || ''
   };
 }
 
@@ -2030,7 +2262,7 @@ function saveSettingsAndSyncFromUi(input) {
       forceCalendarCheck: true,
       notifyOnSuccess: false,
       trackProgress: true,
-      approvalToken: String(input && input.syncApprovalToken || '')
+      approvalId: String(input && (input.syncApprovalId || input.syncApprovalToken) || '')
     });
   } catch (error) {
     notifySyncFailureUnlessActionRequired_(error);
@@ -2047,10 +2279,14 @@ function saveSettingsAndSyncFromUi(input) {
   return response;
 }
 
-function runSyncFromUi() {
+function runSyncFromUi(input) {
   let result;
   try {
-    result = syncSchedule_({ reason: 'manual', trackProgress: true });
+    result = syncSchedule_({
+      reason: 'manual',
+      trackProgress: true,
+      approvalId: String(input && input.approvalId || '')
+    });
   } catch (error) {
     notifySyncFailureUnlessActionRequired_(error);
     throw error;
@@ -2058,10 +2294,15 @@ function runSyncFromUi() {
   return buildSyncUiResponse_(result, formatSyncResultMessage_(result));
 }
 
-function forceRepairFromUi() {
+function forceRepairFromUi(input) {
   let result;
   try {
-    result = syncSchedule_({ reason: 'repair', forceCalendarCheck: true, trackProgress: true });
+    result = syncSchedule_({
+      reason: 'repair',
+      forceCalendarCheck: true,
+      trackProgress: true,
+      approvalId: String(input && input.approvalId || '')
+    });
   } catch (error) {
     notifySyncFailureUnlessActionRequired_(error);
     throw error;
@@ -2108,6 +2349,21 @@ function createDedicatedCalendarForUi(input) {
   const settings = loadSettings_();
   assertSetupImported_(settings);
   const gradeName = sanitizeGrade_(input && input.gradeName || settings.gradeName);
+  const source = loadSourceContext_(gradeName);
+  const businessNow = scheduleBusinessNow_();
+  const sourceHealth = assessSourceForSync_(
+    source,
+    Object.assign({}, settings, { gradeName }),
+    pruneExpiredSyncState_(loadSyncState_(), businessNow),
+    businessNow
+  );
+  assertSourceCanSync_(sourceHealth);
+  if (sourceHealth.status === 'expired') {
+    throw new Error(
+      '[ACTION_REQUIRED] 這份課表沒有未來日期。' +
+      '請直接使用「儲存並同步」預覽並確認，系統會在通過安全檢查後建立專用日曆。'
+    );
+  }
   const calendarName = sanitizeCalendarName_(input && input.calendarName, gradeName);
   const calendar = CalendarApp.createCalendar(calendarName, { selected: true });
   try {
@@ -2342,10 +2598,23 @@ function sanitizeSettingsInput_(input, previous, source) {
 }
 
 function buildUiData_(settings, source) {
+  let uiSource = source;
+  if (source && !source.sourceUnavailable && !source.initialSetupSnapshot &&
+      Array.isArray(source.dateKeys) && source.dateKeys.length) {
+    const businessNow = scheduleBusinessNow_();
+    uiSource = Object.assign({}, source, {
+      sourceHealth: assessSourceForSync_(
+        source,
+        settings,
+        pruneExpiredSyncState_(loadSyncState_(), businessNow),
+        businessNow
+      )
+    });
+  }
   return {
     appVersion: APP_VERSION,
     settings,
-    source: buildSourceUiModel_(source, settings.gradeName),
+    source: buildSourceUiModel_(uiSource, settings.gradeName),
     calendars: listOwnedCalendars_(),
     status: loadStatus_(),
     courseOutlineStatus: buildCourseOutlineUiStatus_(
@@ -2378,6 +2647,11 @@ function buildTermTransitionUiModel_(settings, source) {
 }
 
 function buildSourceUiModel_(source, gradeName) {
+  const sourceHealth = source.sourceHealth || {
+    status: source.sourceUnavailable ? 'untrusted' : 'trusted',
+    reasons: source.sourceUnavailable ? ['SOURCE_UNAVAILABLE'] : [],
+    futureDateCount: 0
+  };
   return {
     gradeName,
     firstDate: source.firstDateKey,
@@ -2393,7 +2667,12 @@ function buildSourceUiModel_(source, gradeName) {
     termKey: source.termKey,
     catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
     catalogFingerprint: source.catalogFingerprint || '',
-    scheduleFingerprint: source.scheduleFingerprint || ''
+    scheduleFingerprint: source.scheduleFingerprint || '',
+    coverageFingerprintVersion: Number(source.coverageFingerprintVersion) || 0,
+    coverageFingerprint: source.coverageFingerprint || '',
+    sourceRevisionFingerprintVersion: Number(source.sourceRevisionFingerprintVersion) || 0,
+    sourceRevisionFingerprint: source.sourceRevisionFingerprint || '',
+    sourceHealth
   };
 }
 
@@ -2653,18 +2932,44 @@ function syncSchedule_(options) {
     assertSetupImported_(settings);
     if (trackProgress) writeSyncProgress_(15, '正在取得最新課表…', 'running');
     const source = loadSourceContext_(settings.gradeName);
+    const businessNow = scheduleBusinessNow_();
+    const oldState = pruneExpiredSyncState_(loadSyncState_(), businessNow);
+    const sourceHealth = assessSourceForSync_(source, settings, oldState, businessNow);
+    assertSourceCanSync_(sourceHealth);
     settings = applyTermTransitionIfNeeded_(settings, source, false);
     settings = registerNewTitles_(settings, source);
-    if (trackProgress) writeSyncProgress_(24, '正在確認專用日曆…', 'running');
-    const calendar = ensureDedicatedCalendar_(settings);
-    const businessNow = scheduleBusinessNow_();
     const todayKey = formatDateKey_(businessNow);
     const desiredEvents = dedupeAndValidateDesiredEvents_(
       enrichEventsWithCourseOutlines_(source.events
         .filter(event => event.dateKey >= todayKey)
         .filter(event => shouldIncludeEvent_(event, settings)), settings, source)
     );
-    const oldState = pruneExpiredSyncState_(loadSyncState_(), businessNow);
+    const preliminaryPlan = buildSyncPlan_(oldState, desiredEvents, todayKey);
+    const migrationDeletionCount = settings.calendarMigrationFromId
+      ? countManagedFutureState_(oldState, todayKey)
+      : 0;
+    const approvalReasons = [];
+    if (sourceHealth.status === 'expired') approvalReasons.push('EXPIRED_SOURCE');
+    if (isSuspiciousDeletionPlan_(preliminaryPlan, oldState) || migrationDeletionCount > 0) {
+      approvalReasons.push('BULK_DELETION');
+    }
+    let approvalRecord = null;
+    if (!isActiveSyncJob_(job) && approvalReasons.length) {
+      approvalRecord = validateSyncApproval_(
+        String(options && (options.approvalId || options.approvalToken) || ''),
+        settings,
+        source,
+        desiredEvents,
+        preliminaryPlan,
+        oldState,
+        approvalReasons,
+        options && options.reason === 'settings'
+          ? 'settings'
+          : (options && options.reason === 'repair' ? 'repair' : 'manual')
+      );
+    }
+    if (trackProgress) writeSyncProgress_(24, '正在確認專用日曆…', 'running');
+    const calendar = ensureDedicatedCalendar_(settings);
     const input = buildSyncJobInput_(settings, source, desiredEvents, calendar);
     job = loadSyncJob_() || job;
 
@@ -2676,16 +2981,16 @@ function syncSchedule_(options) {
     }
 
     if (!isActiveSyncJob_(job)) {
-      const plan = buildSyncPlan_(oldState, desiredEvents, todayKey);
+      const plan = preliminaryPlan;
       if (trackProgress) writeSyncProgress_(32, '正在比對課表與日曆…', 'running');
-      const expectedApprovalToken = makeSyncApprovalToken_(settings, source, desiredEvents, plan);
-      const deletionApproved = Boolean(
-        options && options.reason === 'settings' &&
-        options.approvalToken &&
-        options.approvalToken === expectedApprovalToken
-      );
+      const deletionApproved = approvalReasons.indexOf('BULK_DELETION') !== -1 && Boolean(approvalRecord);
       assertSafeDeletionPlan_(plan, oldState, options && options.reason, deletionApproved);
-      const jobOptions = Object.assign({}, options || {}, { deletionApproved });
+      const jobOptions = Object.assign({}, options || {}, {
+        deletionApproved,
+        sourceApprovalRequired: approvalReasons.indexOf('EXPIRED_SOURCE') !== -1,
+        sourceApproved: approvalReasons.indexOf('EXPIRED_SOURCE') === -1 || Boolean(approvalRecord),
+        approvalReasons
+      });
       job = createSyncJob_(
         settings,
         source,
@@ -2696,6 +3001,7 @@ function syncSchedule_(options) {
         jobOptions,
         job
       );
+      if (approvalRecord) consumeSyncApproval_(approvalRecord.approvalId);
     }
 
     deleteTriggersByHandlers_([SYNC_CONTINUATION_HANDLER]);
@@ -2796,6 +3102,11 @@ function makeSyncApprovalToken_(settings, source, desiredEvents, plan) {
   return hashText_(JSON.stringify([
     settings.gradeName,
     source.termKey,
+    settings.calendarId || '',
+    source.coverageFingerprintVersion || 0,
+    source.coverageFingerprint || '',
+    source.sourceRevisionFingerprintVersion || 0,
+    source.sourceRevisionFingerprint || '',
     source.scheduleFingerprint,
     uniqueStrings_(settings.selectedCourses).map(normalizeTitle_).sort(),
     Boolean(settings.includeActivities),
@@ -2807,6 +3118,70 @@ function makeSyncApprovalToken_(settings, source, desiredEvents, plan) {
     ])),
     (plan.deletions || []).map(item => item.stateKey).sort()
   ]));
+}
+
+function createSyncApproval_(settings, source, desiredEvents, plan, oldState, reasons, operation) {
+  const approvalId = hashText_(JSON.stringify([
+    'sync-approval',
+    new Date().toISOString(),
+    Math.random(),
+    settings.gradeName,
+    source.sourceRevisionFingerprint || '',
+    (plan.deletions || []).map(item => item.stateKey).sort()
+  ]));
+  const createdAt = new Date();
+  const record = {
+    approvalId,
+    createdAt: createdAt.toISOString(),
+    expiresAt: new Date(createdAt.getTime() + SYNC_APPROVAL_TTL_MS).toISOString(),
+    operation: String(operation || 'manual'),
+    reasons: uniqueStrings_(reasons || []),
+    fingerprint: makeSyncApprovalToken_(settings, source, desiredEvents, plan),
+    oldStateFingerprint: hashText_(JSON.stringify(Object.keys(oldState || {}).sort().map(key => [
+      key,
+      oldState[key] && oldState[key].calendarEventId || '',
+      oldState[key] && oldState[key].dateKey || '',
+      oldState[key] && oldState[key].signature || ''
+    ])))
+  };
+  writeChunkedJson_(SYNC_APPROVAL_STORE, record);
+  return record;
+}
+
+function validateSyncApproval_(approvalId, settings, source, desiredEvents, plan, oldState, reasons, operation) {
+  const requiredReasons = uniqueStrings_(reasons || []).sort();
+  if (!requiredReasons.length) return null;
+  if (!approvalId) {
+    const message = requiredReasons.indexOf('EXPIRED_SOURCE') !== -1
+      ? '這份課表沒有任何未來日期'
+      : '這次會移除至少 40% 的受管理未來事件';
+    throw new Error(
+      '[ACTION_REQUIRED] ' + message + '，系統已保留既有日曆。' +
+      '請開啟控制臺預覽變更並確認一次。'
+    );
+  }
+  const record = readChunkedJson_(SYNC_APPROVAL_STORE, null);
+  const currentStateFingerprint = hashText_(JSON.stringify(Object.keys(oldState || {}).sort().map(key => [
+    key,
+    oldState[key] && oldState[key].calendarEventId || '',
+    oldState[key] && oldState[key].dateKey || '',
+    oldState[key] && oldState[key].signature || ''
+  ])));
+  const valid = record && approvalId && record.approvalId === approvalId &&
+    Date.parse(record.expiresAt || '') > Date.now() &&
+    record.operation === String(operation || 'manual') &&
+    record.fingerprint === makeSyncApprovalToken_(settings, source, desiredEvents, plan) &&
+    record.oldStateFingerprint === currentStateFingerprint &&
+    JSON.stringify(uniqueStrings_(record.reasons || []).sort()) === JSON.stringify(requiredReasons);
+  if (!valid) {
+    throw new Error('[ACTION_REQUIRED] 課表或設定在確認後已有變動，請重新預覽並確認這次同步。');
+  }
+  return record;
+}
+
+function consumeSyncApproval_(approvalId) {
+  const record = readChunkedJson_(SYNC_APPROVAL_STORE, null);
+  if (record && record.approvalId === approvalId) clearChunkedStore_(SYNC_APPROVAL_STORE);
 }
 
 function syncJobInputMatches_(left, right) {
@@ -2861,6 +3236,9 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
     notifyOnSuccess: Boolean(options.notifyOnSuccess),
     notificationWindow: Boolean(options.notificationWindow),
     deletionApproved: Boolean(options.deletionApproved),
+    sourceApprovalRequired: Boolean(options.sourceApprovalRequired),
+    sourceApproved: Boolean(options.sourceApproved),
+    approvalReasons: uniqueStrings_(options.approvalReasons || []),
     input,
     createdAt: now,
     updatedAt: now,
@@ -3237,6 +3615,12 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
     () => writeChunkedJson_(STATUS_STORE, status)
   );
   saveSourceUiCacheSafely_(source);
+  runPostCommitStep_(
+    completionWarnings,
+    '同步完成後無法保存已接受的課表基線',
+    '行程已同步，但課表安全基線暫時無法更新。',
+    () => saveAcceptedSourceBaseline_(source)
+  );
   runPostCommitStep_(
     completionWarnings,
     '同步完成後無法清除安裝摘要',
@@ -4005,9 +4389,7 @@ function getScheduledPeriodCount_(item) {
 }
 
 function assertSafeDeletionPlan_(plan, oldState, reason, deletionApproved) {
-  if (reason === 'setup' || reason === 'settings' && deletionApproved) {
-    return;
-  }
+  if (deletionApproved) return;
 
   const oldCount = Number(plan.oldFutureCount) ||
     Object.keys(oldState).filter(key =>
@@ -4015,9 +4397,25 @@ function assertSafeDeletionPlan_(plan, oldState, reason, deletionApproved) {
     ).length;
   const deletedCount = plan.deletions.length;
 
-  if (oldCount >= 5 && deletedCount >= 5 && deletedCount / oldCount > 0.4) {
+  if (oldCount > 0 && deletedCount > 0 && deletedCount / oldCount >= 0.4) {
     throw new Error('來源變動會一次移除過多事件，系統已停止同步以保護日曆。請開啟控制臺檢查課表來源。');
   }
+}
+
+function isSuspiciousDeletionPlan_(plan, oldState) {
+  const oldCount = Number(plan && plan.oldFutureCount) ||
+    Object.keys(oldState || {}).filter(key =>
+      oldState[key].dateKey >= formatDateKey_(scheduleBusinessNow_())
+    ).length;
+  const deletedCount = plan && Array.isArray(plan.deletions) ? plan.deletions.length : 0;
+  return oldCount > 0 && deletedCount > 0 && deletedCount / oldCount >= 0.4;
+}
+
+function countManagedFutureState_(oldState, todayKey) {
+  const boundary = String(todayKey || formatDateKey_(scheduleBusinessNow_()));
+  return Object.keys(oldState || {}).filter(key =>
+    oldState[key] && oldState[key].dateKey >= boundary
+  ).length;
 }
 
 function applySyncPlan_(calendar, oldState, plan, settings, options) {
@@ -6244,6 +6642,7 @@ function parseSchedulePayload_(payload, gradeName, now) {
     event.location || ''
   ]));
   const catalogFingerprint = makeSetupCatalogFingerprint_(termKey, lastDateKey, catalogAll);
+  const coverage = makeSourceCoverage_(datedHeaders);
   const scheduleFingerprint = hashText_(JSON.stringify([
     'schedule',
     SCHEDULE_FINGERPRINT_VERSION,
@@ -6260,6 +6659,21 @@ function parseSchedulePayload_(payload, gradeName, now) {
     termKey,
     catalogFingerprintVersion: SETUP_CATALOG_FINGERPRINT_VERSION,
     catalogFingerprint,
+    coverageFingerprintVersion: SOURCE_COVERAGE_FINGERPRINT_VERSION,
+    coverageFingerprint: coverage.fingerprint,
+    sourceRevisionFingerprintVersion: SOURCE_REVISION_FINGERPRINT_VERSION,
+    sourceRevisionFingerprint: makeSourceRevisionFingerprint_(payload),
+    dateKeys: coverage.dateKeys,
+    weekSignatures: coverage.weekSignatures,
+    sourceHealth: {
+      status: coverage.dateKeys.some(dateKey => dateKey >= formatDateKey_(now))
+        ? 'trusted'
+        : 'expired',
+      reasons: coverage.dateKeys.some(dateKey => dateKey >= formatDateKey_(now))
+        ? []
+        : ['NO_FUTURE_DATES'],
+      futureDateCount: coverage.dateKeys.filter(dateKey => dateKey >= formatDateKey_(now)).length
+    },
     scheduleFingerprint,
     sourceUpdatedLabel,
     sourceStale: isSourceStale_(sourceUpdatedLabel, now),
@@ -6326,29 +6740,76 @@ function extractCatalogFromPayload_(payload, scheduledPeriodCounts) {
 
 function inferHeaderDates_(payload, now) {
   const records = [];
+  let headerCount = 0;
+  const sourceWeeks = {};
+  (payload.weekDataList || []).forEach(item => {
+    const weekNumber = Number(item && item.week);
+    if (Number.isFinite(weekNumber)) sourceWeeks[weekNumber] = true;
+  });
   payload.tableData.forEach((row, rowIndex) => {
     if (!row || !row.isHeader) return;
-    (row.cells || []).slice(2, 9).forEach((cell, dayIndex) => {
+    headerCount += 1;
+    const weekNumberValue = Number(row.weekNum);
+    const weekNumber = Number.isFinite(weekNumberValue) ? weekNumberValue : headerCount;
+    const cells = (row.cells || []).slice(2);
+    if (cells.length !== 7) throw new Error('課表週次缺少完整的七天日期。');
+    if (Object.keys(sourceWeeks).length && !sourceWeeks[weekNumber]) {
+      throw new Error('課表週次與表頭不一致。');
+    }
+    cells.forEach((cell, dayIndex) => {
       const monthDay = parseMonthDay_(cell.value);
-      if (monthDay) records.push({ rowIndex, dayIndex, month: monthDay.month, day: monthDay.day });
+      if (!monthDay) throw new Error('課表包含無法辨識的日期。');
+      records.push({
+        rowIndex,
+        dayIndex,
+        weekNumber,
+        month: monthDay.month,
+        day: monthDay.day
+      });
     });
   });
+  if (!headerCount) throw new Error('課表來源缺少週次表頭。');
+  const headerWeeks = records.filter(item => item.dayIndex === 0).map(item => item.weekNumber);
+  if (uniqueStrings_(headerWeeks.map(String)).length !== headerWeeks.length) {
+    throw new Error('課表週次與表頭不一致。');
+  }
   if (records.length < 7) throw new Error('課表日期不足，無法判定學期。');
   const currentYear = Number(Utilities.formatDate(now, TIMEZONE, 'yyyy'));
   let best = null;
+  let invalidDateCandidateCount = 0;
   [currentYear - 1, currentYear, currentYear + 1].forEach(year => {
-    let activeYear = year;
-    let previousMonth = null;
-    const dated = records.map(record => {
-      if (previousMonth !== null && previousMonth >= 10 && record.month <= 3) activeYear += 1;
-      previousMonth = record.month;
-      const dateKey = activeYear + '-' + pad2_(record.month) + '-' + pad2_(record.day);
-      return Object.assign({}, record, { dateKey, timestamp: Date.parse(dateKey + 'T12:00:00+08:00') });
-    });
+    let dated;
+    try {
+      let activeYear = year;
+      let previousMonth = null;
+      dated = records.map(record => {
+        if (previousMonth !== null && previousMonth >= 10 && record.month <= 3) activeYear += 1;
+        previousMonth = record.month;
+        const dateKey = activeYear + '-' + pad2_(record.month) + '-' + pad2_(record.day);
+        const date = new Date(activeYear, record.month - 1, record.day);
+        if (date.getFullYear() !== activeYear || date.getMonth() !== record.month - 1 ||
+            date.getDate() !== record.day) {
+          throw new Error('課表包含不存在的日期。');
+        }
+        return Object.assign({}, record, { dateKey, timestamp: Date.parse(dateKey + 'T12:00:00+08:00') });
+      });
+    } catch (error) {
+      invalidDateCandidateCount += 1;
+      return;
+    }
     const nearest = Math.min.apply(null, dated.map(item => Math.abs(item.timestamp - now.getTime())));
     if (!best || nearest < best.nearest) best = { dated, nearest };
   });
+  if (!best && invalidDateCandidateCount === 3) throw new Error('課表包含不存在的日期。');
   if (!best || best.nearest > 220 * 24 * 60 * 60 * 1000) throw new Error('課表日期與現在相距過遠，無法安全判定年份。');
+  best.dated.forEach((item, index) => {
+    if (!index) return;
+    const previous = best.dated[index - 1];
+    const deltaDays = Math.round((item.timestamp - previous.timestamp) / (24 * 60 * 60 * 1000));
+    if (deltaDays <= 0 || item.rowIndex === previous.rowIndex && deltaDays !== 1) {
+      throw new Error('課表日期重複、逆序或單週日期不連續。');
+    }
+  });
   return best.dated;
 }
 
@@ -6358,6 +6819,50 @@ function parseMonthDay_(value) {
   const month = Number(match[1]);
   const day = Number(match[2]);
   return month >= 1 && month <= 12 && day >= 1 && day <= 31 ? { month, day } : null;
+}
+
+function makeSourceCoverage_(datedHeaders) {
+  const dateKeys = (datedHeaders || []).map(item => String(item.dateKey || ''));
+  const weekSignatures = (datedHeaders || [])
+    .filter(item => Number(item.dayIndex) === 0)
+    .map(item => {
+      const index = datedHeaders.indexOf(item);
+      return [String(item.weekNumber || ''), dateKeys[index], dateKeys[index + 6] || ''];
+    });
+  return {
+    dateKeys,
+    weekSignatures,
+    fingerprint: hashText_(JSON.stringify([
+      'source-coverage',
+      SOURCE_COVERAGE_FINGERPRINT_VERSION,
+      dateKeys,
+      weekSignatures
+    ]))
+  };
+}
+
+function makeSourceRevisionFingerprint_(payload) {
+  const rows = (payload && payload.tableData || []).map(row => [
+    Boolean(row && row.isHeader),
+    String(row && row.weekNum || ''),
+    (row && Array.isArray(row.cells) ? row.cells : []).map(cell => [
+      normalizeText_(cell && cell.value),
+      Number(cell && cell.day) || 0,
+      Number(cell && cell.period) || 0,
+      Number(cell && cell.rowSpan) || 1,
+      Number(cell && cell.colSpan) || 1
+    ])
+  ]);
+  return hashText_(JSON.stringify([
+    'source-revision',
+    SOURCE_REVISION_FINGERPRINT_VERSION,
+    String(payload && payload.currentGrade || ''),
+    (payload && payload.weekDataList || []).map(item => [
+      Number(item && item.week) || 0,
+      normalizeText_(item && item.date)
+    ]),
+    rows
+  ]));
 }
 
 function parsePeriodTime_(value) {
@@ -7154,8 +7659,25 @@ function notifySyncFailureSafe_(error) {
 
 function notifySyncFailureUnlessActionRequired_(error) {
   if (error && error.syncFailureHandled) return;
-  if (String(error.message || error).indexOf('[ACTION_REQUIRED]') !== 0) {
+  const rawMessage = String(error && error.message || error);
+  if (rawMessage.indexOf('[ACTION_REQUIRED]') !== 0) {
     notifySyncFailureSafe_(error);
+    return;
+  }
+  try {
+    const settings = loadSettings_();
+    const message = userFacingError_(error);
+    sendActionRequiredSafe_(
+      settings,
+      '課表同步需要確認',
+      message + '\\n\\n系統已保留既有日曆，請開啟行程同步控制臺查看。',
+      'sync-source-action-required|' + settings.termKey + '|' + message,
+      'action_required',
+      { message },
+      { immediate: true }
+    );
+  } catch (noticeError) {
+    Logger.log('課表安全提醒寄送失敗：' + userFacingError_(noticeError));
   }
 }
 

@@ -23,6 +23,8 @@
   const SOURCE_FETCH_MAX_ATTEMPTS = 3;
   const SOURCE_FETCH_RETRY_DELAY_MS = 750;
   const CATALOG_FINGERPRINT_VERSION = 1;
+  const SOURCE_COVERAGE_FINGERPRINT_VERSION = 1;
+  const SOURCE_REVISION_FINGERPRINT_VERSION = 1;
   const ACTIVITY_PATTERNS = [
     /全校(?:性)?活動/,
     /^高[一二三](?:導入期|全校活動)$/,
@@ -188,7 +190,7 @@
       : 'course';
   }
 
-  function assertPayload(payload) {
+  function assertPayload(payload, expectedGrade) {
     if (!payload || typeof payload !== 'object') {
       throw new Error('課表來源沒有回傳可讀取的資料。');
     }
@@ -203,6 +205,10 @@
 
     if (!GRADE_API_NAMES || !Object.values(GRADE_API_NAMES).includes(payload.currentGrade)) {
       throw new Error('課表來源回傳了無法辨識的年級。');
+    }
+
+    if (expectedGrade && payload.currentGrade !== expectedGrade) {
+      throw new Error('課表來源回傳了錯誤的年級。');
     }
 
     return payload;
@@ -293,20 +299,45 @@
 
   function getHeaderDateRecords(payload) {
     const records = [];
+    let headerCount = 0;
 
     payload.tableData.forEach((row, rowIndex) => {
       if (!row || !row.isHeader || !Array.isArray(row.cells)) {
         return;
       }
 
-      row.cells.slice(2, 9).forEach((cell, dayIndex) => {
-        const monthDay = parseMonthDay(cell && cell.value);
+      headerCount += 1;
+      const weekNumber = Number(row.weekNum);
+      const weekDates = row.cells.slice(2);
+      if (weekDates.length !== 7) {
+        throw new Error('課表週次缺少完整的七天日期。');
+      }
 
-        if (monthDay) {
-          records.push({ rowIndex, dayIndex, month: monthDay.month, day: monthDay.day });
-        }
+      weekDates.forEach((cell, dayIndex) => {
+        const monthDay = parseMonthDay(cell && cell.value);
+        if (!monthDay) throw new Error('課表包含無法辨識的日期。');
+        records.push({
+          rowIndex,
+          dayIndex,
+          weekNumber: Number.isFinite(weekNumber) ? weekNumber : headerCount,
+          month: monthDay.month,
+          day: monthDay.day
+        });
       });
     });
+
+    if (!headerCount) throw new Error('課表來源缺少週次表頭。');
+
+    const sourceWeeks = new Set((payload.weekDataList || [])
+      .map(item => Number(item && item.week))
+      .filter(Number.isFinite));
+    const headerWeeks = records
+      .filter(item => item.dayIndex === 0)
+      .map(item => item.weekNumber);
+    if (new Set(headerWeeks).size !== headerWeeks.length ||
+        headerWeeks.some(week => sourceWeeks.size && !sourceWeeks.has(week))) {
+      throw new Error('課表週次與表頭不一致。');
+    }
 
     return records;
   }
@@ -321,9 +352,12 @@
       }
 
       previousMonth = record.month;
-      return Object.assign({}, record, {
-        date: new Date(year, record.month - 1, record.day)
-      });
+      const date = new Date(year, record.month - 1, record.day);
+      if (date.getFullYear() !== year || date.getMonth() !== record.month - 1 ||
+          date.getDate() !== record.day) {
+        throw new Error('課表包含不存在的日期。');
+      }
+      return Object.assign({}, record, { date });
     });
   }
 
@@ -339,9 +373,16 @@
     now.setHours(0, 0, 0, 0);
     const candidateYears = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
     let best = null;
+    let invalidDateCandidateCount = 0;
 
     candidateYears.forEach(year => {
-      const dated = buildDateRecords(records, year);
+      let dated;
+      try {
+        dated = buildDateRecords(records, year);
+      } catch (error) {
+        invalidDateCandidateCount += 1;
+        return;
+      }
       const nearestDistance = Math.min.apply(null, dated.map(item =>
         Math.abs(item.date.getTime() - now.getTime())
       ));
@@ -353,9 +394,21 @@
 
     const maxDistance = 220 * 24 * 60 * 60 * 1000;
 
+    if (!best && invalidDateCandidateCount === candidateYears.length) {
+      throw new Error('課表包含不存在的日期。');
+    }
     if (!best || best.nearestDistance > maxDistance) {
       throw new Error('課表日期與目前時間相距過遠，無法安全判定年份。');
     }
+
+    best.dated.forEach((item, index) => {
+      if (!index) return;
+      const previous = best.dated[index - 1];
+      const deltaDays = Math.round((item.date.getTime() - previous.date.getTime()) / 86400000);
+      if (deltaDays <= 0 || item.rowIndex === previous.rowIndex && deltaDays !== 1) {
+        throw new Error('課表日期重複、逆序或單週日期不連續。');
+      }
+    });
 
     return best.dated;
   }
@@ -380,8 +433,52 @@
     return (hash >>> 0).toString(36);
   }
 
-  function summarizePayload(payload, nowValue) {
-    assertPayload(payload);
+  function makeCoverageFingerprint(dateRecords) {
+    const dateKeys = dateRecords.map(item => formatDateKey(item.date));
+    const weekSignatures = dateRecords
+      .filter(item => item.dayIndex === 0)
+      .map((item, index, starts) => {
+        const startIndex = dateRecords.indexOf(item);
+        return [String(item.weekNumber || ''), dateKeys[startIndex], dateKeys[startIndex + 6] || ''];
+      });
+    return {
+      dateKeys,
+      weekSignatures,
+      fingerprint: hashText(JSON.stringify([
+        'source-coverage',
+        SOURCE_COVERAGE_FINGERPRINT_VERSION,
+        dateKeys,
+        weekSignatures
+      ]))
+    };
+  }
+
+  function makeSourceRevisionFingerprint(payload) {
+    const rows = (payload.tableData || []).map(row => [
+      Boolean(row && row.isHeader),
+      String(row && row.weekNum || ''),
+      (row && Array.isArray(row.cells) ? row.cells : []).map(cell => [
+        normalizeText(cell && cell.value),
+        Number(cell && cell.day) || 0,
+        Number(cell && cell.period) || 0,
+        Number(cell && cell.rowSpan) || 1,
+        Number(cell && cell.colSpan) || 1
+      ])
+    ]);
+    return hashText(JSON.stringify([
+      'source-revision',
+      SOURCE_REVISION_FINGERPRINT_VERSION,
+      String(payload && payload.currentGrade || ''),
+      (payload && payload.weekDataList || []).map(item => [
+        Number(item && item.week) || 0,
+        normalizeText(item && item.date)
+      ]),
+      rows
+    ]));
+  }
+
+  function summarizePayload(payload, nowValue, expectedGrade) {
+    assertPayload(payload, expectedGrade);
     const dateRecords = inferDateRecords(payload, nowValue);
     const catalog = extractCatalog(payload);
     const firstDate = dateRecords[0].date;
@@ -404,6 +501,16 @@
       formatDateKey(lastDate),
       catalog.all
     );
+    const coverage = makeCoverageFingerprint(dateRecords);
+    const today = nowValue instanceof Date ? new Date(nowValue) : new Date(nowValue || Date.now());
+    today.setHours(0, 0, 0, 0);
+    const todayKey = formatDateKey(today);
+    const futureDateCount = coverage.dateKeys.filter(dateKey => dateKey >= todayKey).length;
+    const sourceHealth = {
+      status: futureDateCount ? 'trusted' : 'expired',
+      reasons: futureDateCount ? [] : ['NO_FUTURE_DATES'],
+      futureDateCount
+    };
 
     return {
       currentGrade: payload.currentGrade,
@@ -415,6 +522,13 @@
       termKey,
       catalogFingerprintVersion: CATALOG_FINGERPRINT_VERSION,
       catalogFingerprint,
+      coverageFingerprintVersion: SOURCE_COVERAGE_FINGERPRINT_VERSION,
+      coverageFingerprint: coverage.fingerprint,
+      sourceRevisionFingerprintVersion: SOURCE_REVISION_FINGERPRINT_VERSION,
+      sourceRevisionFingerprint: makeSourceRevisionFingerprint(payload),
+      dateKeys: coverage.dateKeys,
+      weekSignatures: coverage.weekSignatures,
+      sourceHealth,
       updateValues,
       catalog
     };
@@ -445,7 +559,7 @@
           error.status = Number(response.status) || 0;
           throw error;
         }
-        return assertPayload(await response.json());
+        return assertPayload(await response.json(), apiGrade);
       } catch (error) {
         lastError = error;
         const status = Number(error && error.status) || 0;
@@ -465,6 +579,8 @@
     API_URL,
     GRADE_API_NAMES,
     CATALOG_FINGERPRINT_VERSION,
+    SOURCE_COVERAGE_FINGERPRINT_VERSION,
+    SOURCE_REVISION_FINGERPRINT_VERSION,
     MIN_COURSE_SCHEDULED_PERIODS,
     ACTIVITY_PATTERNS,
     MANUAL_MERGE_EXCEPTIONS,
@@ -483,6 +599,8 @@
     getVacationWeekNumbers,
     extractCatalog,
     inferDateRecords,
+    makeCoverageFingerprint,
+    makeSourceRevisionFingerprint,
     summarizePayload,
     fetchGradeSchedule,
     formatDateKey

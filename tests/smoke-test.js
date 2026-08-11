@@ -58,6 +58,12 @@ const sidebarByIdReferences = Array.from(
 );
 
 assert.equal(configuratorHtml.includes('id="instant-notifications"'), true);
+assert.equal(configuratorHtml.includes('id="source-expired-confirm"'), true);
+assert.match(
+  configuratorAppSource,
+  /function isExpiredSourceAcknowledged\(\)[\s\S]*?expiredSourceAcknowledgedFingerprint/,
+  '網站遇到沒有未來日期的可信來源時，必須要求就近確認'
+);
 assert.equal(
   configuratorHtml.includes('id="instant-notifications" name="instantNotificationsEnabled" type="checkbox" role="switch" checked'),
   true,
@@ -284,6 +290,11 @@ assert.equal(sidebarHtml.includes('<h2>通知與自動同步</h2>'), false);
 assert.equal(sidebarHtml.includes('id="sync-menu-toggle"'), true);
 assert.equal(sidebarHtml.includes('id="run-sync" role="menuitem"'), true);
 assert.equal(sidebarHtml.includes('id="repair-sync" role="menuitem"'), true);
+assert.match(
+  sidebarHtml,
+  /async function runAction\(method, label, trackProgress, reason\)[\s\S]*?previewSyncImpactFromUi/,
+  '立即同步與強制修復必須先走後端安全預覽'
+);
 assert.equal(
   sidebarHtml.includes("setSyncMenuOpen(byId('sync-menu').hidden, true)"),
   true,
@@ -434,8 +445,8 @@ assert.equal(
 );
 assert.match(
   sidebarHtml,
-  /function updateActionAvailability\(\)[\s\S]*?sourceUnavailable[\s\S]*?byId\('create-calendar'\)\.disabled = sourceUnavailable[\s\S]*?input\[name="grade"\]/,
-  '課表來源離線時除同步與儲存外，也不得建立額外 Calendar 或切換年級'
+  /function updateActionAvailability\(\)[\s\S]*?sourceBlocked = sourceUnavailable \|\| sourceUntrusted[\s\S]*?byId\('create-calendar'\)\.disabled = sourceBlocked \|\| sourceExpired[\s\S]*?input\[name="grade"\]/,
+  '課表來源離線或不可信時，除同步與儲存外也不得建立額外 Calendar 或切換年級'
 );
 assert.equal(
   sidebarHtml.includes('正在準備未來 30 天的課綱資料…'),
@@ -1274,6 +1285,13 @@ const roundTripCatalogFingerprint = scheduleData.makeCatalogFingerprint(
   '2026-08-30',
   roundTripSetupCatalog
 );
+const roundTripCoverage = scheduleData.makeCoverageFingerprint(
+  Array.from({ length: 7 }, (_, dayIndex) => ({
+    date: new Date(2026, 1, 23 + dayIndex),
+    dayIndex,
+    weekNumber: 1
+  }))
+);
 const roundTripSetupCode = setupCode.encode({
   appVersion: '2.0.0-rc.1',
   gradeName: '高二',
@@ -1284,6 +1302,13 @@ const roundTripSetupCode = setupCode.encode({
     firstDateKey: '2026-02-23',
     lastDateKey: '2026-08-30',
     sourceUpdatedLabel: '更新時間\n08011200',
+    coverageFingerprintVersion: 1,
+    coverageFingerprint: roundTripCoverage.fingerprint,
+    dateKeys: roundTripCoverage.dateKeys,
+    weekSignatures: roundTripCoverage.weekSignatures,
+    sourceRevisionFingerprintVersion: 1,
+    sourceRevisionFingerprint: 'revision-1',
+    sourceHealth: { status: 'trusted', reasons: [] },
     items: roundTripSetupCatalog
   },
   selectedCourses: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
@@ -1314,6 +1339,13 @@ assert.deepEqual(decodedSetupCode, {
     firstDateKey: '2026-02-23',
     lastDateKey: '2026-08-30',
     sourceUpdatedLabel: '更新時間\n08011200',
+    coverageFingerprintVersion: 1,
+    coverageFingerprint: roundTripCoverage.fingerprint,
+    dateKeys: roundTripCoverage.dateKeys,
+    weekSignatures: roundTripCoverage.weekSignatures,
+    sourceRevisionFingerprintVersion: 1,
+    sourceRevisionFingerprint: 'revision-1',
+    sourceHealth: { status: 'trusted', reasons: [] },
     items: roundTripSetupCatalog
   }
 });
@@ -1354,6 +1386,16 @@ assert.throws(
   '通用程式不得保存重新導向後的 tokenized 課表網址'
 );
 assert.doesNotThrow(() => new Function(generatedCode));
+assert.match(
+  generatedCode,
+  /const deletionApproved = approvalReasons\.indexOf\('BULK_DELETION'\) !== -1 && Boolean\(approvalRecord\);/,
+  '未預見大量刪除的工作不得預先取得刪除放行，後續重新規劃仍須受保護'
+);
+assert.match(
+  generatedCode,
+  /settings\.calendarMigrationFromId[\s\S]*?migrationDeletionCount[\s\S]*?approvalReasons\.push\('BULK_DELETION'\)/,
+  '更換專用日曆時整批清理舊事件也必須納入一次性核准'
+);
 assert.match(
   generatedCode,
   /^\/\*\*[\s\S]*?@OnlyCurrentDoc[\s\S]*?\*\//,
@@ -2032,6 +2074,16 @@ const currentSetupSource = {
     vacationItems: []
   }
 };
+assert.equal(
+  context.hashText_(JSON.stringify([
+    'source-coverage',
+    1,
+    decodedSetupCode.sourceSnapshot.dateKeys,
+    decodedSetupCode.sourceSnapshot.weekSignatures
+  ])),
+  decodedSetupCode.sourceSnapshot.coverageFingerprint,
+  '設定碼的來源涵蓋指紋必須在網站與 Apps Script 兩個執行環境一致'
+);
 let setupPreviewLiveFetchCount = 0;
 context.loadSourceContext_ = () => {
   setupPreviewLiveFetchCount += 1;
@@ -6223,15 +6275,225 @@ context.handleCourseOutlineRefreshFailure_(repeatedFailureRun, new Error('相同
 assert.equal(sentOutlineFailureEmails, 1, '相同課綱事故不得重複寄信');
 
 const fixtures = [
-  { grade: '高一', file: '/tmp/tschool-requirements-grade1.json' },
-  { grade: '高二', file: '/tmp/tschool-requirements-grade2.json' },
-  { grade: '高三', file: '/tmp/tschool-requirements-grade3.json' }
+  { grade: '高一', file: path.join(root, 'tests/fixtures/schedule-high1.json') },
+  { grade: '高二', file: path.join(root, 'tests/fixtures/schedule-high2.json') },
+  { grade: '高三', file: path.join(root, 'tests/fixtures/schedule-high3.json') }
 ];
 
+const sourceSafetyFixture = JSON.parse(fs.readFileSync(fixtures[0].file, 'utf8'));
+assert.throws(
+  () => scheduleData.assertPayload(sourceSafetyFixture, '二年級'),
+  /錯誤的年級/,
+  '網站端必須拒絕與請求不一致的年級回應'
+);
+
+const leapYearPayload = JSON.parse(JSON.stringify(sourceSafetyFixture));
+['(2/26)', '(2/27)', '(2/28)', '(2/29)', '(3/1)', '(3/2)', '(3/3)']
+  .forEach((value, index) => { leapYearPayload.tableData[0].cells[index + 2].value = value; });
+assert.doesNotThrow(
+  () => scheduleData.summarizePayload(
+    leapYearPayload,
+    new Date('2024-02-29T12:00:00+08:00'),
+    '一年級'
+  ),
+  '有效閏日不得被嚴格日期驗證誤擋'
+);
+const impossibleDatePayload = JSON.parse(JSON.stringify(leapYearPayload));
+impossibleDatePayload.tableData[0].cells[5].value = '(2/30)';
+assert.throws(
+  () => scheduleData.summarizePayload(
+    impossibleDatePayload,
+    new Date('2024-02-29T12:00:00+08:00'),
+    '一年級'
+  ),
+  /不存在的日期/,
+  '2/30 等不存在日期不得被 Date 自動正規化後接受'
+);
+const extraDatePayload = JSON.parse(JSON.stringify(sourceSafetyFixture));
+extraDatePayload.tableData[0].cells.push({ value: '(7/27)' });
+assert.throws(
+  () => scheduleData.summarizePayload(
+    extraDatePayload,
+    new Date('2026-07-20T12:00:00+08:00'),
+    '一年級'
+  ),
+  /完整的七天日期/,
+  '每個週次表頭必須剛好七個日期，多出的日期也不得被靜默忽略'
+);
+assert.throws(
+  () => context.parseSchedulePayload_(
+    extraDatePayload,
+    '高一',
+    new Date('2026-07-20T12:00:00+08:00')
+  ),
+  /完整的七天日期/,
+  'Apps Script 執行階段必須與網站同樣拒絕超過七天的週次表頭'
+);
+
+const twoWeekPayload = JSON.parse(JSON.stringify(sourceSafetyFixture));
+const secondWeekRows = JSON.parse(JSON.stringify(sourceSafetyFixture.tableData));
+secondWeekRows.forEach(row => { row.weekNum = '2'; });
+['(7/27)', '(7/28)', '(7/29)', '(7/30)', '(7/31)', '(8/1)', '(8/2)']
+  .forEach((value, index) => { secondWeekRows[0].cells[index + 2].value = value; });
+twoWeekPayload.weekDataList.push({ week: 2, date: '7/27' });
+twoWeekPayload.tableData = twoWeekPayload.tableData.concat(secondWeekRows);
+const fullTwoWeekSource = context.parseSchedulePayload_(
+  twoWeekPayload,
+  '高一',
+  new Date('2026-07-20T12:00:00+08:00')
+);
+const truncatedOneWeekSource = context.parseSchedulePayload_(
+  sourceSafetyFixture,
+  '高一',
+  new Date('2026-07-20T12:00:00+08:00')
+);
+context.clearChunkedStore_('TSCHOOL_SOURCE_ACCEPTED_BASELINE');
+context.clearChunkedStore_('TSCHOOL_SOURCE_UI_CACHE');
+context.saveSourceUiCacheSafely_(fullTwoWeekSource);
+assert.equal(
+  context.readChunkedJson_('TSCHOOL_SOURCE_ACCEPTED_BASELINE', null),
+  null,
+  '單純開啟控制臺或更新唯讀快取不得建立成功來源基線'
+);
+context.saveAcceptedSourceBaseline_(fullTwoWeekSource);
+assert.equal(
+  context.assessSourceForSync_(
+    truncatedOneWeekSource,
+    { gradeName: '高一', termKey: truncatedOneWeekSource.termKey },
+    {},
+    new Date('2026-07-20T12:00:00+08:00')
+  ).status,
+  'untrusted',
+  '同學期 200 回應若少掉後段週次，必須比對成功基線後停止寫入'
+);
+assert.equal(
+  context.assessSourceForSync_(
+    fullTwoWeekSource,
+    { gradeName: '高一', termKey: fullTwoWeekSource.termKey },
+    {},
+    new Date('2026-08-11T12:00:00+08:00')
+  ).status,
+  'expired',
+  '結構完整但沒有未來日期的來源應標記為可確認的 expired'
+);
+
+assert.throws(
+  () => context.assertSafeDeletionPlan_({ oldFutureCount: 5, deletions: [{}, {}] }, {}, 'source', false),
+  /移除過多事件/,
+  '剛好 40% 的刪除必須停止'
+);
+assert.throws(
+  () => context.assertSafeDeletionPlan_({ oldFutureCount: 2, deletions: [{}] }, {}, 'source', false),
+  /移除過多事件/,
+  '小樣本 50% 刪除不得因少於五筆而繞過'
+);
+assert.doesNotThrow(
+  () => context.assertSafeDeletionPlan_({ oldFutureCount: 3, deletions: [{}] }, {}, 'source', false),
+  '低於 40% 的刪除維持現行允許尺度'
+);
+
+const approvalSettings = {
+  gradeName: '高一',
+  termKey: fullTwoWeekSource.termKey,
+  calendarId: 'calendar-approval',
+  selectedCourses: [],
+  includeActivities: true,
+  excludedActivities: [],
+  excludedTitles: []
+};
+const approvalState = {
+  a: { calendarEventId: 'event-a', dateKey: '2026-08-01', signature: 'a' },
+  b: { calendarEventId: 'event-b', dateKey: '2026-08-02', signature: 'b' }
+};
+assert.equal(
+  context.countManagedFutureState_(approvalState, '2026-08-01'),
+  2,
+  'Calendar 搬移必須精確計入將從舊日曆清理的受管理未來事件'
+);
+const approvalPlan = {
+  oldFutureCount: 2,
+  deletions: [{ stateKey: 'a' }]
+};
+const approval = context.createSyncApproval_(
+  approvalSettings,
+  fullTwoWeekSource,
+  [],
+  approvalPlan,
+  approvalState,
+  ['BULK_DELETION'],
+  'manual'
+);
+assert.doesNotThrow(() => context.validateSyncApproval_(
+  approval.approvalId,
+  approvalSettings,
+  fullTwoWeekSource,
+  [],
+  approvalPlan,
+  approvalState,
+  ['BULK_DELETION'],
+  'manual'
+));
+assert.throws(() => context.validateSyncApproval_(
+  approval.approvalId,
+  approvalSettings,
+  fullTwoWeekSource,
+  [],
+  approvalPlan,
+  approvalState,
+  ['BULK_DELETION'],
+  'settings'
+), /重新預覽/, '一次性核准不得跨操作入口使用');
+const changedApprovalSource = Object.assign({}, fullTwoWeekSource, {
+  sourceRevisionFingerprint: fullTwoWeekSource.sourceRevisionFingerprint + '-changed'
+});
+assert.throws(() => context.validateSyncApproval_(
+  approval.approvalId,
+  approvalSettings,
+  changedApprovalSource,
+  [],
+  approvalPlan,
+  approvalState,
+  ['BULK_DELETION'],
+  'manual'
+), /重新預覽/, '來源版本在確認後改變時核准必須失效');
+context.writeChunkedJson_('TSCHOOL_SYNC_APPROVAL', Object.assign({}, approval, {
+  expiresAt: '2000-01-01T00:00:00.000Z'
+}));
+assert.throws(() => context.validateSyncApproval_(
+  approval.approvalId,
+  approvalSettings,
+  fullTwoWeekSource,
+  [],
+  approvalPlan,
+  approvalState,
+  ['BULK_DELETION'],
+  'manual'
+), /重新預覽/, '超過有效時間的核准必須失效');
+const replayApproval = context.createSyncApproval_(
+  approvalSettings,
+  fullTwoWeekSource,
+  [],
+  approvalPlan,
+  approvalState,
+  ['BULK_DELETION'],
+  'manual'
+);
+context.consumeSyncApproval_(replayApproval.approvalId);
+assert.throws(() => context.validateSyncApproval_(
+  replayApproval.approvalId,
+  approvalSettings,
+  fullTwoWeekSource,
+  [],
+  approvalPlan,
+  approvalState,
+  ['BULK_DELETION'],
+  'manual'
+), /重新預覽/, '一次性核准消耗後不得重播');
+context.clearChunkedStore_('TSCHOOL_SOURCE_ACCEPTED_BASELINE');
+context.clearChunkedStore_('TSCHOOL_SYNC_APPROVAL');
+
 const results = fixtures.map(fixture => {
-  if (!fs.existsSync(fixture.file)) {
-    return { grade: fixture.grade, skipped: true, reason: `找不到 ${fixture.file}` };
-  }
+  assert.equal(fs.existsSync(fixture.file), true, `${fixture.grade} 的固定課表 fixture 不得缺少`);
 
   const payload = JSON.parse(fs.readFileSync(fixture.file, 'utf8'));
   const installerSummary = scheduleData.summarizePayload(payload, new Date('2026-07-20T12:00:00+08:00'));
@@ -6258,6 +6520,16 @@ const results = fixtures.map(fixture => {
     runtimeSummary.catalogFingerprint,
     installerSummary.catalogFingerprint,
     `${fixture.grade} 的設定目錄指紋必須跨網站與 Code.gs 一致`
+  );
+  assert.equal(
+    runtimeSummary.coverageFingerprint,
+    installerSummary.coverageFingerprint,
+    `${fixture.grade} 的日期涵蓋指紋必須跨網站與 Code.gs 一致`
+  );
+  assert.equal(
+    runtimeSummary.sourceRevisionFingerprint,
+    installerSummary.sourceRevisionFingerprint,
+    `${fixture.grade} 的完整來源版本指紋必須跨網站與 Code.gs 一致`
   );
   assert.notEqual(
     runtimeSummary.scheduleFingerprint,

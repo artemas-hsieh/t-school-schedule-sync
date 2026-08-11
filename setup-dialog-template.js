@@ -8,19 +8,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <base target="_top">
   <style>
-    :root { color-scheme:light; --ink:#14211d; --muted:#52615b; --line:#bac6be; --paper:#f4f7f2; --green:#007c59; --orange:#a63c2f; --orange-soft:#fff8ed; }
+    :root { color-scheme:light; --ink:#14211d; --muted:#4f5d57; --line:#bac6be; --line-dark:#75847c; --paper:#f4f7f2; --paper-bright:#fff; --sync:#00a676; --sync-dark:#007c59; --warning:#f05a47; --warning-surface:#fae3df; --error:#a62d23; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --radius-control:3px; --body:"Noto Sans TC Variable","Noto Sans TC","Microsoft JhengHei",sans-serif; }
     * { box-sizing:border-box; }
-    body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.65 Arial,"Noto Sans TC","Microsoft JhengHei",sans-serif; }
-    main { min-height:100vh; padding:28px 32px; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:13px/20px var(--body); text-rendering:optimizeLegibility; }
+    main { min-height:100vh; padding:var(--space-6) 32px; }
     h1 { margin:0; font-size:22px; line-height:1.4; font-weight:700; }
-textarea { width:100%; min-height:300px; margin-top:16px; padding:14px 16px; resize:none; border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--ink); font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
+textarea { width:100%; min-height:300px; margin-top:var(--space-4); padding:var(--space-3) var(--space-4); resize:none; border:1px solid var(--line-dark); border-radius:var(--radius-control); background:var(--paper-bright); color:var(--ink); font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
     textarea::placeholder { color:#7a8882; }
-    textarea:focus { outline:3px solid rgba(0,124,89,.2); border-color:var(--green); }
-    .message,.warning { margin-top:14px; padding:11px 13px; border:1px solid var(--orange); background:var(--orange-soft); color:#6f2a20; }
-    .actions { display:flex; align-items:center; gap:16px; margin-top:18px; }
+    textarea:focus { outline:2px solid var(--sync); outline-offset:2px; border-color:var(--sync-dark); }
+    .message,.warning { margin-top:var(--space-3); padding:var(--space-3); border:1px solid var(--warning); border-left-width:4px; background:var(--warning-surface); color:var(--error); }
+    .actions { display:flex; align-items:center; gap:var(--space-4); margin-top:var(--space-5); }
     .actions p { margin:0; color:var(--muted); }
     .source-wait-note { margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.6; }
-    button { min-height:44px; padding:10px 16px; flex:0 0 auto; border:1px solid var(--green); border-radius:4px; background:var(--green); color:#fff; font:inherit; font-weight:700; cursor:pointer; }
+    button { min-height:44px; padding:10px var(--space-4); flex:0 0 auto; border:1px solid var(--sync-dark); border-radius:var(--radius-control); background:var(--sync); color:#fff; font:inherit; font-weight:700; cursor:pointer; transition:box-shadow 150ms ease,transform 150ms ease; }
+    button:hover { box-shadow:3px 3px 0 rgba(20,33,29,.22); transform:translate(-1px,-1px); }
+    button:active { box-shadow:none; transform:translate(1px,1px); }
+    button:focus-visible { outline:2px solid var(--sync); outline-offset:2px; }
     button:disabled { opacity:.55; cursor:wait; }
     [hidden] { display:none !important; }
     @media (max-width:520px) { main{padding:20px 16px}.actions{align-items:stretch;flex-direction:column}.actions button{width:100%}textarea{min-height:240px} }

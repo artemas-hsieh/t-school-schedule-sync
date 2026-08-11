@@ -48,7 +48,7 @@ node tests/smoke-test.js
 - 安裝器與執行階段共用行為。
 - 可能影響課程、活動、事件範圍或產生程式碼語法的修改。
 
-冒煙測試會檢查介面模板基本條件、產生程式碼語法，以及在 fixture 存在時比較安裝器與執行階段的解析結果。若高一、高二或高三 fixture 缺失而被跳過，必須在完成回報中說明，不得將跳過項目視為通過。
+冒煙測試會檢查介面模板基本條件、產生程式碼語法，並以版本控制內的高一、高二、高三 fixture 比較安裝器與執行階段的解析結果。任一年級 fixture 缺失都必須讓測試失敗，不得跳過或視為通過。
 
 ## 設定碼與母版程式驗證
 
@@ -80,11 +80,12 @@ node scripts/generate-google-docs-control-panel.js \
 
 - 測試高一、高二、高三資料。
 - 比較安裝器與產生的 Apps Script 所得到的課程目錄、活動目錄、事件數量與日期範圍。
+- 比較兩個執行環境產生的日期涵蓋指紋與完整來源版本指紋；精確年級不符、每週不是七日、重複週次、無效國曆日期、日期倒退或週內不連續都必須拒絕。
 - 確認來源未提供時間的明確活動仍為全天事件。
 - 確認未知標題不會只因缺少課程名稱就被推斷為活動。
 - 確認標題尾端地點解析與正規化去重仍符合預期。
 
-若無法取得即時資料或 fixture，應說明未驗證的年級與原因。
+三個版本控制 fixture 是最低離線驗證，不得因即時來源不可用而省略；即時來源若無法取得，另說明未完成的線上驗證及原因。
 
 ## Calendar 與狀態變更
 
@@ -102,7 +103,7 @@ node scripts/generate-google-docs-control-panel.js \
 - 不會寫入主要 Calendar。
 - 控制臺手動建立與首次同步自動建立的專用 Calendar 都使用 `selected: true`，使其預設顯示在 Google Calendar 介面中。
 - 一般同步不會無故覆蓋來源未變時的使用者手動修改。
-- 可疑大量刪除會停止自動執行。
+- 可疑大量刪除會停止自動執行；門檻為任何樣本刪除未來受管理事件的 40%（含）以上，需覆蓋 5 刪 2、2 刪 1會停止，以及 3 刪 1可繼續的邊界。更換專用 Calendar 時從舊 Calendar 清理的受管理未來事件亦須計入，不能因一般事件差異表為零而繞過。
 - 刪除工具只處理受管理事件。
 - 「移除受管理事件」與「重設同步狀態」必須在同一把 Script Lock 內重新檢查 active job 並完成變更，且快速移除不得重複清除同步狀態。
 - Calendar 切換遵循先建立新 Calendar 事件、再清理舊 Calendar 的順序。
@@ -111,7 +112,8 @@ node scripts/generate-google-docs-control-panel.js \
 - Calendar 搬移期間若舊 Calendar 已不存在，`migration_delete` 應視為沒有可清理項目並繼續；不得把一般 API 或權限例外一律吞掉成「已刪除」。
 - 零操作的 finalizer 重試不會清除連續失敗次數。
 - 設定與 `SYNC_STATE` 遷移不會遺失可復原所需資訊。
-- 大量刪除預覽 token 在來源或設定改變後會失效；強制修復不得繞過大量刪除保護。
+- 大量刪除或 expired 來源的預覽 approval 必須綁定操作入口、來源版本與涵蓋範圍、設定、Calendar、舊 state、目標事件及刪除清單；10 分鐘逾時、任一輸入改變、跨入口使用、首次建立工作單後重播都必須失效。強制修復與後續批次重新規劃不得繞過大量刪除保護。
+- accepted source baseline 只能在 Calendar 與 state 成功提交後更新；單純開啟 UI、寫入最後成功摘要或匯入設定碼不得建立或推進 baseline。同學期來源缺少既有未來日期、範圍退縮、重疊日期卻宣稱不同學期時必須在建立 Calendar 前停止；結構可信但沒有未來日期時則標記 expired，僅能由控制臺明確單次確認。
 - 失敗通知不會掩蓋原始同步錯誤。
 - Calendar 或設定已寫入後，即使 `getSettingsUiData()`、Calendar 清單、狀態顯示、觸發器或通知後處理失敗，也必須回傳已完成結果與獨立警告；不得進入 `notifySyncFailureUnlessActionRequired_()` 或對使用者誤報主要操作失敗。
 - 指紋、簽章與 hash 輸入必須使用資料域名稱與版本；`catalogFingerprint`、`scheduleFingerprint`、`setupContextFingerprint`、`desiredScheduleFingerprint`、`indexFingerprint` 及事件簽章不得交叉比較。需跨執行環境比較的列必須使用明確字典序，不依賴預設 locale。
