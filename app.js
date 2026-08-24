@@ -876,12 +876,17 @@ function renderCourses() {
 
   const query = normalizeSearchText(elements.courseSearch.value);
   const catalog = state.sourceSummary.catalog;
+  const isCourseSelectionHidden = window.TSchoolScheduleData?.isCourseSelectionHidden;
+  const isVisibleItem = item => !(typeof isCourseSelectionHidden === 'function' &&
+    isCourseSelectionHidden(item.title));
   const sections = [];
   const termItems = (catalog.termItems || [])
+    .filter(isVisibleItem)
     .filter(item => normalizeSearchText(item.title).includes(query));
   const vacationItems = (catalog.vacationItems || [])
+    .filter(isVisibleItem)
     .filter(item => normalizeSearchText(item.title).includes(query));
-  const hasVacationItems = (catalog.vacationItems || []).length > 0;
+  const hasVacationItems = (catalog.vacationItems || []).some(isVisibleItem);
 
   if (termItems.length > 0) {
     sections.push(renderCourseSection(
@@ -922,7 +927,10 @@ function renderScheduleItemCard(item) {
 }
 
 function renderSelectionCounts() {
-  const catalogItems = state.sourceSummary ? state.sourceSummary.catalog.all || [] : [];
+  const isCourseSelectionHidden = window.TSchoolScheduleData?.isCourseSelectionHidden;
+  const catalogItems = state.sourceSummary ? (state.sourceSummary.catalog.all || [])
+    .filter(item => !(typeof isCourseSelectionHidden === 'function' &&
+      isCourseSelectionHidden(item.title))) : [];
   const selected = getSelectedTitles();
   const selectedCount = catalogItems.filter(item => selected.has(item.title)).length;
   const label = `已選 ${selectedCount} 項`;
@@ -952,11 +960,12 @@ function getSettings() {
 
   const summary = state.sourceSummary;
   const selected = getSelectedTitles();
-  const selectedTitles = summary
-    ? (summary.catalog.all || [])
+  const applyCourseSelectionRules = window.TSchoolScheduleData?.applyCourseSelectionRules;
+  const selectedTitles = summary && typeof applyCourseSelectionRules === 'function'
+    ? applyCourseSelectionRules(Array.from(selected), summary.catalog.all || [])
+    : (summary ? (summary.catalog.all || [])
       .filter(item => selected.has(item.title))
-      .map(item => item.title)
-    : [];
+      .map(item => item.title) : []);
 
   return {
     appVersion: '2.0.0-rc.2',
@@ -3493,7 +3502,10 @@ function renderSettingsSummary() {
   }
 
   const selectedTitles = getSelectedTitles();
-  const catalogItems = state.sourceSummary?.catalog?.all || [];
+  const isCourseSelectionHidden = window.TSchoolScheduleData?.isCourseSelectionHidden;
+  const catalogItems = (state.sourceSummary?.catalog?.all || [])
+    .filter(item => !(typeof isCourseSelectionHidden === 'function' &&
+      isCourseSelectionHidden(item.title)));
   const selectedItems = catalogItems
     .filter(item => selectedTitles.has(item.title))
     .map(item => item.title);

@@ -505,7 +505,7 @@
 
     <section class="term-transition" id="term-transition" role="alert" aria-live="assertive" tabindex="-1" hidden>
       <div>
-        <h2>請完成新學期設定</h2>
+        <h2 id="term-transition-title">請完成新學期設定</h2>
         <p id="term-transition-message">確認新學期年級 → 選擇課程與活動 → 完成選擇並同步</p>
         <p id="term-transition-outline-message" hidden></p>
         <button type="button" id="term-transition-action">前往確認年級</button>
@@ -621,10 +621,14 @@
       var customNotificationHours = [6];
       var initialLoadRetryTimer = null;
       var INITIAL_LOAD_RETRY_DELAY_MS = 1500;
+      var NATURAL_ADVANCED_BASE_TITLE = '自然進階(二)';
 
       function byId(id) { return document.getElementById(id); }
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
       function normalize(value) { return String(value || '').replace(/\s+/g, '').toLowerCase(); }
+      function isCourseSelectionHidden(value) {
+        return normalize(value) === normalize(NATURAL_ADVANCED_BASE_TITLE);
+      }
       function defaultCalendarName(gradeName) { return (gradeName || '高一') + '行程｜T-SCHOOL Schedule Sync'; }
       function isDefaultSelectedTitle(value) {
         return /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(normalize(value));
@@ -747,7 +751,9 @@
       function render(data) {
         model = data;
         var settings = data.settings;
-        selectedTitles = new Set(settings.selectedTitles || []);
+        selectedTitles = new Set((settings.selectedTitles || []).filter(function (title) {
+          return !isCourseSelectionHidden(title);
+        }));
         if (data.termTransition && data.termTransition.required && selectedTitles.size === 0) {
           seedDefaultSelections(data.source);
         }
@@ -771,17 +777,21 @@
         renderTermTransition(data.termTransition, data.courseOutlineStatus, data.source);
         updateConditionalFields();
         var needsTermSelection = Boolean(data.termTransition && data.termTransition.required);
+        var verifyingTerm = Boolean(data.termTransition && data.termTransition.verifying);
         var sourceUnavailable = Boolean(data.source && data.source.unavailable);
-        byId('top-status').dataset.state = !needsTermSelection && !sourceUnavailable && data.status && data.status.ok
+        byId('top-status').dataset.state = !needsTermSelection && !verifyingTerm &&
+          !sourceUnavailable && data.status && data.status.ok
           ? 'success'
           : 'attention';
-        byId('top-status').textContent = needsTermSelection
+        byId('top-status').textContent = verifyingTerm
+          ? '正在確認新學期課表'
+          : (needsTermSelection
           ? '待重新選擇課程與活動'
           : (sourceUnavailable
             ? '課表來源暫時離線'
           : (data.status && data.status.ok
             ? '狀態正常'
-            : (settings.setupComplete ? '需檢查狀態' : '待首次同步')));
+            : (settings.setupComplete ? '需檢查狀態' : '待首次同步'))));
         byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
           ? '完成選擇並同步'
@@ -793,31 +803,51 @@
       function renderTermTransition(transition, outlineStatus, source) {
         var panel = byId('term-transition');
         var required = Boolean(transition && transition.required);
-        panel.hidden = !required;
+        var verifying = Boolean(transition && transition.verifying);
+        panel.hidden = !required && !verifying;
         byId('term-grade-confirmation').hidden = !required;
-        if (!required) {
+        byId('term-transition-action').hidden = !required;
+        if (!required && !verifying) {
           byId('term-grade-confirmed').checked = false;
           termTransitionAnnounced = false;
           return;
         }
+        byId('term-transition-title').textContent = verifying
+          ? '正在確認課表是否已轉入新學期'
+          : '請完成新學期設定';
         byId('term-transition-message').textContent =
-          '確認新學期年級 → 選擇課程與活動 → 完成選擇並同步';
+          verifying
+            ? '系統會觀察 30 分鐘。期間不會改動日曆、清空選擇或寄送新學期提醒。'
+            : '確認新學期年級 → 選擇課程與活動 → 完成選擇並同步';
         var outlineMessage = byId('term-transition-outline-message');
+        if (verifying) {
+          outlineMessage.hidden = !transition.verificationDueAt;
+          outlineMessage.textContent = transition.verificationDueAt
+            ? '預計於 ' + new Date(transition.verificationDueAt).toLocaleString('zh-TW') + ' 再次確認。'
+            : '';
+          return;
+        }
         var indexWarning = outlineStatus && outlineStatus.indexWarning || '';
         var missingCurrentOutline = outlineStatus && !outlineStatus.enabled;
-        outlineMessage.hidden = !indexWarning && !missingCurrentOutline && !transition.noticeFailed;
+        var noticeScheduled = transition.noticeState === 'scheduled' && transition.noticeScheduledFor;
+        outlineMessage.hidden = !indexWarning && !missingCurrentOutline &&
+          !transition.noticeFailed && !noticeScheduled;
         outlineMessage.textContent = transition.noticeFailed
           ? '提醒信暫時無法寄出，但這裡會持續保留重新選擇課程與活動的提示。'
           : (indexWarning
             ? indexWarning
             : (missingCurrentOutline
               ? '這學期的課綱尚未加入中央索引；可先同步基本行程。上架後，自動同步或下一次手動同步會補入課綱。'
-              : ''));
+              : (noticeScheduled
+                ? '新學期提醒預計於 ' +
+                  new Date(transition.noticeScheduledFor).toLocaleString('zh-TW') + ' 寄出。'
+                : '')));
       }
 
       function updateActionAvailability() {
         if (!model || busy) return;
         var requiresSelection = Boolean(model.termTransition && model.termTransition.required);
+        var verifyingTerm = Boolean(model.termTransition && model.termTransition.verifying);
         var sourceUnavailable = Boolean(model.source && model.source.unavailable);
         var catalog = model.source && model.source.catalog || {};
         var missingSelection = !(catalog.all || []).some(function (item) {
@@ -826,18 +856,20 @@
         var missingGradeConfirmation = requiresSelection && !byId('term-grade-confirmed').checked;
         ['save', 'save-sync'].forEach(function (id) {
           var button = byId(id);
-          button.disabled = missingSelection || missingGradeConfirmation || sourceUnavailable;
+          button.disabled = missingSelection || missingGradeConfirmation || sourceUnavailable || verifyingTerm;
           button.dataset.validationDisabled = String(
-            missingSelection || missingGradeConfirmation || sourceUnavailable
+            missingSelection || missingGradeConfirmation || sourceUnavailable || verifyingTerm
           );
         });
         ['run-sync', 'repair-sync'].forEach(function (id) {
           var button = byId(id);
-          button.disabled = requiresSelection || sourceUnavailable;
-          button.dataset.validationDisabled = String(requiresSelection || sourceUnavailable);
+          button.disabled = requiresSelection || verifyingTerm || sourceUnavailable;
+          button.dataset.validationDisabled = String(requiresSelection || verifyingTerm || sourceUnavailable);
         });
-        byId('sync-menu-toggle').disabled = requiresSelection || sourceUnavailable;
-        byId('sync-menu-toggle').dataset.validationDisabled = String(requiresSelection || sourceUnavailable);
+        byId('sync-menu-toggle').disabled = requiresSelection || verifyingTerm || sourceUnavailable;
+        byId('sync-menu-toggle').dataset.validationDisabled = String(
+          requiresSelection || verifyingTerm || sourceUnavailable
+        );
         byId('create-calendar').disabled = sourceUnavailable;
         byId('create-calendar').dataset.validationDisabled = String(sourceUnavailable);
         Array.prototype.forEach.call(
@@ -848,7 +880,7 @@
           document.querySelectorAll('[data-keep],[data-remove]'),
           function (button) { button.disabled = sourceUnavailable; }
         );
-        if (requiresSelection || sourceUnavailable) setSyncMenuOpen(false);
+        if (requiresSelection || verifyingTerm || sourceUnavailable) setSyncMenuOpen(false);
       }
 
       function renderSource(source) {
@@ -1038,6 +1070,9 @@
       }
 
       function renderPending(items) {
+        items = (items || []).filter(function (title) {
+          return !isCourseSelectionHidden(title);
+        });
         byId('pending-section').hidden = !items.length;
         byId('pending-list').innerHTML = items.map(function (title) { return '<div class="pending-item"><strong>' + escapeHtml(title) + '</strong><div class="pending-actions"><button type="button" class="keep" data-keep="' + escapeHtml(title) + '">屬於我，保留</button><button type="button" class="remove" data-remove="' + escapeHtml(title) + '">不屬於我，下次移除</button></div></div>'; }).join('');
       }
@@ -1073,7 +1108,9 @@
           : getSelectedNotifyHours();
         return {
           gradeName: getCheckedGrade(),
-          selectedTitles: Array.from(selectedTitles),
+          selectedTitles: Array.from(selectedTitles).filter(function (title) {
+            return !isCourseSelectionHidden(title);
+          }),
           calendarId: byId('calendar').value,
           calendarName: byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade()),
           notificationEmail: byId('email').value.trim(),
@@ -1320,7 +1357,9 @@
           byId('app').hidden = false;
           requestAnimationFrame(function () {
             byId('app').classList.add('is-ready');
-            if (data.termTransition && data.termTransition.required && !termTransitionAnnounced) {
+            if (data.termTransition &&
+                (data.termTransition.required || data.termTransition.verifying) &&
+                !termTransitionAnnounced) {
               termTransitionAnnounced = true;
               byId('term-transition').focus({ preventScroll: true });
             }

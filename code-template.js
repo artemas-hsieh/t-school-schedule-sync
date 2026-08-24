@@ -142,7 +142,7 @@ function runHighLoadFirstSyncTest() {
   const snapshot = collectCourseOutlineSnapshot_(settings, source, outlineEvents, sourceSets);
   if (snapshot.diagnostics.missingSheetNames.length) {
     throw new Error(
-      '30 天課綱找不到精確分頁：' +
+      '30 天課綱找不到可匹配分頁：' +
       snapshot.diagnostics.missingSheetNames.join('、') +
       '。已停止首次同步，避免建立缺少課綱內容的測試事件。'
     );
@@ -331,13 +331,13 @@ function runHighLoadCourseOutlineReadTest() {
       (report.missingSheetNames.length ? report.missingSheetNames.join('、') : '無') +
     '\\n已略過跨校課程：' +
       (report.ignoredCrossSchoolSheetNames.length ? report.ignoredCrossSchoolSheetNames.join('、') : '無') +
-    '\\n疑似只差空格或全形字元：' +
+    '\\n仍有其他名稱差異：' +
       (report.nearMatchSheetNames.length
         ? report.nearMatchSheetNames.map(item => item.courseName + ' → ' + item.candidates.join('／')).join('、')
         : '無') +
     '\\n耗時：' + Math.round(report.elapsedMs / 100) / 10 + ' 秒' +
     '\\n\\n結果：完成。這份課綱資料將套用至後續 Calendar 寫入測試。' +
-    '若「找不到分頁」有內容，請停止並回報；疑似名稱不會自動配對。',
+    '若「找不到分頁」有內容，請停止並回報；全半形、空白與大小寫以外的差異不會自動配對。',
     getControlPanelUi_().ButtonSet.OK
   );
   return report;
@@ -654,7 +654,8 @@ function clearHighLoadFirstSyncStores_() {
   deleteTriggersByHandlers_([
     SYNC_CONTINUATION_HANDLER,
     SYNC_WATCHDOG_HANDLER,
-    TERM_TRANSITION_NOTICE_HANDLER
+    TERM_TRANSITION_NOTICE_HANDLER,
+    TERM_TRANSITION_VERIFICATION_HANDLER
   ]);
   [
     SETTINGS_STORE,
@@ -663,6 +664,7 @@ function clearHighLoadFirstSyncStores_() {
     STATUS_STORE,
     SYNC_PROGRESS_STORE,
     NOTICE_STORE,
+    SOURCE_OBSERVATION_STORE,
     NOTIFICATION_QUEUE_STORE,
     COURSE_OUTLINE_STATE_STORE
   ].forEach(clearChunkedStore_);
@@ -841,7 +843,7 @@ function attachHighLoadTestCourseOutlines_(events, source) {
   if (!snapshot ||
       snapshot.schemaVersion !== COURSE_OUTLINE_CACHE_SCHEMA_VERSION ||
       snapshot.gradeName !== '高二' ||
-      snapshot.termKey !== (source && source.termKey || '')) {
+      !termKeysMatch_(snapshot.termKey, source && source.termKey || '')) {
     return events;
   }
   return attachCourseOutlineLookup_(events, snapshot.lookup || {});
@@ -907,6 +909,7 @@ function buildHighLoadTestSettings_(source) {
       pausedReason: '',
       autoSyncEnabledBeforeTermTransition: null,
       termTransitionNoticeAttempts: 0,
+      termTransitionNoticeScheduledFor: '',
       termTransitionNoticeSentAt: '',
       termTransitionNoticeLastError: '',
       calendarMigrationFromId: ''
@@ -964,6 +967,7 @@ const EMAIL_LINK_ALLOWED_HOSTS = ['calendar.google.com', 'docs.google.com'];
 const SETTINGS_STORE = 'TSCHOOL_SETTINGS';
 const SETUP_SOURCE_CONTEXT_STORE = 'TSCHOOL_SETUP_SOURCE_CONTEXT';
 const SOURCE_UI_CACHE_STORE = 'TSCHOOL_SOURCE_UI_CACHE';
+const SOURCE_OBSERVATION_STORE = 'TSCHOOL_SOURCE_OBSERVATION';
 const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
 const SYNC_JOB_STORE = 'TSCHOOL_SYNC_JOB';
 const STATUS_STORE = 'TSCHOOL_STATUS';
@@ -1009,7 +1013,16 @@ const COURSE_OUTLINE_MANUAL_ONCE_HANDLER = 'refreshCourseOutlinesManualOnce';
 const COURSE_OUTLINE_RETRY_HANDLER = 'retryCourseOutlineRefresh';
 const COURSE_OUTLINE_WATCHDOG_HANDLER = 'watchCourseOutlineRefresh';
 const COURSE_OUTLINE_APPLY_HANDLER = 'applyCourseOutlineSnapshotToCalendar';
+const NATURAL_ADVANCED_BASE_TITLE = '自然進階(二)';
+const NATURAL_ADVANCED_VARIANT_TITLES = [
+  '自然進階(二)_化學',
+  '自然進階(二)_生物',
+  '自然進階(二)_物理'
+];
 const TERM_TRANSITION_NOTICE_HANDLER = 'retryTermTransitionNotice';
+const TERM_TRANSITION_VERIFICATION_HANDLER = 'verifyTermTransitionCandidate';
+const TERM_TRANSITION_VERIFICATION_DELAY_MS = 30 * 60 * 1000;
+const NEW_TITLE_OBSERVATION_DELAY_MS = 24 * 60 * 60 * 1000;
 const TERM_TRANSITION_NOTICE_RETRY_DELAY_MS = 30 * 60 * 1000;
 const TERM_TRANSITION_NOTICE_MAX_ATTEMPTS = 2;
 const COURSE_OUTLINE_INDEX_SPREADSHEET_ID = '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9nmXi9wSBjY';
@@ -1037,9 +1050,9 @@ const SETUP_DIALOG_HTML = ${formatLongString(setupDialogHtml)};
 const SETUP_CODE_PREFIX = 'TSCHOOL_SETUP_V1';
 const SETUP_CODE_SCHEMA_VERSION = 2;
 const SETUP_CODE_MAX_LENGTH = 32 * 1024;
-const SETUP_CATALOG_FINGERPRINT_VERSION = 2;
-const SETUP_CONTEXT_FINGERPRINT_VERSION = 2;
-const SCHEDULE_FINGERPRINT_VERSION = 2;
+const SETUP_CATALOG_FINGERPRINT_VERSION = 3;
+const SETUP_CONTEXT_FINGERPRINT_VERSION = 3;
+const SCHEDULE_FINGERPRINT_VERSION = 3;
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const MANUAL_MERGE_EXCEPTIONS = {};
@@ -1186,7 +1199,7 @@ function getSettingsUiData() {
       settings = loadSettings_();
       assertSetupImported_(settings);
       stateStillMatches = settings.gradeName === observedSettings.gradeName &&
-        settings.termKey === observedSettings.termKey &&
+        termKeysMatch_(settings.termKey, observedSettings.termKey) &&
         Boolean(settings.setupComplete) === Boolean(observedSettings.setupComplete) &&
         (settings.setupComplete || !settings.setupContextFingerprint ||
           settings.setupContextFingerprint === source.setupContextFingerprint);
@@ -1325,13 +1338,17 @@ function loadSetupSourceContext_(settings) {
   const stored = readChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, null);
   if (!stored || !stored.catalog ||
       stored.gradeName !== settings.gradeName ||
-      stored.termKey !== settings.termKey) {
+      !termKeysMatch_(stored.termKey, settings.termKey)) {
     throw new Error('請重新貼上行程同步設定碼，再開啟控制臺。');
   }
   const source = normalizeSetupSourceContext_(stored, settings.gradeName);
   const expectedContextFingerprint = String(settings.setupContextFingerprint || '');
+  const storedContextFingerprint = String(
+    stored.setupContextFingerprint || stored.contextFingerprint || ''
+  );
   if (expectedContextFingerprint &&
       expectedContextFingerprint !== source.setupContextFingerprint &&
+      expectedContextFingerprint !== storedContextFingerprint &&
       Number(settings.setupCodeVersion) !== 1) {
     throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
   }
@@ -1382,17 +1399,22 @@ function saveSourceUiCacheSafely_(source) {
 
 function loadSourceUiFallback_(settings, sourceError) {
   const cached = readChunkedJson_(SOURCE_UI_CACHE_STORE, null);
-  const acceptedTerms = uniqueStrings_([settings.pendingTermKey, settings.termKey]);
+  const observation = loadSourceObservation_();
+  const acceptedTerms = uniqueStrings_([
+    settings.pendingTermKey,
+    settings.termKey,
+    observation.termCandidate && observation.termCandidate.termKey
+  ].map(normalizeTermKey_));
   let fallback = cached && cached.catalog &&
     cached.gradeName === settings.gradeName &&
-    (!acceptedTerms.length || acceptedTerms.indexOf(cached.termKey) !== -1)
+    (!acceptedTerms.length || acceptedTerms.indexOf(normalizeTermKey_(cached.termKey)) !== -1)
     ? cached
     : null;
 
   if (!fallback) {
     const setupSource = readChunkedJson_(SETUP_SOURCE_CONTEXT_STORE, null);
     if (setupSource && setupSource.catalog && setupSource.gradeName === settings.gradeName &&
-        (!acceptedTerms.length || acceptedTerms.indexOf(setupSource.termKey) !== -1)) {
+        (!acceptedTerms.length || acceptedTerms.indexOf(normalizeTermKey_(setupSource.termKey)) !== -1)) {
       fallback = setupSource;
     }
   }
@@ -1770,10 +1792,48 @@ function makeCatalogFingerprintRows_(catalogItems) {
   ]));
 }
 
+function makeAcademicTermKey_(gradeApiName, firstDateKey) {
+  const match = String(firstDateKey || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);
+  if (!gradeApiName || !match) throw new Error('無法判定課表屬於哪一個學期。');
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!year || month < 1 || month > 12) throw new Error('無法判定課表屬於哪一個學期。');
+  const academicYear = month >= 8 ? year : year - 1;
+  const semester = month >= 8 || month === 1 ? 1 : 2;
+  return String(gradeApiName) + '|' + academicYear + '-' + semester;
+}
+
+function normalizeTermKey_(termKey) {
+  const value = String(termKey || '').trim();
+  const canonical = value.match(/^(.+)\\|(\\d{4})-([12])$/);
+  if (canonical) return canonical[1] + '|' + canonical[2] + '-' + canonical[3];
+  const legacy = value.match(/^(.+)\\|(\\d{4}-\\d{2}-\\d{2})$/);
+  if (!legacy) return value;
+  try {
+    return makeAcademicTermKey_(legacy[1], legacy[2]);
+  } catch (error) {
+    return value;
+  }
+}
+
+function termKeysMatch_(left, right) {
+  return Boolean(left && right && normalizeTermKey_(left) === normalizeTermKey_(right));
+}
+
 function makeSetupCatalogFingerprint_(termKey, lastDateKey, catalogItems) {
   return hashText_(JSON.stringify([
     'setup-catalog',
     SETUP_CATALOG_FINGERPRINT_VERSION,
+    String(termKey || ''),
+    String(lastDateKey || ''),
+    makeCatalogFingerprintRows_(catalogItems)
+  ]));
+}
+
+function makeLegacyV2SetupCatalogFingerprint_(termKey, lastDateKey, catalogItems) {
+  return hashText_(JSON.stringify([
+    'setup-catalog',
+    2,
     String(termKey || ''),
     String(lastDateKey || ''),
     makeCatalogFingerprintRows_(catalogItems)
@@ -1806,10 +1866,10 @@ function makeLegacyClassifiedSetupCatalogFingerprint_(termKey, lastDateKey, cata
   ]));
 }
 
-function makeSetupContextFingerprint_(source) {
+function makeSetupContextFingerprintVersion_(source, version) {
   return hashText_(JSON.stringify([
     'setup-context',
-    SETUP_CONTEXT_FINGERPRINT_VERSION,
+    version,
     String(source && source.gradeName || ''),
     String(source && source.termKey || ''),
     String(source && source.firstDateKey || ''),
@@ -1818,6 +1878,10 @@ function makeSetupContextFingerprint_(source) {
     String(source && source.catalogFingerprint || ''),
     makeCatalogFingerprintRows_(source && source.catalog && source.catalog.all)
   ]));
+}
+
+function makeSetupContextFingerprint_(source) {
+  return makeSetupContextFingerprintVersion_(source, SETUP_CONTEXT_FINGERPRINT_VERSION);
 }
 
 function normalizeSetupSourceContext_(source, gradeName) {
@@ -1843,6 +1907,15 @@ function normalizeSetupSourceContext_(source, gradeName) {
     if (!suppliedFingerprint || suppliedFingerprint !== expected) {
       throw new Error('設定碼的課表摘要指紋不一致，請回網站重新產生。');
     }
+  } else if (sourceFingerprintVersion === 2) {
+    const expected = makeLegacyV2SetupCatalogFingerprint_(
+      source.termKey,
+      source.lastDateKey,
+      catalogAll
+    );
+    if (!suppliedFingerprint || suppliedFingerprint !== expected) {
+      throw new Error('舊版設定碼的課表摘要指紋不一致，請回網站重新產生。');
+    }
   } else if (sourceFingerprintVersion === 1) {
     const expected = makeLegacyClassifiedSetupCatalogFingerprint_(
       source.termKey,
@@ -1866,10 +1939,10 @@ function normalizeSetupSourceContext_(source, gradeName) {
       termItems: catalogAll.filter(item => item.period === 'term'),
       vacationItems: catalogAll.filter(item => item.period === 'vacation')
     },
-    termKey: String(source.termKey || ''),
+    termKey: normalizeTermKey_(source.termKey),
     catalogFingerprintVersion: SETUP_CATALOG_FINGERPRINT_VERSION,
     catalogFingerprint: makeSetupCatalogFingerprint_(
-      source.termKey,
+      normalizeTermKey_(source.termKey),
       source.lastDateKey,
       catalogAll
     ),
@@ -1877,11 +1950,16 @@ function normalizeSetupSourceContext_(source, gradeName) {
     initialSetupSnapshot: true
   };
   normalized.setupContextFingerprint = makeSetupContextFingerprint_(normalized);
-  if (sourceFingerprintVersion === SETUP_CATALOG_FINGERPRINT_VERSION &&
-      (source.setupContextFingerprint || source.contextFingerprint) &&
-      String(source.setupContextFingerprint || source.contextFingerprint) !==
-        normalized.setupContextFingerprint) {
-    throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
+  const suppliedContextFingerprint = String(
+    source.setupContextFingerprint || source.contextFingerprint || ''
+  );
+  if (suppliedContextFingerprint) {
+    const expectedContextFingerprint = sourceFingerprintVersion === 2
+      ? makeSetupContextFingerprintVersion_(source, 2)
+      : normalized.setupContextFingerprint;
+    if (suppliedContextFingerprint !== expectedContextFingerprint) {
+      throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
+    }
   }
   return normalized;
 }
@@ -1897,6 +1975,13 @@ function setupPayloadCatalogMatchesSource_(payload, source) {
   if (version === SETUP_CATALOG_FINGERPRINT_VERSION) {
     return Number(source.catalogFingerprintVersion) === version &&
       supplied === source.catalogFingerprint;
+  }
+  if (version === 2) {
+    return supplied === makeLegacyV2SetupCatalogFingerprint_(
+      payload.termKey,
+      source.lastDateKey,
+      source.catalog.all
+    );
   }
   if (version === 1) {
     return Boolean(payload && payload.sourceSnapshot);
@@ -1939,7 +2024,7 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
   const notificationHours = validateSetupNotificationHours_(payload.notificationHours);
   const embeddedSource = buildSetupSourceContextFromPayload_(payload);
   const source = embeddedSource || loadSourceContext_(payload.gradeName);
-  if (payload.termKey && source.termKey && payload.termKey !== source.termKey) {
+  if (payload.termKey && source.termKey && !termKeysMatch_(payload.termKey, source.termKey)) {
     throw new Error('這份設定碼屬於不同學期，請回網站依目前課表重新產生。');
   }
 
@@ -1949,11 +2034,11 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
   });
   const missingItems = [];
   const requestedTitles = getSelectedTitlesFromSetupPayload_(payload, source);
-  const selectedTitles = requestedTitles.map(title => {
+  const selectedTitles = applyCourseSelectionRules_(requestedTitles.map(title => {
     const current = itemByKey[normalizeTitle_(title)] || '';
     if (!current) missingItems.push(String(title));
     return current;
-  }).filter(Boolean);
+  }).filter(Boolean), source.catalog.all);
   const sourceChanged = Boolean(
     missingItems.length ||
     !setupPayloadCatalogMatchesSource_(payload, source)
@@ -2520,14 +2605,37 @@ function saveSettingsCore_(input) {
     assertSetupImported_(oldSettings);
     const source = loadSourceContext_(sanitizeGrade_(input && input.gradeName));
     assertFirstSetupTermStillCurrent_(oldSettings, source);
+    if (oldSettings.setupComplete && !oldSettings.pendingTermKey &&
+        oldSettings.gradeName === source.gradeName) {
+      applyTermTransitionIfNeeded_(oldSettings, source, true);
+    }
+    if (loadSourceObservation_().termCandidate) {
+      throw new Error(
+        '[ACTION_REQUIRED] 正在確認課表是否已轉入新學期，' +
+        '期間不能儲存、同步或修復。'
+      );
+    }
     const next = sanitizeSettingsInput_(input, oldSettings, source);
 
     saveSettings_(next);
+    const observation = loadSourceObservation_();
+    observation.termCandidate = null;
+    observation.newTitleCandidates = observation.newTitleCandidates.filter(candidate =>
+      !termKeysMatch_(candidate.termKey, source.termKey)
+    );
+    if (observation.pendingNewTitleNotice &&
+        termKeysMatch_(observation.pendingNewTitleNotice.termKey, source.termKey)) {
+      observation.pendingNewTitleNotice = null;
+    }
+    saveSourceObservation_(observation);
     const operationWarnings = [];
     try {
       cancelActiveSyncJob_('設定已更新，將依新設定重新規劃。');
       if (!next.pendingTermKey) {
-        deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+        deleteTriggersByHandlers_([
+          TERM_TRANSITION_NOTICE_HANDLER,
+          TERM_TRANSITION_VERIFICATION_HANDLER
+        ]);
       }
       if (next.setupComplete) refreshAutoSyncTriggers_(next);
       else deleteAutoSyncTriggersUnlocked_();
@@ -2548,7 +2656,7 @@ function saveSettingsCore_(input) {
 
 function assertFirstSetupTermStillCurrent_(settings, source) {
   if (settings && !settings.setupComplete && settings.termKey && source && source.termKey &&
-      settings.termKey !== source.termKey) {
+      !termKeysMatch_(settings.termKey, source.termKey)) {
     throw new Error('課表已進入不同學期，請回設定網站重新選擇課程與活動並產生新的設定碼。');
   }
 }
@@ -2565,9 +2673,9 @@ function sanitizeSettingsInput_(input, previous, source) {
     const key = normalizeTitle_(title);
     if (!sourceTitleByKey[key]) sourceTitleByKey[key] = title;
   });
-  const cleanSelected = uniqueStrings_(selectedTitles
+  const cleanSelected = applyCourseSelectionRules_(uniqueStrings_(selectedTitles
     .map(title => sourceTitleByKey[normalizeTitle_(title)] || '')
-    .filter(Boolean));
+    .filter(Boolean)), source.catalog.all);
   const notificationEmail = String(value.notificationEmail || '').trim();
 
   if (notificationEmail) {
@@ -2658,7 +2766,9 @@ function sanitizeSettingsInput_(input, previous, source) {
     reminderMode,
     reminderMinutes: sanitizeReminderMinutes_(value.reminderMinutes),
     knownTitles: sourceTitles,
-    pendingTitles: gradeChanged ? [] : previous.pendingTitles.filter(title => sourceKeys.indexOf(normalizeTitle_(title)) !== -1),
+    pendingTitles: gradeChanged ? [] : previous.pendingTitles.filter(title =>
+      !isCourseSelectionHidden_(title) && sourceKeys.indexOf(normalizeTitle_(title)) !== -1
+    ),
     excludedTitles: gradeChanged ? [] : previous.excludedTitles.filter(title =>
       sourceKeys.indexOf(normalizeTitle_(title)) !== -1 &&
       cleanSelected.map(normalizeTitle_).indexOf(normalizeTitle_(title)) === -1
@@ -2669,6 +2779,7 @@ function sanitizeSettingsInput_(input, previous, source) {
     pausedReason: '',
     autoSyncEnabledBeforeTermTransition: null,
     termTransitionNoticeAttempts: 0,
+    termTransitionNoticeScheduledFor: '',
     termTransitionNoticeSentAt: '',
     termTransitionNoticeLastError: '',
     calendarMigrationFromId
@@ -2695,38 +2806,100 @@ function buildUiData_(settings, source) {
   };
 }
 
+function loadSourceObservation_() {
+  const stored = readChunkedJson_(SOURCE_OBSERVATION_STORE, null) || {};
+  return {
+    schemaVersion: 1,
+    termCandidate: stored.termCandidate && typeof stored.termCandidate === 'object'
+      ? stored.termCandidate
+      : null,
+    newTitleCandidates: Array.isArray(stored.newTitleCandidates)
+      ? stored.newTitleCandidates
+      : [],
+    pendingNewTitleNotice: stored.pendingNewTitleNotice &&
+      typeof stored.pendingNewTitleNotice === 'object'
+      ? stored.pendingNewTitleNotice
+      : null
+  };
+}
+
+function saveSourceObservation_(observation) {
+  writeChunkedJson_(SOURCE_OBSERVATION_STORE, Object.assign(
+    loadSourceObservation_(),
+    observation || {},
+    { schemaVersion: 1 }
+  ));
+}
+
+function clearTermCandidate_(observation) {
+  const next = observation || loadSourceObservation_();
+  next.termCandidate = null;
+  saveSourceObservation_(next);
+  try {
+    deleteTriggersByHandlers_([TERM_TRANSITION_VERIFICATION_HANDLER]);
+  } catch (error) {
+    Logger.log('新學期候選已清除，但驗證觸發器暫時無法整理：' +
+      userFacingError_(error));
+  }
+  return next;
+}
+
 function buildTermTransitionUiModel_(settings, source) {
+  const observation = loadSourceObservation_();
+  const candidate = observation.termCandidate;
   const required = Boolean(settings && settings.pendingTermKey);
+  const verifying = Boolean(!required && candidate && candidate.termKey);
   const resumeAutoSync = required
     ? (typeof settings.autoSyncEnabledBeforeTermTransition === 'boolean'
       ? settings.autoSyncEnabledBeforeTermTransition
       : true)
     : Boolean(settings && settings.autoSyncEnabled);
   return {
+    state: required ? 'required' : (verifying ? 'verifying' : 'none'),
     required,
+    verifying,
     pendingTermKey: required ? settings.pendingTermKey : '',
+    candidateTermKey: verifying ? candidate.termKey : '',
+    verificationDueAt: verifying ? candidate.verificationDueAt || '' : '',
     firstDate: source && source.firstDateKey || '',
     lastDate: source && source.lastDateKey || '',
     resumeAutoSync,
-    noticeFailed: required &&
-      Number(settings.termTransitionNoticeAttempts) >= TERM_TRANSITION_NOTICE_MAX_ATTEMPTS &&
-      !settings.termTransitionNoticeSentAt,
+    noticeState: !required
+      ? 'none'
+      : (settings.termTransitionNoticeSentAt
+        ? 'sent'
+        : ((Number(settings.termTransitionNoticeAttempts) >= TERM_TRANSITION_NOTICE_MAX_ATTEMPTS ||
+            settings.termTransitionNoticeLastError && !settings.termTransitionNoticeScheduledFor)
+          ? 'failed'
+          : (settings.termTransitionNoticeScheduledFor ? 'scheduled' : 'none'))),
+    noticeScheduledFor: required ? settings.termTransitionNoticeScheduledFor || '' : '',
+    noticeFailed: required && !settings.termTransitionNoticeSentAt && Boolean(
+      Number(settings.termTransitionNoticeAttempts) >= TERM_TRANSITION_NOTICE_MAX_ATTEMPTS ||
+      settings.termTransitionNoticeLastError && !settings.termTransitionNoticeScheduledFor
+    ),
     noticeLastError: required ? settings.termTransitionNoticeLastError || '' : ''
   };
 }
 
 function buildSourceUiModel_(source, gradeName) {
+  const visibleCatalogAll = (source.catalog.all || []).filter(item =>
+    !isCourseSelectionHidden_(item && item.title)
+  );
   return {
     gradeName,
     firstDate: source.firstDateKey,
     lastDate: source.lastDateKey,
-    itemCount: source.catalog.all.length,
+    itemCount: visibleCatalogAll.length,
     updateLabel: source.sourceUpdatedLabel,
     warning: source.sourceStale || source.sourceUnavailable,
     unavailable: Boolean(source.sourceUnavailable),
     unavailableMessage: String(source.sourceUnavailableMessage || ''),
     cacheSavedAt: String(source.sourceCacheSavedAt || ''),
-    catalog: source.catalog,
+    catalog: {
+      all: visibleCatalogAll,
+      termItems: visibleCatalogAll.filter(item => item.period === 'term'),
+      vacationItems: visibleCatalogAll.filter(item => item.period === 'vacation')
+    },
     termKey: source.termKey,
     catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
     catalogFingerprint: source.catalogFingerprint || '',
@@ -2997,6 +3170,7 @@ function syncSchedule_(options) {
     }
     const source = loadSourceContext_(settings.gradeName);
     settings = applyTermTransitionIfNeeded_(settings, source, false);
+    assertTermTransitionCalendarWritesAllowed_(settings);
     settings = registerNewTitles_(settings, source);
     if (trackProgress) {
       writeSyncProgress_(24, '正在確認專用日曆（可能需等待 0–10 分鐘）', 'running');
@@ -3546,9 +3720,11 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
   settings.setupComplete = true;
   settings.scheduleFingerprint = source.scheduleFingerprint;
   settings.setupContextFingerprint = '';
-  settings.knownTitles = uniqueStrings_(
-    settings.knownTitles.concat(source.catalog.all.map(item => item.title))
-  );
+  if (job.firstSetup) {
+    settings.knownTitles = uniqueStrings_(
+      settings.knownTitles.concat(source.catalog.all.map(item => item.title))
+    );
+  }
   if (job.migrationFromId) settings.calendarMigrationFromId = '';
   saveSettings_(settings);
 
@@ -3615,6 +3791,7 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
           notifyOnSuccess: job.notifyOnSuccess,
           notificationWindow: job.notificationWindow
         });
+        deliverPromotedNewTitleNoticeAfterSync_(settings, source, state);
         if (job.firstSetup && !job.setupNotificationClaimed) {
           job.setupNotificationClaimed = true;
           saveSyncJob_(job);
@@ -4048,46 +4225,217 @@ function dedupeAndValidateDesiredEvents_(events) {
   return result;
 }
 
+function assertTermTransitionCalendarWritesAllowed_(settings) {
+  const observation = loadSourceObservation_();
+  if (observation.termCandidate) {
+    throw new Error('[ACTION_REQUIRED] 正在確認課表是否已轉入新學期，期間不會改動日曆。');
+  }
+  if (settings && settings.pendingTermKey) {
+    throw new Error('[ACTION_REQUIRED] 已確認進入新學期，請先重新選擇課程與活動。');
+  }
+}
+
 function applyTermTransitionIfNeeded_(settings, source, quiet) {
-  if (!settings.setupComplete || !settings.termKey || settings.termKey === source.termKey) {
+  if (!settings.setupComplete || !settings.termKey) {
     return settings;
   }
 
-  if (settings.pendingTermKey !== source.termKey) {
-    if (!settings.pendingTermKey ||
-        typeof settings.autoSyncEnabledBeforeTermTransition !== 'boolean') {
-      settings.autoSyncEnabledBeforeTermTransition = Boolean(settings.autoSyncEnabled);
+  const observation = loadSourceObservation_();
+  if (termKeysMatch_(settings.termKey, source.termKey)) {
+    if (observation.termCandidate) {
+      clearTermCandidate_(observation);
+      try {
+        refreshAutoSyncTriggers_(settings);
+      } catch (triggerError) {
+        Logger.log('課表回復原學期，但自動同步觸發器暫時無法回復：' +
+          userFacingError_(triggerError));
+      }
     }
-    settings.selectedTitles = source.catalog.all
-      .filter(item => isDefaultSelectedTitle_(item.title))
-      .map(item => item.title);
-    settings.pendingTitles = [];
-    settings.pendingTermKey = source.termKey;
-    settings.autoSyncEnabled = false;
-    settings.pausedReason = '偵測到新學期，請重新選擇課程與活動。';
-    settings.termTransitionNoticeAttempts = 0;
-    settings.termTransitionNoticeSentAt = '';
-    settings.termTransitionNoticeLastError = '';
-    saveSettings_(settings);
-    try {
-      deleteAutoSyncTriggersUnlocked_();
-    } catch (triggerError) {
-      Logger.log('新學期狀態已儲存，但無法立即整理自動同步觸發器：' +
-        userFacingError_(triggerError));
-    }
-    try {
-      deliverTermTransitionNotice_(settings, source);
-    } catch (noticeError) {
-      Logger.log('新學期狀態已儲存，但通知後處理暫時失敗：' +
-        userFacingError_(noticeError));
-    }
+    return settings;
   }
 
-  if (!quiet) {
-    throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟控制臺介面並重新選擇課程與活動。');
+  if (settings.pendingTermKey && termKeysMatch_(settings.pendingTermKey, source.termKey)) {
+    if (observation.termCandidate) clearTermCandidate_(observation);
+    try {
+      migrateLegacyQueuedTermTransitionNotice_(settings, source);
+    } catch (migrationError) {
+      Logger.log('舊版學期通知佇列暫時無法遷移：' + userFacingError_(migrationError));
+    }
+    if (!quiet) {
+      throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟控制臺介面並重新選擇課程與活動。');
+    }
+    return settings;
+  }
+
+  const now = new Date();
+  const sourceTermKey = normalizeTermKey_(source.termKey);
+  const sourceFingerprint = String(source.scheduleFingerprint || source.catalogFingerprint || '');
+  let candidate = observation.termCandidate;
+  if (!candidate || !termKeysMatch_(candidate.termKey, sourceTermKey) ||
+      String(candidate.sourceFingerprint || '') !== sourceFingerprint) {
+    candidate = {
+      termKey: sourceTermKey,
+      sourceFingerprint,
+      firstSeenAt: now.toISOString(),
+      lastSeenAt: now.toISOString(),
+      verificationDueAt: new Date(now.getTime() + TERM_TRANSITION_VERIFICATION_DELAY_MS).toISOString(),
+      sourceFailureCount: 0,
+      sourceFailureNotifiedAt: ''
+    };
+    observation.termCandidate = candidate;
+    saveSourceObservation_(observation);
+    try {
+      cancelActiveSyncJob_('正在確認新學期課表。');
+      deleteAutoSyncTriggersUnlocked_();
+    } catch (triggerError) {
+      Logger.log('新學期驗證狀態已儲存，但無法立即整理自動同步觸發器：' +
+        userFacingError_(triggerError));
+    }
+    ensureOneTimeTrigger_(TERM_TRANSITION_VERIFICATION_HANDLER, TERM_TRANSITION_VERIFICATION_DELAY_MS);
+  } else {
+    candidate.lastSeenAt = now.toISOString();
+    candidate.sourceFailureCount = 0;
+    candidate.sourceFailureNotifiedAt = '';
+    observation.termCandidate = candidate;
+    saveSourceObservation_(observation);
+  }
+
+  const dueAt = Date.parse(candidate.verificationDueAt);
+  if (Number.isFinite(dueAt) && now.getTime() >= dueAt) {
+    settings = confirmTermTransition_(settings, source, observation);
+    if (!quiet) {
+      throw new Error('[ACTION_REQUIRED] 已確認進入新學期，請先開啟控制臺介面並重新選擇課程與活動。');
+    }
+  } else {
+    ensureOneTimeTrigger_(
+      TERM_TRANSITION_VERIFICATION_HANDLER,
+      Math.max(60 * 1000, dueAt - now.getTime())
+    );
+    if (!quiet) {
+      throw new Error('[ACTION_REQUIRED] 偵測到疑似新學期的課表，正在進行 30 分鐘穩定性確認，期間不會改動日曆。');
+    }
   }
 
   return settings;
+}
+
+function migrateLegacyQueuedTermTransitionNotice_(settings, source) {
+  if (!settings || !settings.pendingTermKey || !settings.termTransitionNoticeSentAt) return false;
+  const queueState = loadNotificationQueueState_();
+  const retained = queueState.pending.filter(item =>
+    String(item && item.templateKind || '') !== 'term_transition'
+  );
+  if (retained.length === queueState.pending.length) return false;
+  queueState.pending = retained;
+  saveNotificationQueueState_(queueState);
+  settings.termTransitionNoticeAttempts = 0;
+  settings.termTransitionNoticeScheduledFor = '';
+  settings.termTransitionNoticeSentAt = '';
+  settings.termTransitionNoticeLastError = '';
+  saveSettings_(settings);
+  try {
+    scheduleTermTransitionNotice_(settings, source);
+  } catch (error) {
+    settings.termTransitionNoticeScheduledFor = '';
+    settings.termTransitionNoticeLastError = userFacingError_(error);
+    saveSettings_(settings);
+  }
+  return true;
+}
+
+function confirmTermTransition_(settings, source, observation) {
+  if (typeof settings.autoSyncEnabledBeforeTermTransition !== 'boolean') {
+    settings.autoSyncEnabledBeforeTermTransition = Boolean(settings.autoSyncEnabled);
+  }
+  settings.selectedTitles = source.catalog.all
+    .filter(item => isDefaultSelectedTitle_(item.title))
+    .map(item => item.title);
+  settings.pendingTitles = [];
+  settings.pendingTermKey = normalizeTermKey_(source.termKey);
+  settings.autoSyncEnabled = false;
+  settings.pausedReason = '偵測到新學期，請重新選擇課程與活動。';
+  settings.termTransitionNoticeAttempts = 0;
+  settings.termTransitionNoticeScheduledFor = '';
+  settings.termTransitionNoticeSentAt = '';
+  settings.termTransitionNoticeLastError = '';
+  saveSettings_(settings);
+  const nextObservation = observation || loadSourceObservation_();
+  nextObservation.termCandidate = null;
+  nextObservation.newTitleCandidates = [];
+  nextObservation.pendingNewTitleNotice = null;
+  saveSourceObservation_(nextObservation);
+  try {
+    clearQueuedNewTitleNotifications_();
+  } catch (queueError) {
+    Logger.log('新學期已確認，但舊的新項目通知暫時無法清除：' +
+      userFacingError_(queueError));
+  }
+  try {
+    deleteTriggersByHandlers_([TERM_TRANSITION_VERIFICATION_HANDLER]);
+  } catch (triggerCleanupError) {
+    Logger.log('新學期已確認，但驗證觸發器暫時無法清除：' +
+      userFacingError_(triggerCleanupError));
+  }
+  try {
+    deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+    scheduleTermTransitionNotice_(settings, source);
+  } catch (noticeError) {
+    settings.termTransitionNoticeScheduledFor = '';
+    settings.termTransitionNoticeLastError = userFacingError_(noticeError);
+    saveSettings_(settings);
+    Logger.log('新學期已確認，但通知排程暫時失敗：' +
+      userFacingError_(noticeError));
+  }
+  return settings;
+}
+
+function clearQueuedNewTitleNotifications_() {
+  const queueState = loadNotificationQueueState_();
+  const pending = queueState.pending.filter(item =>
+    String(item && item.templateKind || '') !== 'new_schedule_items'
+  );
+  if (pending.length === queueState.pending.length) return false;
+  queueState.pending = pending;
+  saveNotificationQueueState_(queueState);
+  return true;
+}
+
+function verifyTermTransitionCandidate() {
+  try {
+    deleteTriggersByHandlers_([TERM_TRANSITION_VERIFICATION_HANDLER]);
+  } catch (triggerError) {
+    Logger.log('無法清理已執行的學期驗證觸發器：' + userFacingError_(triggerError));
+  }
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    ensureOneTimeTrigger_(TERM_TRANSITION_VERIFICATION_HANDLER, 5 * 60 * 1000);
+    return false;
+  }
+  try {
+    const settings = loadSettings_();
+    const observation = loadSourceObservation_();
+    if (!observation.termCandidate || settings.pendingTermKey) return false;
+    try {
+      const source = loadSourceContext_(settings.gradeName);
+      applyTermTransitionIfNeeded_(settings, source, true);
+      return true;
+    } catch (error) {
+      const latest = loadSourceObservation_();
+      if (!latest.termCandidate) throw error;
+      latest.termCandidate.sourceFailureCount =
+        Math.max(0, Number(latest.termCandidate.sourceFailureCount) || 0) + 1;
+      if (latest.termCandidate.sourceFailureCount >= 2 &&
+          !latest.termCandidate.sourceFailureNotifiedAt) {
+        notifySyncFailureSafe_(new Error('新學期課表驗證連續兩次無法讀取來源：' + userFacingError_(error)));
+        latest.termCandidate.sourceFailureNotifiedAt = new Date().toISOString();
+      }
+      saveSourceObservation_(latest);
+      ensureOneTimeTrigger_(TERM_TRANSITION_VERIFICATION_HANDLER, TERM_TRANSITION_VERIFICATION_DELAY_MS);
+      return false;
+    }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function buildTermTransitionNotice_(settings, source) {
@@ -4105,49 +4453,135 @@ function buildTermTransitionNotice_(settings, source) {
   };
 }
 
+function getNextTermTransitionNoticeAt_(settings, nowValue) {
+  const now = nowValue || new Date();
+  const hours = settings.instantNotificationsEnabled !== false
+    ? [INSTANT_NOTIFICATION_SUMMARY_HOUR]
+    : getEffectiveNotificationHours_(settings);
+  const currentHour = Number(Utilities.formatDate(now, TIMEZONE, 'H'));
+  const dateKey = Utilities.formatDate(now, TIMEZONE, 'yyyy-MM-dd');
+  const futureHour = hours.slice().sort((left, right) => left - right)
+    .find(hour => Number(hour) > currentHour);
+  if (typeof futureHour === 'number') {
+    return new Date(dateKey + 'T' + pad2_(futureHour) + ':00:00+08:00');
+  }
+  const tomorrow = new Date(Date.parse(dateKey + 'T12:00:00+08:00') + 24 * 60 * 60 * 1000);
+  const tomorrowKey = Utilities.formatDate(tomorrow, TIMEZONE, 'yyyy-MM-dd');
+  return new Date(tomorrowKey + 'T' + pad2_(hours.slice().sort((a, b) => a - b)[0]) + ':00:00+08:00');
+}
+
+function scheduleTermTransitionNotice_(settings, source) {
+  if (!settings || !settings.pendingTermKey || settings.termTransitionNoticeSentAt) return false;
+  const deliveryHours = settings.instantNotificationsEnabled !== false
+    ? [INSTANT_NOTIFICATION_SUMMARY_HOUR]
+    : getEffectiveNotificationHours_(settings);
+  const currentHour = Number(Utilities.formatDate(new Date(), TIMEZONE, 'H'));
+  if (deliveryHours.indexOf(currentHour) !== -1) {
+    return deliverTermTransitionNotice_(settings, source);
+  }
+  const scheduledFor = getNextTermTransitionNoticeAt_(settings, new Date());
+  settings.termTransitionNoticeScheduledFor = scheduledFor.toISOString();
+  settings.termTransitionNoticeLastError = '';
+  saveSettings_(settings);
+  ensureOneTimeTrigger_(
+    TERM_TRANSITION_NOTICE_HANDLER,
+    Math.max(60 * 1000, scheduledFor.getTime() - Date.now())
+  );
+  return true;
+}
+
 function deliverTermTransitionNotice_(settings, source) {
   if (!settings || !settings.pendingTermKey || settings.termTransitionNoticeSentAt) return true;
   const notice = buildTermTransitionNotice_(settings, source);
-  const result = sendActionRequiredSafe_(
-    settings,
-    notice.subject,
-    notice.body,
-    'term-transition|' + settings.pendingTermKey,
-    'term_transition',
-    { dateRange: notice.dateRange }
-  );
-  settings.termTransitionNoticeAttempts =
-    Math.max(0, Number(settings.termTransitionNoticeAttempts) || 0) +
-    (result.alreadySent ? 0 : 1);
-  if (result.ok) {
+  settings.termTransitionNoticeAttempts = Math.max(
+    0,
+    Number(settings.termTransitionNoticeAttempts) || 0
+  ) + 1;
+  try {
+    sendEmail_(settings, 'term_transition', notice.subject, notice.body, {
+      dateRange: notice.dateRange
+    });
     settings.termTransitionNoticeSentAt = new Date().toISOString();
+    settings.termTransitionNoticeScheduledFor = '';
     settings.termTransitionNoticeLastError = '';
     deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
-  } else {
-    settings.termTransitionNoticeLastError = result.error || '通知寄送失敗';
+    saveSettings_(settings);
+    return true;
+  } catch (error) {
+    scheduleTermTransitionNoticeRetry_(settings, userFacingError_(error));
+    Logger.log('新學期通知寄送失敗：' + userFacingError_(error));
+    return false;
+  }
+}
+
+function scheduleTermTransitionNoticeRetry_(settings, errorMessage) {
+  settings.termTransitionNoticeLastError = String(errorMessage || '新學期通知暫時無法寄送。');
+  if (settings.termTransitionNoticeAttempts >= TERM_TRANSITION_NOTICE_MAX_ATTEMPTS) {
+    settings.termTransitionNoticeScheduledFor = '';
+    deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+    saveSettings_(settings);
+    return false;
+  }
+  settings.termTransitionNoticeScheduledFor = new Date(
+    Date.now() + TERM_TRANSITION_NOTICE_RETRY_DELAY_MS
+  ).toISOString();
+  try {
+    ensureOneTimeTrigger_(TERM_TRANSITION_NOTICE_HANDLER, TERM_TRANSITION_NOTICE_RETRY_DELAY_MS);
+  } catch (triggerError) {
+    settings.termTransitionNoticeScheduledFor = '';
+    settings.termTransitionNoticeLastError += '；且無法建立重試：' +
+      userFacingError_(triggerError);
   }
   saveSettings_(settings);
-  if (!result.ok &&
-      settings.termTransitionNoticeAttempts < TERM_TRANSITION_NOTICE_MAX_ATTEMPTS) {
-    ensureOneTimeTrigger_(
-      TERM_TRANSITION_NOTICE_HANDLER,
-      TERM_TRANSITION_NOTICE_RETRY_DELAY_MS
-    );
-  }
-  return result.ok;
+  return Boolean(settings.termTransitionNoticeScheduledFor);
 }
 
 function retryTermTransitionNotice() {
+  try {
+    deleteTriggersByHandlers_([TERM_TRANSITION_NOTICE_HANDLER]);
+  } catch (triggerError) {
+    Logger.log('無法清理已執行的新學期通知觸發器：' + userFacingError_(triggerError));
+  }
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) return false;
+  if (!lock.tryLock(15000)) {
+    try {
+      ensureOneTimeTrigger_(TERM_TRANSITION_NOTICE_HANDLER, TERM_TRANSITION_NOTICE_RETRY_DELAY_MS);
+    } catch (triggerError) {
+      Logger.log('新學期通知遇到鎖定，且無法建立重試：' + userFacingError_(triggerError));
+    }
+    return false;
+  }
   try {
     const settings = loadSettings_();
     if (!settings.pendingTermKey || settings.termTransitionNoticeSentAt ||
         Number(settings.termTransitionNoticeAttempts) >= TERM_TRANSITION_NOTICE_MAX_ATTEMPTS) {
       return false;
     }
-    const source = loadSourceContext_(settings.gradeName);
-    if (source.termKey !== settings.pendingTermKey) return false;
+    let source;
+    try {
+      source = loadSourceContext_(settings.gradeName);
+    } catch (sourceError) {
+      settings.termTransitionNoticeAttempts = Math.max(
+        0,
+        Number(settings.termTransitionNoticeAttempts) || 0
+      ) + 1;
+      scheduleTermTransitionNoticeRetry_(
+        settings,
+        '寄信前無法讀取新學期日期：' + userFacingError_(sourceError)
+      );
+      return false;
+    }
+    if (!termKeysMatch_(source.termKey, settings.pendingTermKey)) {
+      settings.termTransitionNoticeAttempts = Math.max(
+        0,
+        Number(settings.termTransitionNoticeAttempts) || 0
+      ) + 1;
+      scheduleTermTransitionNoticeRetry_(
+        settings,
+        '寄信前讀到的學期與待確認學期不一致。'
+      );
+      return false;
+    }
     return deliverTermTransitionNotice_(settings, source);
   } finally {
     lock.releaseLock();
@@ -4159,19 +4593,58 @@ function registerNewTitles_(settings, source) {
     return settings;
   }
 
+  const observation = loadSourceObservation_();
+  const termKey = normalizeTermKey_(source.termKey);
   const known = settings.knownTitles.map(normalizeTitle_);
   const excluded = settings.excludedTitles.map(normalizeTitle_);
   const pending = settings.pendingTitles.map(normalizeTitle_);
   const discovered = source.catalog.all
     .map(item => item.title)
+    .filter(title => !isCourseSelectionHidden_(title))
     .filter(title => known.indexOf(normalizeTitle_(title)) === -1)
-    .filter(title => excluded.indexOf(normalizeTitle_(title)) === -1);
+    .filter(title => excluded.indexOf(normalizeTitle_(title)) === -1)
+    .filter(title => pending.indexOf(normalizeTitle_(title)) === -1);
+  const now = new Date();
+  const candidatesByKey = Object.create(null);
+  observation.newTitleCandidates
+    .filter(candidate => termKeysMatch_(candidate.termKey, termKey))
+    .forEach(candidate => {
+      candidatesByKey[String(candidate.titleKey || '')] = candidate;
+    });
+  const nextCandidates = [];
+  const promoted = [];
 
-  if (discovered.length === 0) {
+  discovered.forEach(title => {
+    const titleKey = normalizeTitle_(title);
+    let candidate = candidatesByKey[titleKey];
+    if (!candidate) {
+      candidate = {
+        termKey,
+        titleKey,
+        title,
+        firstSeenAt: now.toISOString(),
+        lastSeenAt: now.toISOString()
+      };
+    } else {
+      candidate.title = title;
+      candidate.lastSeenAt = now.toISOString();
+    }
+    const firstSeenAt = Date.parse(candidate.firstSeenAt);
+    if (Number.isFinite(firstSeenAt) &&
+        now.getTime() - firstSeenAt >= NEW_TITLE_OBSERVATION_DELAY_MS) {
+      promoted.push(title);
+    } else {
+      nextCandidates.push(candidate);
+    }
+  });
+  observation.newTitleCandidates = nextCandidates;
+
+  if (promoted.length === 0) {
+    saveSourceObservation_(observation);
     return settings;
   }
 
-  discovered.forEach(title => {
+  promoted.forEach(title => {
     settings.knownTitles.push(title);
     if (pending.indexOf(normalizeTitle_(title)) === -1) {
       settings.pendingTitles.push(title);
@@ -4182,35 +4655,66 @@ function registerNewTitles_(settings, source) {
   });
 
   saveSettings_(settings);
-  const pendingDiscovered = discovered.filter(title =>
-    settings.pendingTitles.some(item => normalizeTitle_(item) === normalizeTitle_(title))
-  );
-  if (pendingDiscovered.length) {
-    try {
-      sendActionRequiredSafe_(
-        settings,
-        '同步已暫停',
-        '下列項目已先加入日曆，請在控制臺確認是否屬於你：\\n\\n' +
-          pendingDiscovered.join('\\n'),
-        '',
-        'new_schedule_items',
-        {
-          itemCount: pendingDiscovered.length,
-          items: pendingDiscovered.map(label => ({ label }))
-        }
-      );
-    } catch (noticeError) {
-      Logger.log('新項目狀態已儲存，但通知後處理暫時失敗：' +
-        userFacingError_(noticeError));
-    }
-  }
+  observation.pendingNewTitleNotice = {
+    termKey,
+    titles: uniqueStrings_([].concat(
+      observation.pendingNewTitleNotice &&
+        termKeysMatch_(observation.pendingNewTitleNotice.termKey, termKey)
+        ? observation.pendingNewTitleNotice.titles || []
+        : [],
+      promoted
+    )),
+    promotedAt: now.toISOString()
+  };
+  saveSourceObservation_(observation);
   return settings;
+}
+
+function deliverPromotedNewTitleNoticeAfterSync_(settings, source, state) {
+  const observation = loadSourceObservation_();
+  const pendingNotice = observation.pendingNewTitleNotice;
+  if (!pendingNotice || !termKeysMatch_(pendingNotice.termKey, source.termKey)) return false;
+  const todayKey = formatDateKey_(new Date());
+  const includedKeys = Object.keys(state || {}).map(key => state[key])
+    .filter(item => item && item.dateKey >= todayKey)
+    .map(item => normalizeTitle_(item.originalTitle));
+  const includedTitles = uniqueStrings_((pendingNotice.titles || []).filter(title =>
+    includedKeys.indexOf(normalizeTitle_(title)) !== -1
+  ));
+  if (!includedTitles.length) {
+    observation.pendingNewTitleNotice = null;
+    saveSourceObservation_(observation);
+    return false;
+  }
+  const result = sendActionRequiredSafe_(
+    settings,
+    '發現新的行程項目',
+    '下列項目已經過 24 小時穩定性確認，並已同步未來行程至日曆。' +
+      '請在控制臺確認是否屬於你：\\n\\n' + includedTitles.join('\\n'),
+    'new-schedule-items|' + normalizeTermKey_(source.termKey) + '|' +
+      includedTitles.map(normalizeTitle_).sort().join('|'),
+    'new_schedule_items',
+    {
+      itemCount: includedTitles.length,
+      items: includedTitles.map(label => ({ label }))
+    }
+  );
+  if (result.ok) {
+    observation.pendingNewTitleNotice = null;
+    saveSourceObservation_(observation);
+  }
+  return result.ok;
 }
 
 function shouldIncludeEvent_(event, settings) {
   const normalized = normalizeTitle_(event.originalTitle);
 
   if (settings.selectedTitles.some(title => normalizeTitle_(title) === normalized)) {
+    return true;
+  }
+
+  if (isCourseSelectionHidden_(event.originalTitle) &&
+      settings.selectedTitles.some(isNaturalAdvancedVariantTitle_)) {
     return true;
   }
 
@@ -5100,7 +5604,12 @@ function findSheetsResourceByTitle_(metadata, sheetTitle) {
 
 function readSheetsDisplayValues_(spreadsheetId, sheetTitles) {
   assertSheetsReadonlyServiceAvailable_();
-  const titles = uniqueExactStrings_(sheetTitles || []);
+  const seenTitles = Object.create(null);
+  const titles = (sheetTitles || []).map(title => String(title == null ? '' : title)).filter(title => {
+    if (!title.trim() || seenTitles[title]) return false;
+    seenTitles[title] = true;
+    return true;
+  });
   if (!titles.length) return {};
   const response = Sheets.Spreadsheets.Values.batchGet(spreadsheetId, {
     ranges: titles.map(quoteSheetsA1Title_),
@@ -5111,7 +5620,7 @@ function readSheetsDisplayValues_(spreadsheetId, sheetTitles) {
   const valueRanges = response && Array.isArray(response.valueRanges)
     ? response.valueRanges
     : [];
-  const result = {};
+  const result = Object.create(null);
   titles.forEach((title, index) => {
     const valueRange = valueRanges[index] || {};
     result[title] = Array.isArray(valueRange.values) ? valueRange.values : [];
@@ -5138,11 +5647,10 @@ function getCourseOutlineIndexNoticeSemesterNumber_(settings) {
     DEFAULT_SETTINGS.termKey ||
     ''
   );
-  const termDateMatch = termKey.match(/\\|(\\d{4})-(\\d{2})-\\d{2}$/);
-  const termStartMonth = termDateMatch
-    ? Number(termDateMatch[2])
-    : Number(Utilities.formatDate(scheduleBusinessNow_(), TIMEZONE, 'M'));
-  return termStartMonth >= 2 && termStartMonth <= 7 ? 2 : 1;
+  const canonicalMatch = normalizeTermKey_(termKey).match(/\\|\\d{4}-([12])$/);
+  if (canonicalMatch) return Number(canonicalMatch[1]);
+  const currentMonth = Number(Utilities.formatDate(scheduleBusinessNow_(), TIMEZONE, 'M'));
+  return currentMonth >= 2 && currentMonth <= 7 ? 2 : 1;
 }
 
 function makeCourseOutlineSemesterKey_(gradeName, semesterNumber) {
@@ -5611,6 +6119,15 @@ function makeCourseOutlineOccurrenceKey_(sheetName, dateKey, periodStart, period
   return JSON.stringify([String(sheetName || ''), dateKey, Number(periodStart), Number(periodEnd)]);
 }
 
+function makeCourseOutlineSheetMatchKey_(value) {
+  let text = String(value == null ? '' : value);
+  if (typeof text.normalize === 'function') text = text.normalize('NFKC');
+  const key = text.replace(/[\\s\\u200B-\\u200D\\uFEFF]+/g, '').toLowerCase();
+  return NATURAL_ADVANCED_VARIANT_TITLES.map(normalizeTitle_).indexOf(key) !== -1
+    ? normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE)
+    : key;
+}
+
 function makeCourseOutlineIdentityHash_(outline) {
   const topic = normalizeText_(outline && outline.topic);
   const content = normalizeText_(outline && outline.content);
@@ -5625,7 +6142,7 @@ function enrichEventsWithCourseOutlines_(events, settings, source) {
   const snapshot = readActiveCourseOutlineSnapshot_();
   if (!snapshot || snapshot.schemaVersion !== COURSE_OUTLINE_CACHE_SCHEMA_VERSION) return desiredEvents;
   if (snapshot.gradeName !== settings.gradeName ||
-      snapshot.termKey !== (source && source.termKey || '') ||
+      !termKeysMatch_(snapshot.termKey, source && source.termKey || '') ||
       snapshot.sourceSetsFingerprint !== makeCourseOutlineSourceSetsFingerprint_(sourceSets)) {
     return desiredEvents;
   }
@@ -5683,17 +6200,12 @@ function resolveCourseOutlineDateKey_(value, candidateDateKeys) {
 function resolveCourseOutlineDateKeyFromUniqueCandidates_(value, candidates) {
   const numbers = String(value == null ? '' : value).match(/\\d+/g);
   if (!numbers || numbers.length < 2) return '';
-
-  if (numbers.length >= 3) {
-    let year = Number(numbers[0]);
-    const month = Number(numbers[1]);
-    const day = Number(numbers[2]);
-    if (year > 0 && year < 1911) year += 1911;
-    const direct = year + '-' + pad2_(month) + '-' + pad2_(day);
-    return candidates.indexOf(direct) !== -1 ? direct : '';
-  }
-
-  const suffix = '-' + pad2_(Number(numbers[0])) + '-' + pad2_(Number(numbers[1]));
+  const hasLeadingYear = numbers.length >= 3;
+  const month = Number(numbers[hasLeadingYear ? 1 : 0]);
+  const day = Number(numbers[hasLeadingYear ? 2 : 1]);
+  if (!Number.isInteger(month) || month < 1 || month > 12 ||
+      !Number.isInteger(day) || day < 1 || day > 31) return '';
+  const suffix = '-' + pad2_(month) + '-' + pad2_(day);
   const matches = candidates.filter(dateKey => String(dateKey).slice(-6) === suffix);
   return matches.length === 1 ? matches[0] : '';
 }
@@ -5704,8 +6216,13 @@ function parseCourseOutlinePeriod_(value) {
   let numbers = text.match(/\\d+/g);
   if (!numbers || !numbers.length) return null;
 
-  if (numbers.length === 1 && /^\\d{2}$/.test(numbers[0])) {
-    numbers = [numbers[0].charAt(0), numbers[0].charAt(1)];
+  if (numbers.length === 1 && /^\\d{2,8}$/.test(numbers[0])) {
+    const compactPeriods = numbers[0].split('').map(Number);
+    const isSupportedCompactRange = compactPeriods.length === 2 || compactPeriods.every(
+      (period, index) => index === 0 || period === compactPeriods[index - 1] + 1
+    );
+    if (!isSupportedCompactRange) return null;
+    numbers = [compactPeriods[0], compactPeriods[compactPeriods.length - 1]];
   }
 
   const periodStart = Number(numbers[0]);
@@ -5769,9 +6286,13 @@ function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, source
   const header = findCourseOutlineColumns_(values);
   if (!header) throw new Error('課綱分頁「' + sheetName + '」找不到必要欄位。');
   const candidates = uniqueExactStrings_((desiredEvents || []).map(event => event.dateKey));
-  const desiredKeys = {};
+  const desiredCourseNamesByTime = {};
   (desiredEvents || []).forEach(event => {
-    desiredKeys[makeCourseOutlineOccurrenceKey_(sheetName, event.dateKey, event.periodStart, event.periodEnd)] = true;
+    const timeKey = JSON.stringify([event.dateKey, Number(event.periodStart), Number(event.periodEnd)]);
+    if (!desiredCourseNamesByTime[timeKey]) desiredCourseNamesByTime[timeKey] = [];
+    if (desiredCourseNamesByTime[timeKey].indexOf(event.originalTitle) === -1) {
+      desiredCourseNamesByTime[timeKey].push(event.originalTitle);
+    }
   });
   const records = [];
 
@@ -5783,26 +6304,30 @@ function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, source
     );
     const period = parseCourseOutlinePeriod_(row[header.columns['節次']]);
     if (!dateKey || !period || isPureAsynchronousCourseOutlineRow_(row, header.columns)) continue;
-    const key = makeCourseOutlineOccurrenceKey_(sheetName, dateKey, period.periodStart, period.periodEnd);
-    if (!desiredKeys[key]) continue;
+    const timeKey = JSON.stringify([dateKey, period.periodStart, period.periodEnd]);
+    const desiredCourseNames = desiredCourseNamesByTime[timeKey] || [];
+    if (!desiredCourseNames.length) continue;
     const classroom = normalizeText_(row[header.columns['實體課程教室']]);
     const topic = normalizeText_(row[header.columns['單元主題']]);
     const content = normalizeText_(row[header.columns['課程內容']]);
     if (!classroom && !topic && !content) continue;
-    records.push({
-      key,
-      sheetName,
-      dateKey,
-      periodStart: period.periodStart,
-      periodEnd: period.periodEnd,
-      classroom,
-      topic,
-      content,
-      hash: hashText_(JSON.stringify([classroom, topic, content])),
-      sourceSetKey: sourceInfo.sourceSetKey,
-      spreadsheetId: sourceInfo.spreadsheetId,
-      spreadsheetName: sourceInfo.spreadsheetName,
-      rowNumber: rowIndex + 1
+    desiredCourseNames.forEach(courseName => {
+      records.push({
+        key: makeCourseOutlineOccurrenceKey_(courseName, dateKey, period.periodStart, period.periodEnd),
+        sheetName,
+        courseName,
+        dateKey,
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+        classroom,
+        topic,
+        content,
+        hash: hashText_(JSON.stringify([classroom, topic, content])),
+        sourceSetKey: sourceInfo.sourceSetKey,
+        spreadsheetId: sourceInfo.spreadsheetId,
+        spreadsheetName: sourceInfo.spreadsheetName,
+        rowNumber: rowIndex + 1
+      });
     });
   }
 
@@ -5832,6 +6357,13 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
       isDateInCourseOutlineSourceSet_(event.dateKey, sourceSet)
     );
     const setCourseNames = uniqueExactStrings_(setEvents.map(event => event.originalTitle));
+    const courseNamesByMatchKey = Object.create(null);
+    setCourseNames.forEach(courseName => {
+      const matchKey = makeCourseOutlineSheetMatchKey_(courseName);
+      if (!matchKey) return;
+      if (!courseNamesByMatchKey[matchKey]) courseNamesByMatchKey[matchKey] = [];
+      courseNamesByMatchKey[matchKey].push(courseName);
+    });
 
     sourceSet.spreadsheetIds.forEach(spreadsheetId => {
       const spreadsheet = readSheetsWorkbookMetadata_(spreadsheetId);
@@ -5849,15 +6381,17 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
       spreadsheet.sheets.forEach(sheet => {
         const sheetName = String(sheet && sheet.properties && sheet.properties.title || '');
         if (!sheetName) return;
-        if (setCourseNames.indexOf(sheetName) === -1) return;
-        relevantSheets.push(sheet);
+        const matchedCourseNames = courseNamesByMatchKey[makeCourseOutlineSheetMatchKey_(sheetName)] || [];
+        if (!matchedCourseNames.length) return;
+        relevantSheets.push({ sheet, matchedCourseNames });
       });
       const valuesBySheet = readSheetsDisplayValues_(
         spreadsheetId,
-        relevantSheets.map(sheet => sheet.properties.title)
+        relevantSheets.map(item => item.sheet.properties.title)
       );
 
-      relevantSheets.forEach(sheet => {
+      relevantSheets.forEach(item => {
+        const sheet = item.sheet;
         const sheetName = sheet.properties.title;
         const sheetValues = valuesBySheet[sheetName] || [];
         if (!sheetValues.length) throw new Error('課綱分頁「' + sheetName + '」沒有可讀取的資料。');
@@ -5865,7 +6399,7 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
           sheetValues,
           Array.isArray(sheet.merges) ? sheet.merges : []
         );
-        const sheetEvents = setEvents.filter(event => event.originalTitle === sheetName);
+        const sheetEvents = setEvents.filter(event => item.matchedCourseNames.indexOf(event.originalTitle) !== -1);
         const parsed = parseCourseOutlineSheetValues_(values, sheetName, sheetEvents, {
           sourceSetKey: sourceSet.key,
           spreadsheetId,
@@ -6069,7 +6603,7 @@ function hasFreshCourseOutlineSnapshot_(settings, source) {
     snapshot &&
     snapshot.schemaVersion === COURSE_OUTLINE_CACHE_SCHEMA_VERSION &&
     snapshot.gradeName === settings.gradeName &&
-    snapshot.termKey === source.termKey &&
+    termKeysMatch_(snapshot.termKey, source.termKey) &&
     snapshot.contextFingerprint ===
       makeCourseOutlineContextFingerprint_(settings, source, desiredEvents, sourceSets) &&
     Number.isFinite(refreshedAtMs) &&
@@ -6085,6 +6619,7 @@ function scheduleCourseOutlineRefreshIfNeeded_(settings, source, options) {
   if (!activeSettings.setupComplete ||
       (!activeSettings.autoSyncEnabled && !allowWhenAutoSyncDisabled) ||
       activeSettings.pendingTermKey ||
+      loadSourceObservation_().termCandidate ||
       !getConfiguredCourseOutlineSourceSets_(activeSettings.gradeName).length) {
     return false;
   }
@@ -6167,7 +6702,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
     if (!settings.setupComplete) {
       return { ok: true, skipped: true, message: '完成第一次同步後，系統才會更新課綱資料。' };
     }
-    if (settings.pendingTermKey) {
+    if (settings.pendingTermKey || loadSourceObservation_().termCandidate) {
       return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程與活動再更新課綱資料。' };
     }
     if (!settings.autoSyncEnabled &&
@@ -6181,7 +6716,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
       return { ok: true, skipped: true, message: '課綱資料正在更新，或已排定稍後再試。' };
     }
     const source = loadSourceContext_(settings.gradeName);
-    if (settings.termKey && source.termKey !== settings.termKey) {
+    if (settings.termKey && !termKeysMatch_(source.termKey, settings.termKey)) {
       finishCourseOutlineRefreshRun_(run, null);
       return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程與活動再更新課綱資料。' };
     }
@@ -6564,7 +7099,7 @@ function parseSchedulePayload_(payload, gradeName, now) {
   const catalogAll = extractCatalogFromPayload_(payload);
   const firstDateKey = datedHeaders[0].dateKey;
   const lastDateKey = datedHeaders[datedHeaders.length - 1].dateKey;
-  const termKey = GRADE_API_NAMES[gradeName] + '|' + firstDateKey;
+  const termKey = makeAcademicTermKey_(GRADE_API_NAMES[gradeName], firstDateKey);
   const sourceUpdatedLabel = latestUpdateLabel_(events.map(event => event.sourceUpdatedLabel));
   const sourceEventRows = sortCanonicalRows_(events.map(event => [
     event.originalTitle,
@@ -6754,6 +7289,9 @@ function loadSettings_() {
     settings.scheduleFingerprint || settings.sourceFingerprint || ''
   );
   settings.setupContextFingerprint = String(settings.setupContextFingerprint || '');
+  settings.termKey = normalizeTermKey_(settings.termKey);
+  settings.pendingTermKey = normalizeTermKey_(settings.pendingTermKey);
+  settings.termTransitionNoticeScheduledFor = String(settings.termTransitionNoticeScheduledFor || '');
   delete settings.sourceFingerprint;
   const legacyNotificationHours = stored && Array.isArray(stored.autoSyncHours)
     ? stored.autoSyncHours
@@ -6811,7 +7349,8 @@ function loadSettings_() {
     settings.selectedTitles = uniqueStrings_(settings.selectedTitles || []);
     settings.knownTitles = uniqueStrings_(settings.knownTitles || []);
   }
-  settings.pendingTitles = uniqueStrings_(settings.pendingTitles || []);
+  settings.pendingTitles = uniqueStrings_(settings.pendingTitles || [])
+    .filter(title => !isCourseSelectionHidden_(title));
   settings.excludedTitles = uniqueStrings_(settings.excludedTitles || []);
   delete settings.selectedCourses;
   delete settings.includeActivities;
@@ -6822,6 +7361,8 @@ function loadSettings_() {
   }
   settings.termTransitionNoticeAttempts =
     Math.max(0, Number(settings.termTransitionNoticeAttempts) || 0);
+  settings.termTransitionNoticeScheduledFor =
+    String(settings.termTransitionNoticeScheduledFor || '');
   settings.termTransitionNoticeSentAt =
     String(settings.termTransitionNoticeSentAt || '');
   settings.termTransitionNoticeLastError =
@@ -6836,12 +7377,16 @@ function loadSettings_() {
 
 function loadLegacyClassifiedCatalogItems_(settings) {
   const storeKeys = [SOURCE_UI_CACHE_STORE, SETUP_SOURCE_CONTEXT_STORE];
-  const acceptedTerms = uniqueStrings_([settings && settings.pendingTermKey, settings && settings.termKey]);
+  const acceptedTerms = uniqueStrings_([
+    settings && settings.pendingTermKey,
+    settings && settings.termKey
+  ].map(normalizeTermKey_));
   for (let index = 0; index < storeKeys.length; index += 1) {
     const snapshot = readChunkedJson_(storeKeys[index], null);
     if (!snapshot || !snapshot.catalog ||
         String(snapshot.gradeName || '') !== String(settings && settings.gradeName || '') ||
-        (acceptedTerms.length && acceptedTerms.indexOf(String(snapshot.termKey || '')) === -1)) {
+        (acceptedTerms.length &&
+          acceptedTerms.indexOf(normalizeTermKey_(snapshot.termKey)) === -1)) {
       continue;
     }
     const items = snapshot && snapshot.catalog && snapshot.catalog.all;
@@ -7044,7 +7589,7 @@ function setupAutoSyncTriggers() {
   try {
     const settings = loadSettings_();
     assertSetupImported_(settings);
-    if (settings.pendingTermKey) {
+    if (settings.pendingTermKey || loadSourceObservation_().termCandidate) {
       throw new Error('已偵測到新學期，請先在控制臺重新選擇課程與活動，再啟用自動同步。');
     }
     settings.autoSyncEnabled = true;
@@ -7063,7 +7608,8 @@ function setupAutoSyncTriggers() {
 
 function refreshAutoSyncTriggers_(settings) {
   deleteDailySyncTriggers_();
-  if (!settings.autoSyncEnabled || settings.pendingTermKey) {
+  if (!settings.autoSyncEnabled || settings.pendingTermKey ||
+      loadSourceObservation_().termCandidate) {
     deleteCourseOutlineMaintenanceTriggers_();
     return;
   }
@@ -7239,7 +7785,8 @@ function toggleAutoSyncFromMenu() {
   try {
     settings = loadSettings_();
     assertSetupImported_(settings);
-    if (!settings.autoSyncEnabled && settings.pendingTermKey) {
+    if (!settings.autoSyncEnabled &&
+        (settings.pendingTermKey || loadSourceObservation_().termCandidate)) {
       throw new Error('已偵測到新學期，請先在控制臺重新選擇課程與活動，再啟用自動同步。');
     }
     settings.autoSyncEnabled = !settings.autoSyncEnabled;
@@ -7269,10 +7816,10 @@ function showSyncStatus() {
     ? '\\n\\n課綱資料：' + describeCourseOutlineStatusForUser_(outline) +
       '\\n最近完成課綱更新：' + (outline.lastSuccessLabel || '尚未完成第一次更新') +
       (outline.missingSheetNames.length
-        ? '\\n找不到完全相同名稱的課綱分頁：' + outline.missingSheetNames.join('、')
+        ? '\\n找不到可匹配名稱的課綱分頁：' + outline.missingSheetNames.join('、')
         : '') +
       (outline.nearMatchSheetNames.length
-        ? '\\n可能是名稱有空格或全形、半形差異：' + outline.nearMatchSheetNames
+        ? '\\n可能仍有其他名稱差異：' + outline.nearMatchSheetNames
           .map(item => item.courseName + ' → ' + item.candidates.join('／')).join('、')
         : '') +
       (outline.lastError ? '\\n未完成的原因：' + outline.lastError : '')
@@ -8189,6 +8736,27 @@ function normalizeText_(value) {
 
 function normalizeTitle_(value) {
   return normalizeText_(value).replace(/\\s+/g, '').toLowerCase();
+}
+
+function isCourseSelectionHidden_(value) {
+  return normalizeTitle_(value) === normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE);
+}
+
+function isNaturalAdvancedVariantTitle_(value) {
+  return NATURAL_ADVANCED_VARIANT_TITLES.map(normalizeTitle_).indexOf(normalizeTitle_(value)) !== -1;
+}
+
+function applyCourseSelectionRules_(selectedTitles, catalogItems) {
+  const selectedKeys = uniqueStrings_(selectedTitles || []).map(normalizeTitle_);
+  const baseKey = normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE);
+  const variantSelected = selectedKeys.some(key =>
+    NATURAL_ADVANCED_VARIANT_TITLES.map(normalizeTitle_).indexOf(key) !== -1
+  );
+  const effectiveKeys = selectedKeys.filter(key => key !== baseKey);
+  if (variantSelected) effectiveKeys.push(baseKey);
+  return (catalogItems || [])
+    .map(item => typeof item === 'string' ? item : item && item.title)
+    .filter(title => title && effectiveKeys.indexOf(normalizeTitle_(title)) !== -1);
 }
 
 function uniqueStrings_(values) {

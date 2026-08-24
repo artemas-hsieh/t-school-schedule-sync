@@ -21,7 +21,13 @@
   const MANUAL_MERGE_EXCEPTIONS = Object.freeze({});
   const SOURCE_FETCH_MAX_ATTEMPTS = 3;
   const SOURCE_FETCH_RETRY_DELAY_MS = 750;
-  const CATALOG_FINGERPRINT_VERSION = 2;
+  const CATALOG_FINGERPRINT_VERSION = 3;
+  const NATURAL_ADVANCED_BASE_TITLE = '自然進階(二)';
+  const NATURAL_ADVANCED_VARIANT_TITLES = Object.freeze([
+    '自然進階(二)_化學',
+    '自然進階(二)_生物',
+    '自然進階(二)_物理'
+  ]);
   const TITLE_SIMILARITY_CLUSTER_THRESHOLD = 0.34;
   const TITLE_SIMILARITY_EPSILON = 1e-12;
   const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
@@ -63,6 +69,21 @@
     return normalizeText(value)
       .replace(/\s+/g, '')
       .toLowerCase();
+  }
+
+  function isCourseSelectionHidden(value) {
+    return normalizeTitle(value) === normalizeTitle(NATURAL_ADVANCED_BASE_TITLE);
+  }
+
+  function applyCourseSelectionRules(selectedTitles, catalogItems) {
+    const selectedKeys = new Set((selectedTitles || []).map(normalizeTitle).filter(Boolean));
+    const baseKey = normalizeTitle(NATURAL_ADVANCED_BASE_TITLE);
+    const variantKeys = NATURAL_ADVANCED_VARIANT_TITLES.map(normalizeTitle);
+    selectedKeys.delete(baseKey);
+    if (variantKeys.some(key => selectedKeys.has(key))) selectedKeys.add(baseKey);
+    return (catalogItems || [])
+      .map(item => typeof item === 'string' ? item : item && item.title)
+      .filter(title => title && selectedKeys.has(normalizeTitle(title)));
   }
 
   // This is a presentation default, not a course/activity classifier. It only
@@ -665,6 +686,20 @@
     ].join('-');
   }
 
+  function makeAcademicTermKey(gradeApiName, dateValue) {
+    const date = dateValue instanceof Date ? dateValue : new Date(String(dateValue || '') + 'T00:00:00');
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+
+    if (!gradeApiName || !Number.isFinite(year) || month < 1 || month > 12) {
+      throw new Error('無法判定課表屬於哪一個學期。');
+    }
+
+    const academicYear = month >= 8 ? year : year - 1;
+    const semester = month >= 8 || month === 1 ? 1 : 2;
+    return [gradeApiName, academicYear + '-' + semester].join('|');
+  }
+
   function hashText(value) {
     let hash = 2166136261;
     const text = String(value || '');
@@ -695,7 +730,7 @@
       });
     });
 
-    const termKey = [payload.currentGrade, formatDateKey(firstDate)].join('|');
+    const termKey = makeAcademicTermKey(payload.currentGrade, firstDate);
     const catalogFingerprint = makeCatalogFingerprint(
       termKey,
       formatDateKey(lastDate),
@@ -762,10 +797,15 @@
     API_URL,
     GRADE_API_NAMES,
     CATALOG_FINGERPRINT_VERSION,
+    makeAcademicTermKey,
     MANUAL_MERGE_EXCEPTIONS,
     WEEKDAY_LABELS,
     normalizeText,
     normalizeTitle,
+    NATURAL_ADVANCED_BASE_TITLE,
+    NATURAL_ADVANCED_VARIANT_TITLES,
+    isCourseSelectionHidden,
+    applyCourseSelectionRules,
     isDefaultSelectedTitle,
     compareCanonicalStrings,
     sortCatalogItemsBySimilarity,
