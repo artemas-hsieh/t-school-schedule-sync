@@ -19,21 +19,26 @@
   };
   const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
   const MANUAL_MERGE_EXCEPTIONS = Object.freeze({});
-  const MIN_COURSE_SCHEDULED_PERIODS = 5;
   const SOURCE_FETCH_MAX_ATTEMPTS = 3;
   const SOURCE_FETCH_RETRY_DELAY_MS = 750;
-  const CATALOG_FINGERPRINT_VERSION = 1;
-  const ACTIVITY_PATTERNS = [
-    /全校(?:性)?活動/,
-    /^高[一二三](?:導入期|全校活動)$/,
-    /^休業式(?:_高[一二三])?$/,
-    /^勞動節$/,
-    /模擬考/,
-    /校際交流/,
-    /教育局.*(?:協作坊|輔導團)/,
-    /^全天(?:吉林|弘道)$/,
-    /防災|避難演練|畢業典禮|畢展布展/
-  ];
+  const CATALOG_FINGERPRINT_VERSION = 2;
+  const TITLE_SIMILARITY_CLUSTER_THRESHOLD = 0.34;
+  const TITLE_SIMILARITY_EPSILON = 1e-12;
+  const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
+    try {
+      return new Intl.Collator('zh-Hant-u-co-stroke', {
+        numeric: true,
+        sensitivity: 'base'
+      });
+    } catch (error) {
+      return {
+        compare: (left, right) => String(left).localeCompare(String(right), 'zh-Hant', {
+          numeric: true,
+          sensitivity: 'base'
+        })
+      };
+    }
+  })();
 
   function normalizeText(value) {
     let text = String(value == null ? '' : value);
@@ -60,6 +65,14 @@
       .toLowerCase();
   }
 
+  // This is a presentation default, not a course/activity classifier. It only
+  // decides which titles are initially checked and placed after the opt-in list.
+  function isDefaultSelectedTitle(value) {
+    const title = normalizeTitle(value);
+
+    return /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
+  }
+
   function compareCanonicalStrings(left, right) {
     const leftText = String(left == null ? '' : left);
     const rightText = String(right == null ? '' : right);
@@ -70,7 +83,6 @@
     return (Array.isArray(catalogItems) ? catalogItems : [])
       .map(item => [
         String(item && item.title || ''),
-        item && item.type === 'activity' ? 'activity' : 'course',
         item && item.period === 'vacation' ? 'vacation' : 'term'
       ])
       .sort((left, right) => compareCanonicalStrings(
@@ -121,6 +133,342 @@
     };
   }
 
+  function normalizeSimilarityTitle(value) {
+    return normalizeText(value)
+      .replace(/\s+/g, '')
+      .replace(/[・．.。:：/／|｜_＿\-‐‑–—]/g, '')
+      .toLowerCase();
+  }
+
+  function compareDisplayTitles(left, right) {
+    const leftText = String(left == null ? '' : left);
+    const rightText = String(right == null ? '' : right);
+    return TRADITIONAL_CHINESE_STROKE_COLLATOR.compare(leftText, rightText) ||
+      compareCanonicalStrings(leftText, rightText);
+  }
+
+  function normalizedEditSimilarity(left, right) {
+    const leftCharacters = Array.from(left);
+    const rightCharacters = Array.from(right);
+    const longestLength = Math.max(leftCharacters.length, rightCharacters.length);
+
+    if (longestLength === 0) {
+      return 1;
+    }
+
+    let previous = Array.from(
+      { length: rightCharacters.length + 1 },
+      (unused, index) => index
+    );
+
+    leftCharacters.forEach((leftCharacter, leftIndex) => {
+      const current = [leftIndex + 1];
+      rightCharacters.forEach((rightCharacter, rightIndex) => {
+        current[rightIndex + 1] = Math.min(
+          current[rightIndex] + 1,
+          previous[rightIndex + 1] + 1,
+          previous[rightIndex] + (leftCharacter === rightCharacter ? 0 : 1)
+        );
+      });
+      previous = current;
+    });
+
+    return 1 - previous[rightCharacters.length] / longestLength;
+  }
+
+  function commonPrefixCoverage(left, right) {
+    const leftCharacters = Array.from(left);
+    const rightCharacters = Array.from(right);
+    const shortestLength = Math.min(leftCharacters.length, rightCharacters.length);
+    let sharedLength = 0;
+
+    while (
+      sharedLength < shortestLength &&
+      leftCharacters[sharedLength] === rightCharacters[sharedLength]
+    ) {
+      sharedLength += 1;
+    }
+
+    return shortestLength ? sharedLength / shortestLength : 0;
+  }
+
+  function bigramDiceSimilarity(left, right) {
+    const leftCharacters = Array.from(left);
+    const rightCharacters = Array.from(right);
+
+    if (leftCharacters.length < 2 || rightCharacters.length < 2) {
+      return left === right ? 1 : 0;
+    }
+
+    const leftBigrams = new Map();
+    let matches = 0;
+
+    for (let index = 0; index < leftCharacters.length - 1; index += 1) {
+      const bigram = leftCharacters[index] + leftCharacters[index + 1];
+      leftBigrams.set(bigram, (leftBigrams.get(bigram) || 0) + 1);
+    }
+
+    for (let index = 0; index < rightCharacters.length - 1; index += 1) {
+      const bigram = rightCharacters[index] + rightCharacters[index + 1];
+      const available = leftBigrams.get(bigram) || 0;
+      if (available > 0) {
+        matches += 1;
+        leftBigrams.set(bigram, available - 1);
+      }
+    }
+
+    return (2 * matches) /
+      (leftCharacters.length + rightCharacters.length - 2);
+  }
+
+  function calculateTitleSimilarity(left, right) {
+    const leftTitle = normalizeSimilarityTitle(left);
+    const rightTitle = normalizeSimilarityTitle(right);
+
+    if (leftTitle === rightTitle) {
+      return 1;
+    }
+
+    const leftLeadingCharacters = Array.from(leftTitle).slice(0, 3).join('');
+    const rightLeadingCharacters = Array.from(rightTitle).slice(0, 3).join('');
+
+    return (
+      0.5 * normalizedEditSimilarity(leftLeadingCharacters, rightLeadingCharacters) +
+      0.25 * commonPrefixCoverage(leftTitle, rightTitle) +
+      0.15 * bigramDiceSimilarity(leftTitle, rightTitle) +
+      0.1 * normalizedEditSimilarity(leftTitle, rightTitle)
+    );
+  }
+
+  function compareSimilarityLeaves(left, right) {
+    return compareDisplayTitles(left.title, right.title) ||
+      compareCanonicalStrings(left.period, right.period) ||
+      left.originalIndex - right.originalIndex;
+  }
+
+  function compareSimilaritySequences(left, right) {
+    const sharedLength = Math.min(left.length, right.length);
+
+    for (let index = 0; index < sharedLength; index += 1) {
+      const comparison = compareSimilarityLeaves(left[index], right[index]);
+      if (comparison !== 0) {
+        return comparison;
+      }
+    }
+
+    return left.length - right.length;
+  }
+
+  function parseClassVariantTitle(title) {
+    const match = normalizeSimilarityTitle(title).match(/^(.*)(海風班|山嵐班)$/);
+    return match && match[1]
+      ? { base: match[1], variant: match[2] }
+      : null;
+  }
+
+  function buildInitialSimilarityClusters(leaves) {
+    const families = new Map();
+
+    leaves.forEach(leaf => {
+      const parsed = parseClassVariantTitle(leaf.title);
+      if (!parsed) return;
+      if (!families.has(parsed.base)) {
+        families.set(parsed.base, { leaves: [], variants: new Set() });
+      }
+      const family = families.get(parsed.base);
+      family.leaves.push(leaf);
+      family.variants.add(parsed.variant);
+    });
+
+    const hardBlockFamilies = new Set();
+    families.forEach((family, base) => {
+      if (family.variants.has('海風班') && family.variants.has('山嵐班')) {
+        hardBlockFamilies.add(base);
+      }
+    });
+
+    const emittedFamilies = new Set();
+    const clusters = [];
+    leaves.forEach(leaf => {
+      const parsed = parseClassVariantTitle(leaf.title);
+      const familyBase = parsed && hardBlockFamilies.has(parsed.base)
+        ? parsed.base
+        : '';
+      if (familyBase) {
+        if (emittedFamilies.has(familyBase)) return;
+        emittedFamilies.add(familyBase);
+        const familyLeaves = families.get(familyBase).leaves
+          .slice()
+          .sort(compareSimilarityLeaves);
+        clusters.push({
+          id: clusters.length,
+          anchor: familyLeaves[0],
+          leaves: familyLeaves
+        });
+        return;
+      }
+      clusters.push({
+        id: clusters.length,
+        anchor: leaf,
+        leaves: [leaf]
+      });
+    });
+
+    return clusters;
+  }
+
+  function calculateCompleteLinkSimilarity(first, second) {
+    let similarity = 1;
+    first.leaves.forEach(firstLeaf => {
+      second.leaves.forEach(secondLeaf => {
+        similarity = Math.min(
+          similarity,
+          calculateTitleSimilarity(firstLeaf.title, secondLeaf.title)
+        );
+      });
+    });
+    return similarity;
+  }
+
+  function orientSimilarityClusters(first, second) {
+    const firstForward = first.leaves.slice();
+    const firstReverse = first.leaves.slice().reverse();
+    const secondForward = second.leaves.slice();
+    const secondReverse = second.leaves.slice().reverse();
+    const candidates = [];
+
+    [firstForward, firstReverse].forEach(firstSequence => {
+      [secondForward, secondReverse].forEach(secondSequence => {
+        candidates.push({
+          joinIndex: firstSequence.length,
+          leaves: firstSequence.concat(secondSequence)
+        });
+        candidates.push({
+          joinIndex: secondSequence.length,
+          leaves: secondSequence.concat(firstSequence)
+        });
+      });
+    });
+
+    candidates.sort((left, right) => {
+      const leftSimilarity = calculateTitleSimilarity(
+        left.leaves[left.joinIndex - 1].title,
+        left.leaves[left.joinIndex].title
+      );
+      const rightSimilarity = calculateTitleSimilarity(
+        right.leaves[right.joinIndex - 1].title,
+        right.leaves[right.joinIndex].title
+      );
+      return rightSimilarity - leftSimilarity ||
+        compareSimilaritySequences(left.leaves, right.leaves);
+    });
+
+    return candidates[0].leaves;
+  }
+
+  /**
+   * Returns a display-only order. Call this once for each term/vacation section,
+   * then filter the ordered result during search so the visible order does not jump.
+   */
+  function sortCatalogItemsBySimilarity(catalogItems) {
+    const sourceItems = Array.isArray(catalogItems) ? catalogItems : [];
+    const leaves = sourceItems.map((item, originalIndex) => ({
+      item,
+      originalIndex,
+      title: String(item && item.title || ''),
+      period: item && item.period === 'vacation' ? 'vacation' : 'term'
+    })).sort(compareSimilarityLeaves);
+
+    if (leaves.length < 2) {
+      return leaves.map(leaf => leaf.item);
+    }
+
+    let clusters = buildInitialSimilarityClusters(leaves);
+    let nextClusterId = clusters.length;
+    const clusterSimilarities = new Map();
+    const pairKey = (leftId, rightId) => leftId < rightId
+      ? leftId + ':' + rightId
+      : rightId + ':' + leftId;
+    const getClusterSimilarity = (left, right) =>
+      clusterSimilarities.get(pairKey(left.id, right.id));
+    const setClusterSimilarity = (left, right, similarity) => {
+      clusterSimilarities.set(pairKey(left.id, right.id), similarity);
+    };
+
+    for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
+        setClusterSimilarity(
+          clusters[leftIndex],
+          clusters[rightIndex],
+          calculateCompleteLinkSimilarity(clusters[leftIndex], clusters[rightIndex])
+        );
+      }
+    }
+
+    while (clusters.length > 1) {
+      clusters.sort((left, right) => compareSimilarityLeaves(left.anchor, right.anchor));
+      let bestPair = null;
+
+      for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
+          const similarity = getClusterSimilarity(
+            clusters[leftIndex],
+            clusters[rightIndex]
+          );
+          if (
+            similarity >= TITLE_SIMILARITY_CLUSTER_THRESHOLD &&
+            (!bestPair || similarity > bestPair.similarity + TITLE_SIMILARITY_EPSILON)
+          ) {
+            bestPair = { leftIndex, rightIndex, similarity };
+          }
+        }
+      }
+
+      if (!bestPair) {
+        break;
+      }
+
+      const first = clusters[bestPair.leftIndex];
+      const second = clusters[bestPair.rightIndex];
+      const remaining = clusters.filter((cluster, index) =>
+        index !== bestPair.leftIndex && index !== bestPair.rightIndex
+      );
+      const mergedLeaves = orientSimilarityClusters(first, second);
+      const merged = {
+        id: nextClusterId,
+        anchor: mergedLeaves.slice().sort(compareSimilarityLeaves)[0],
+        leaves: mergedLeaves
+      };
+      nextClusterId += 1;
+
+      remaining.forEach(cluster => {
+        setClusterSimilarity(
+          merged,
+          cluster,
+          Math.min(
+            getClusterSimilarity(first, cluster),
+            getClusterSimilarity(second, cluster)
+          )
+        );
+      });
+      clusters = remaining.concat(merged);
+    }
+
+    return clusters
+      .sort((left, right) => compareSimilarityLeaves(left.anchor, right.anchor))
+      .flatMap(cluster => cluster.leaves)
+      .map(leaf => leaf.item);
+  }
+
+  function sortCatalogItemsForSelection(catalogItems) {
+    const items = Array.isArray(catalogItems) ? catalogItems : [];
+    const regularItems = items.filter(item => !isDefaultSelectedTitle(item && item.title));
+    const defaultSelectedItems = items.filter(item => isDefaultSelectedTitle(item && item.title));
+
+    return sortCatalogItemsBySimilarity(regularItems)
+      .concat(sortCatalogItemsBySimilarity(defaultSelectedItems));
+  }
+
   function isStructuralValue(value) {
     const text = normalizeText(value);
 
@@ -133,59 +481,6 @@
       text === '節次' ||
       text === '備註' ||
       text.indexOf('更新時間') === 0;
-  }
-
-  function isActivityTitle(title) {
-    const text = normalizeText(title);
-    return ACTIVITY_PATTERNS.some(pattern => pattern.test(text));
-  }
-
-  function countScheduledPeriodsByTitle(payload) {
-    assertPayload(payload);
-    const counts = new Map();
-
-    payload.tableData.forEach(row => {
-      if (!row || row.isHeader || !Array.isArray(row.cells)) {
-        return;
-      }
-
-      row.cells.forEach(cell => {
-        const day = Number(cell && cell.day);
-        const periodStart = Number(cell && cell.period);
-
-        if (!Number.isFinite(day) || !Number.isFinite(periodStart)) {
-          return;
-        }
-
-        const rowSpan = Math.max(1, Number(cell.rowSpan) || 1);
-        const scheduledPeriods = Math.max(1, Math.min(8 - periodStart + 1, rowSpan));
-
-        splitCellEntries(cell.value).forEach(rawEntry => {
-          if (isStructuralValue(rawEntry)) {
-            return;
-          }
-
-          const key = normalizeTitle(parseEntry(rawEntry).title);
-
-          if (key) {
-            counts.set(key, (counts.get(key) || 0) + scheduledPeriods);
-          }
-        });
-      });
-    });
-
-    return counts;
-  }
-
-  function classifyScheduleTitle(title, scheduledPeriodCounts) {
-    const key = normalizeTitle(title);
-    const scheduledPeriods = key && scheduledPeriodCounts instanceof Map
-      ? scheduledPeriodCounts.get(key) || 0
-      : 0;
-
-    return isActivityTitle(title) || scheduledPeriods < MIN_COURSE_SCHEDULED_PERIODS
-      ? 'activity'
-      : 'course';
   }
 
   function assertPayload(payload) {
@@ -225,7 +520,6 @@
     assertPayload(payload);
     const byKey = new Map();
     const vacationWeekNumbers = getVacationWeekNumbers(payload);
-    const scheduledPeriodCounts = countScheduledPeriodsByTitle(payload);
 
     payload.tableData.forEach(row => {
       if (!row || row.isHeader || !Array.isArray(row.cells)) {
@@ -247,7 +541,6 @@
 
           const existing = byKey.get(key) || {
             title: parsed.title,
-            type: classifyScheduleTitle(parsed.title, scheduledPeriodCounts),
             hasVacationOccurrence: false
           };
           existing.hasVacationOccurrence =
@@ -258,19 +551,23 @@
       });
     });
 
-    const all = Array.from(byKey.values())
+    const catalogItems = Array.from(byKey.values())
       .map(item => ({
         title: item.title,
-        type: item.type,
         period: item.hasVacationOccurrence ? 'vacation' : 'term'
-      }))
-      .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hant'));
+      }));
+    const termItems = sortCatalogItemsForSelection(
+      catalogItems.filter(item => item.period === 'term')
+    );
+    const vacationItems = sortCatalogItemsForSelection(
+      catalogItems.filter(item => item.period === 'vacation')
+    );
+    const all = termItems.concat(vacationItems);
 
     return {
       all,
-      courses: all.filter(item => item.type === 'course'),
-      activities: all.filter(item => item.type === 'activity'),
-      vacationItems: all.filter(item => item.period === 'vacation')
+      termItems,
+      vacationItems
     };
   }
 
@@ -465,20 +762,18 @@
     API_URL,
     GRADE_API_NAMES,
     CATALOG_FINGERPRINT_VERSION,
-    MIN_COURSE_SCHEDULED_PERIODS,
-    ACTIVITY_PATTERNS,
     MANUAL_MERGE_EXCEPTIONS,
     WEEKDAY_LABELS,
     normalizeText,
     normalizeTitle,
+    isDefaultSelectedTitle,
     compareCanonicalStrings,
+    sortCatalogItemsBySimilarity,
+    sortCatalogItemsForSelection,
     makeCatalogFingerprintRows,
     makeCatalogFingerprint,
     splitCellEntries,
     parseEntry,
-    isActivityTitle,
-    countScheduledPeriodsByTitle,
-    classifyScheduleTitle,
     assertPayload,
     getVacationWeekNumbers,
     extractCatalog,

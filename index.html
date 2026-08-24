@@ -16,7 +16,7 @@
   </style>
   <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
   <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
-  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260802-01">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260824-01">
   <script>
     (function () {
       var stylesheet = document.getElementById('app-stylesheet');
@@ -47,7 +47,7 @@
       <nav class="stage-menu-panel" id="stage-menu-panel" aria-label="設定階段" hidden>
         <ol>
           <li><button type="button" data-step-target="1"><span>01</span>選年級</button></li>
-          <li><button type="button" data-step-target="2"><span>02</span>選課程和活動</button></li>
+          <li><button type="button" data-step-target="2"><span>02</span>選課程與活動</button></li>
           <li><button type="button" data-step-target="3"><span>03</span>設定通知偏好</button></li>
           <li><button type="button" data-step-target="4"><span>04</span>檢查設定</button></li>
           <li><button type="button" data-step-target="5"><span>05</span>變出控制臺</button></li>
@@ -64,8 +64,8 @@
           <p class="intro">省下常常找課表、看課網消耗的時間與精力！</p>
           <ul class="hero-benefits" aria-label="行程同步功能">
             <li>
-              <span class="benefit-desktop">把你的課程與活動定時同步到行事曆上</span>
-              <span class="benefit-mobile">定時同步課程和活動</span>
+              <span class="benefit-desktop">把你選擇的行程定時同步到行事曆上</span>
+              <span class="benefit-mobile">定時同步所選行程</span>
             </li>
             <li>告訴你每堂課要幹嘛</li>
             <li>定時通知行程調整</li>
@@ -107,7 +107,7 @@
 
               <span class="transfer-tile tile-one" data-tile-index="0" data-initial-label="實體課 [吉林基地]" data-final-label="實體課 [吉林基地-協作坊]">實體課 [吉林基地]</span>
               <span class="transfer-tile tile-two" data-tile-index="1" data-initial-label="線上課 [線上教室]" data-final-label="線上課 [線上教室]">線上課 [線上教室]</span>
-              <span class="transfer-tile tile-three" data-tile-index="2" data-initial-label="活動 [弘道基地]" data-final-label="活動 [弘道基地-未來教室]">活動 [弘道基地]</span>
+              <span class="transfer-tile tile-three" data-tile-index="2" data-initial-label="學習分享會 [弘道基地]" data-final-label="學習分享會 [弘道基地-未來教室]">學習分享會 [弘道基地]</span>
             </div>
 
             <span class="hero-progressive-fog" aria-hidden="true">
@@ -138,7 +138,7 @@
               <span class="source-status-indicator" aria-hidden="true"></span>
               <span class="source-status-copy">
                 <strong id="source-status-title">請先選擇年級</strong>
-                <span id="source-status-detail">系統將整理出對應的課程、活動給你選擇</span>
+                <span id="source-status-detail">系統將整理出對應的課程與活動給你選擇</span>
               </span>
               <button type="button" class="icon-button source-refresh" id="source-refresh" aria-label="重新讀取課表" data-cursor-label="重新讀取" title="重新讀取課表" disabled>
                 <img src="assets/icon-refresh-cw.svg" alt="">
@@ -162,16 +162,16 @@
           <div class="step-card course-step-card">
             <header class="step-heading step-heading-component">
               <div>
-                <h2 id="step-2-title">選課程和活動</h2>
-                <p id="course-count">已選 0 門課 ・ 0 項活動</p>
+                <h2 id="step-2-title">選課程與活動</h2>
+                <p id="course-count">已選 0 項</p>
               </div>
               <span class="step-position" aria-label="步驟 2，共 5 步">步驟 2/5</span>
             </header>
 
             <div class="search-control" role="search">
-              <label class="visually-hidden" for="course-search">搜尋課程和活動</label>
-              <input id="course-search" type="search" placeholder="輸入課名、活動名、班別等">
-              <button type="button" class="icon-button search-submit" id="course-search-submit" aria-label="搜尋課程和活動" data-cursor-label="搜尋">
+              <label class="visually-hidden" for="course-search">搜尋課程與活動</label>
+              <input id="course-search" type="search" placeholder="輸入課程或活動名稱、班別等">
+              <button type="button" class="icon-button search-submit" id="course-search-submit" aria-label="搜尋課程與活動" data-cursor-label="搜尋">
                 <img src="assets/icon-search.svg" alt="" id="course-search-icon">
               </button>
             </div>
@@ -179,7 +179,7 @@
 
           </div>
           <div class="step-completion">
-            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="確認選課" aria-keyshortcuts="Enter" aria-pressed="false" disabled>選好了 ↵</button>
+            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="確認課程與活動" aria-keyshortcuts="Enter" aria-pressed="false" disabled>選好了 ↵</button>
           </div>
         </section>
 

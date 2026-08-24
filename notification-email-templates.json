@@ -64,9 +64,9 @@
       "accentSoft": "#fae3df",
       "statusLabel": "需要處理",
       "preheader": "偵測到 {{dateRange}} 的新學期行程",
-      "headline": "需要重新選課",
-      "lede": "已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課",
-      "content": "<div style=\"padding:16px 18px;background:#f4f7f2;border:1px solid #bac6be;border-radius:4px;\"><span style=\"display:block;font-size:12px;font-weight:700;color:#4f5d57;\">新行程日期</span><strong style=\"display:block;margin-top:6px;font-size:18px;color:#14211d;\">{{dateRange}}</strong></div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin-top:18px;\"><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#007c59;\">✓</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">完成新學期同步前，系統不會改動現有 Google 日曆行程</td></tr><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#f05a47;\">→</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">在行程同步控制臺確認新學期就讀年級、重新選課，並在同步前檢查新增與移除預覽</td></tr></table><p style=\"margin:14px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟行程同步控制臺</a></p>"
+      "headline": "需要重新選擇課程與活動",
+      "lede": "已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程與活動",
+      "content": "<div style=\"padding:16px 18px;background:#f4f7f2;border:1px solid #bac6be;border-radius:4px;\"><span style=\"display:block;font-size:12px;font-weight:700;color:#4f5d57;\">新行程日期</span><strong style=\"display:block;margin-top:6px;font-size:18px;color:#14211d;\">{{dateRange}}</strong></div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin-top:18px;\"><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#007c59;\">✓</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">完成新學期同步前，系統不會改動現有 Google 日曆行程</td></tr><tr><td width=\"28\" valign=\"top\" style=\"font-size:18px;color:#f05a47;\">→</td><td style=\"padding-bottom:10px;font-size:14px;line-height:1.7;color:#4f5d57;\">在行程同步控制臺確認新學期就讀年級、重新選擇課程與活動，並在同步前檢查新增與移除預覽</td></tr></table><p style=\"margin:14px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟行程同步控制臺</a></p>"
     },
     "new_schedule_items": {
       "accent": "#f05a47",

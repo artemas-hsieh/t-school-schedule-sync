@@ -10,7 +10,7 @@
   'use strict';
 
   const PREFIX = 'TSCHOOL_SETUP_V1';
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const MAX_CODE_LENGTH = 32 * 1024;
   const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -45,7 +45,6 @@
 
     const cleanItems = items.slice(0, 500).map(item => ({
       title: String(item && item.title || '').trim(),
-      type: item && item.type === 'activity' ? 'activity' : 'course',
       period: item && item.period === 'vacation' ? 'vacation' : 'term'
     })).filter(item => item.title);
 
@@ -79,11 +78,7 @@
       termKey: String(input.initialTermKey || input.termKey || ''),
       catalogFingerprintVersion,
       catalogFingerprint,
-      // 舊版通用 Code.gs 仍讀取此欄位；新程式不得再把它當成完整課表指紋。
-      sourceFingerprint: catalogFingerprint,
-      selectedCourses: uniqueStrings(input.selectedCourses),
-      includeActivities: input.includeActivities !== false,
-      excludedActivities: uniqueStrings(input.excludedActivities),
+      selectedTitles: uniqueStrings(input.selectedTitles),
       notificationEmail: String(input.notificationEmail || '').trim(),
       instantNotificationsEnabled: input.instantNotificationsEnabled !== false,
       notificationHours: normalizeHours(input.notificationHours)

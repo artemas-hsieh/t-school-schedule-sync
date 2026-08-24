@@ -68,10 +68,6 @@ const HIGH_LOAD_TEST_CALENDAR_PREFIX = '[TEST]';
 const HIGH_LOAD_TEST_SIMULATED_NOW = '2026-02-23T06:00:00+08:00';
 const HIGH_LOAD_TEST_EXPECTED = {
   totalFuture: 422,
-  courseFuture: 380,
-  activityFuture: 42,
-  outlineWindow: 79,
-  outlineCourseNames: 20,
   firstDateKey: '2026-02-23',
   lastDateKey: '2026-08-16'
 };
@@ -138,7 +134,7 @@ function runHighLoadFirstSyncTest() {
     getHighLoadTestDesiredEvents_(source),
     highLoadTestBusinessNow_(),
     COURSE_OUTLINE_LOOKAHEAD_DAYS
-  ).filter(event => event.type === 'course' && !event.isAllDay);
+  ).filter(event => !event.isAllDay);
   const sourceSets = getRelevantCourseOutlineSourceSets_('高二', outlineEvents);
   if (!sourceSets.length) {
     throw new Error('模擬日期沒有可使用的高二課綱來源組。');
@@ -168,9 +164,7 @@ function runHighLoadFirstSyncTest() {
   try {
     syncResponse = saveSettingsAndSyncFromUi({
       gradeName: '高二',
-      selectedCourses: source.catalog.courses.map(item => item.title),
-      includeActivities: true,
-      excludedActivities: [],
+      selectedTitles: source.catalog.all.map(item => item.title),
       calendarId: '',
       calendarName,
       notificationEmail: testNotificationEmail,
@@ -293,7 +287,7 @@ function runHighLoadCourseOutlineReadTest() {
     getHighLoadTestDesiredEvents_(source),
     highLoadTestBusinessNow_(),
     COURSE_OUTLINE_LOOKAHEAD_DAYS
-  ).filter(event => event.type === 'course' && !event.isAllDay);
+  ).filter(event => !event.isAllDay);
   const sourceSets = getRelevantCourseOutlineSourceSets_('高二', desiredEvents);
   if (!sourceSets.length) {
     throw new Error('模擬日期沒有可使用的高二課綱來源組。');
@@ -681,18 +675,18 @@ function clearHighLoadFirstSyncStores_() {
 
 function buildHighLoadReadOnlyReport_(source, elapsedMs) {
   const events = getHighLoadTestDesiredEvents_(source);
-  const courseEvents = events.filter(event => event.type === 'course' && !event.isAllDay);
-  const activityEvents = events.filter(event => event.type === 'activity');
+  const timedEvents = events.filter(event => !event.isAllDay);
+  const allDayEvents = events.filter(event => event.isAllDay);
   const outlineEvents = filterCourseOutlineLookaheadEvents_(
-    courseEvents,
+    timedEvents,
     highLoadTestBusinessNow_(),
     COURSE_OUTLINE_LOOKAHEAD_DAYS
   );
   const outlineCourseNames = uniqueExactStrings_(outlineEvents.map(event => event.originalTitle));
   const actual = {
     totalFuture: events.length,
-    courseFuture: courseEvents.length,
-    activityFuture: activityEvents.length,
+    timedFuture: timedEvents.length,
+    allDayFuture: allDayEvents.length,
     outlineWindow: outlineEvents.length,
     outlineCourseNames: outlineCourseNames.length,
     firstDateKey: source.firstDateKey || (events.length ? events[0].dateKey : ''),
@@ -716,10 +710,10 @@ function showHighLoadTestReportAlert_(title, report) {
   if (report.actual) {
     lines.push(
       '未來行程：' + report.actual.totalFuture + '（預期 422）',
-      '課程：' + report.actual.courseFuture + '（預期 380）',
-      '活動：' + report.actual.activityFuture + '（預期 42）',
-      '30 天課綱：' + report.actual.outlineWindow + '（預期 79）',
-      '30 天課程名稱：' + report.actual.outlineCourseNames + '（預期 20）',
+      '有時間行程：' + report.actual.timedFuture,
+      '全日行程：' + report.actual.allDayFuture,
+      '30 天課綱候選：' + report.actual.outlineWindow,
+      '30 天行程名稱：' + report.actual.outlineCourseNames,
       '日期範圍：' + report.actual.firstDateKey + '～' + report.actual.lastDateKey
     );
   } else {
@@ -856,9 +850,7 @@ function attachHighLoadTestCourseOutlines_(events, source) {
 function buildHighLoadTestSettings_(source) {
   return {
     gradeName: '高二',
-    selectedCourses: source.catalog.courses.map(item => item.title),
-    includeActivities: true,
-    excludedActivities: [],
+    selectedTitles: source.catalog.all.map(item => item.title),
     pendingTitles: [],
     excludedTitles: [],
     descriptionPreset: 'standard',
@@ -884,7 +876,7 @@ function buildHighLoadTestSettings_(source) {
       throw new Error('Production Code.gs generation requires an immutable emailTemplateManifestUrl.');
     }
     const initialSettings = {
-      schemaVersion: 8,
+      schemaVersion: 9,
       appVersion: settings.appVersion || '2.0.0-rc.2',
       setupComplete: false,
       setupImportedAt: '',
@@ -893,9 +885,7 @@ function buildHighLoadTestSettings_(source) {
       calendarId: '',
       calendarName: '',
       notificationEmail: '',
-      selectedCourses: [],
-      includeActivities: true,
-      excludedActivities: [],
+      selectedTitles: [],
       autoSyncEnabled: true,
       autoSyncHours: [3, 11, 18, 21],
       instantNotificationsEnabled: true,
@@ -955,7 +945,7 @@ return `/**
  */
 // GENERATED UNIVERSAL GOOGLE DOCS TEMPLATE — do not paste a personalized or archived Code.gs here.
 const APP_VERSION = ${formatString(settings.appVersion || '2.0.0-rc.2')};
-const SETTINGS_SCHEMA_VERSION = 8;
+const SETTINGS_SCHEMA_VERSION = 9;
 const TIMEZONE = 'Asia/Taipei';
 const SCHEDULE_SYNC_HOURS = [3, 11, 18, 21];
 const SCHEDULE_SYNC_WINDOW_HALF_MINUTES = 60;
@@ -1005,7 +995,7 @@ const SCRIPT_PROPERTIES_SAFE_BUDGET_BYTES = 430 * 1024;
 const COURSE_OUTLINE_STATE_STORE = 'TSCHOOL_COURSE_OUTLINE_STATE';
 const COURSE_OUTLINE_SNAPSHOT_PREFIX = 'TSCHOOL_COURSE_OUTLINE_SNAPSHOT_';
 const COURSE_OUTLINE_ACTIVE_VERSION_PROPERTY = 'TSCHOOL_COURSE_OUTLINE_ACTIVE_VERSION';
-const COURSE_OUTLINE_CACHE_SCHEMA_VERSION = 1;
+const COURSE_OUTLINE_CACHE_SCHEMA_VERSION = 2;
 const COURSE_OUTLINE_SOURCE_INDEX_FINGERPRINT_VERSION = 1;
 const COURSE_OUTLINE_HEADER_SCAN_LIMIT = 100;
 const COURSE_OUTLINE_LOOKAHEAD_DAYS = 30;
@@ -1045,15 +1035,28 @@ ${highLoadConstantCode}const DEFAULT_SETTINGS = ${formatObject(initialSettings)}
 const SETTINGS_SIDEBAR_HTML = ${formatLongString(sidebarHtml)};
 const SETUP_DIALOG_HTML = ${formatLongString(setupDialogHtml)};
 const SETUP_CODE_PREFIX = 'TSCHOOL_SETUP_V1';
-const SETUP_CODE_SCHEMA_VERSION = 1;
+const SETUP_CODE_SCHEMA_VERSION = 2;
 const SETUP_CODE_MAX_LENGTH = 32 * 1024;
-const SETUP_CATALOG_FINGERPRINT_VERSION = 1;
-const SETUP_CONTEXT_FINGERPRINT_VERSION = 1;
-const SCHEDULE_FINGERPRINT_VERSION = 1;
+const SETUP_CATALOG_FINGERPRINT_VERSION = 2;
+const SETUP_CONTEXT_FINGERPRINT_VERSION = 2;
+const SCHEDULE_FINGERPRINT_VERSION = 2;
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const MANUAL_MERGE_EXCEPTIONS = {};
-const MIN_COURSE_SCHEDULED_PERIODS = 5;
+const TITLE_SIMILARITY_CLUSTER_THRESHOLD = 0.34;
+const TITLE_SIMILARITY_EPSILON = 1e-12;
+const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
+  try {
+    return new Intl.Collator('zh-Hant-u-co-stroke', { numeric: true, sensitivity: 'base' });
+  } catch (error) {
+    return {
+      compare: (left, right) => String(left).localeCompare(String(right), 'zh-Hant', {
+        numeric: true,
+        sensitivity: 'base'
+      })
+    };
+  }
+})();
 // 中央索引暫時不可讀且沒有最後成功快取時使用，避免既有 114-2 課綱立即失效。
 const COURSE_OUTLINE_SOURCE_SETS_BY_GRADE = {
   '高一': [],
@@ -1077,17 +1080,6 @@ let courseOutlineSourceIndexRuntimeCache_ = null;
 let scheduleSourceRuntimeCache_ = Object.create(null);
 let emailTemplateManifestRuntimeCache_ = null;
 let emailTemplateManifestRuntimeLoadAttempted_ = false;
-const ACTIVITY_PATTERNS = [
-  /全校(?:性)?活動/,
-  /^高[一二三](?:導入期|全校活動)$/,
-  /^休業式(?:_高[一二三])?$/,
-  /^勞動節$/,
-  /模擬考/,
-  /校際交流/,
-  /教育局.*(?:協作坊|輔導團)/,
-  /^全天(?:吉林|弘道)$/,
-  /防災|避難演練|畢業典禮|畢展布展/
-];
 
 function getControlPanelUi_() {
   return DocumentApp.getUi();
@@ -1289,9 +1281,7 @@ function applySetupCodeFromUi(code, confirmationToken) {
 function applySetupImportPreview_(preview, previous) {
   const input = {
     gradeName: preview.gradeName,
-    selectedCourses: preview.selectedCourses,
-    includeActivities: preview.includeActivities,
-    excludedActivities: preview.excludedActivities,
+    selectedTitles: preview.selectedTitles,
     notificationEmail: preview.notificationEmail,
     instantNotificationsEnabled: preview.instantNotificationsEnabled,
     notificationHours: preview.notificationHours,
@@ -1306,7 +1296,7 @@ function applySetupImportPreview_(preview, previous) {
   const next = sanitizeSettingsInput_(input, previous, setupSource);
   next.setupComplete = false;
   next.setupImportedAt = new Date().toISOString();
-  next.setupCodeVersion = SETUP_CODE_SCHEMA_VERSION;
+  next.setupCodeVersion = preview.schemaVersion || SETUP_CODE_SCHEMA_VERSION;
   next.setupContextFingerprint = setupSource.setupContextFingerprint;
   next.calendarId = '';
   next.calendarMigrationFromId = '';
@@ -1341,7 +1331,8 @@ function loadSetupSourceContext_(settings) {
   const source = normalizeSetupSourceContext_(stored, settings.gradeName);
   const expectedContextFingerprint = String(settings.setupContextFingerprint || '');
   if (expectedContextFingerprint &&
-      expectedContextFingerprint !== source.setupContextFingerprint) {
+      expectedContextFingerprint !== source.setupContextFingerprint &&
+      Number(settings.setupCodeVersion) !== 1) {
     throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
   }
   return source;
@@ -1373,14 +1364,12 @@ function saveSourceUiCacheSafely_(source) {
     catalog: {
       all: (source.catalog.all || []).map(item => ({
         title: String(item.title || ''),
-        type: item.type === 'activity' ? 'activity' : 'course',
         period: item.period === 'vacation' ? 'vacation' : 'term'
       }))
     },
     cachedAt: new Date().toISOString()
   };
-  snapshot.catalog.courses = snapshot.catalog.all.filter(item => item.type === 'course');
-  snapshot.catalog.activities = snapshot.catalog.all.filter(item => item.type === 'activity');
+  snapshot.catalog.termItems = snapshot.catalog.all.filter(item => item.period === 'term');
   snapshot.catalog.vacationItems = snapshot.catalog.all.filter(item => item.period === 'vacation');
   try {
     writeChunkedJson_(SOURCE_UI_CACHE_STORE, snapshot);
@@ -1409,17 +1398,15 @@ function loadSourceUiFallback_(settings, sourceError) {
   }
 
   if (!fallback) fallback = buildSettingsSourceUiFallback_(settings);
-  const catalogAll = (fallback.catalog && fallback.catalog.all || []).map(item => ({
+  const catalogAll = sortCatalogItemsByPeriod_((fallback.catalog && fallback.catalog.all || []).map(item => ({
     title: String(item.title || ''),
-    type: item.type === 'activity' ? 'activity' : 'course',
     period: item.period === 'vacation' ? 'vacation' : 'term'
-  }));
+  })));
   return Object.assign({}, fallback, {
     gradeName: settings.gradeName,
     catalog: {
       all: catalogAll,
-      courses: catalogAll.filter(item => item.type === 'course'),
-      activities: catalogAll.filter(item => item.type === 'activity'),
+      termItems: catalogAll.filter(item => item.period === 'term'),
       vacationItems: catalogAll.filter(item => item.period === 'vacation')
     },
     events: [],
@@ -1432,16 +1419,14 @@ function loadSourceUiFallback_(settings, sourceError) {
 }
 
 function buildSettingsSourceUiFallback_(settings) {
-  const activityKeys = (settings.excludedActivities || []).map(normalizeTitle_);
   const titles = uniqueStrings_([].concat(
     settings.knownTitles || [],
-    settings.selectedCourses || [],
+    settings.selectedTitles || [],
     settings.pendingTitles || [],
-    settings.excludedActivities || []
+    settings.excludedTitles || []
   ));
   const catalogAll = titles.map(title => ({
     title,
-    type: activityKeys.indexOf(normalizeTitle_(title)) !== -1 ? 'activity' : 'course',
     period: 'term'
   }));
   return {
@@ -1471,10 +1456,316 @@ function sortCanonicalRows_(rows) {
   );
 }
 
+function normalizeSimilarityTitle_(value) {
+  return normalizeText_(value)
+    .replace(/\\s+/g, '')
+    .replace(/[・．.。:：/／|｜_＿\\-‐‑–—]/g, '')
+    .toLowerCase();
+}
+
+function compareDisplayTitles_(left, right) {
+  const leftText = String(left == null ? '' : left);
+  const rightText = String(right == null ? '' : right);
+  return TRADITIONAL_CHINESE_STROKE_COLLATOR.compare(leftText, rightText) ||
+    compareCanonicalStrings_(leftText, rightText);
+}
+
+function normalizedEditSimilarity_(left, right) {
+  const leftCharacters = Array.from(left);
+  const rightCharacters = Array.from(right);
+  const longestLength = Math.max(leftCharacters.length, rightCharacters.length);
+  if (longestLength === 0) return 1;
+  let previous = Array.from(
+    { length: rightCharacters.length + 1 },
+    (unused, index) => index
+  );
+  leftCharacters.forEach((leftCharacter, leftIndex) => {
+    const current = [leftIndex + 1];
+    rightCharacters.forEach((rightCharacter, rightIndex) => {
+      current[rightIndex + 1] = Math.min(
+        current[rightIndex] + 1,
+        previous[rightIndex + 1] + 1,
+        previous[rightIndex] + (leftCharacter === rightCharacter ? 0 : 1)
+      );
+    });
+    previous = current;
+  });
+  return 1 - previous[rightCharacters.length] / longestLength;
+}
+
+function commonPrefixCoverage_(left, right) {
+  const leftCharacters = Array.from(left);
+  const rightCharacters = Array.from(right);
+  const shortestLength = Math.min(leftCharacters.length, rightCharacters.length);
+  let sharedLength = 0;
+  while (
+    sharedLength < shortestLength &&
+    leftCharacters[sharedLength] === rightCharacters[sharedLength]
+  ) {
+    sharedLength += 1;
+  }
+  return shortestLength ? sharedLength / shortestLength : 0;
+}
+
+function bigramDiceSimilarity_(left, right) {
+  const leftCharacters = Array.from(left);
+  const rightCharacters = Array.from(right);
+  if (leftCharacters.length < 2 || rightCharacters.length < 2) {
+    return left === right ? 1 : 0;
+  }
+  const leftBigrams = new Map();
+  let matches = 0;
+  for (let index = 0; index < leftCharacters.length - 1; index += 1) {
+    const bigram = leftCharacters[index] + leftCharacters[index + 1];
+    leftBigrams.set(bigram, (leftBigrams.get(bigram) || 0) + 1);
+  }
+  for (let index = 0; index < rightCharacters.length - 1; index += 1) {
+    const bigram = rightCharacters[index] + rightCharacters[index + 1];
+    const available = leftBigrams.get(bigram) || 0;
+    if (available > 0) {
+      matches += 1;
+      leftBigrams.set(bigram, available - 1);
+    }
+  }
+  return (2 * matches) / (leftCharacters.length + rightCharacters.length - 2);
+}
+
+function calculateTitleSimilarity_(left, right) {
+  const leftTitle = normalizeSimilarityTitle_(left);
+  const rightTitle = normalizeSimilarityTitle_(right);
+  if (leftTitle === rightTitle) return 1;
+  const leftLeadingCharacters = Array.from(leftTitle).slice(0, 3).join('');
+  const rightLeadingCharacters = Array.from(rightTitle).slice(0, 3).join('');
+  return (
+    0.5 * normalizedEditSimilarity_(leftLeadingCharacters, rightLeadingCharacters) +
+    0.25 * commonPrefixCoverage_(leftTitle, rightTitle) +
+    0.15 * bigramDiceSimilarity_(leftTitle, rightTitle) +
+    0.1 * normalizedEditSimilarity_(leftTitle, rightTitle)
+  );
+}
+
+// This rule controls initial selection and list placement only. It does not
+// assign a course/activity type or affect event parsing.
+function isDefaultSelectedTitle_(value) {
+  const title = normalizeTitle_(value);
+  return /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
+}
+
+function compareSimilarityLeaves_(left, right) {
+  return compareDisplayTitles_(left.title, right.title) ||
+    compareCanonicalStrings_(left.period, right.period) ||
+    left.originalIndex - right.originalIndex;
+}
+
+function compareSimilaritySequences_(left, right) {
+  const sharedLength = Math.min(left.length, right.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const comparison = compareSimilarityLeaves_(left[index], right[index]);
+    if (comparison !== 0) return comparison;
+  }
+  return left.length - right.length;
+}
+
+function parseClassVariantTitle_(title) {
+  const match = normalizeSimilarityTitle_(title).match(/^(.*)(海風班|山嵐班)$/);
+  return match && match[1]
+    ? { base: match[1], variant: match[2] }
+    : null;
+}
+
+function buildInitialSimilarityClusters_(leaves) {
+  const families = new Map();
+  leaves.forEach(leaf => {
+    const parsed = parseClassVariantTitle_(leaf.title);
+    if (!parsed) return;
+    if (!families.has(parsed.base)) {
+      families.set(parsed.base, { leaves: [], variants: new Set() });
+    }
+    const family = families.get(parsed.base);
+    family.leaves.push(leaf);
+    family.variants.add(parsed.variant);
+  });
+
+  const hardBlockFamilies = new Set();
+  families.forEach((family, base) => {
+    if (family.variants.has('海風班') && family.variants.has('山嵐班')) {
+      hardBlockFamilies.add(base);
+    }
+  });
+
+  const emittedFamilies = new Set();
+  const clusters = [];
+  leaves.forEach(leaf => {
+    const parsed = parseClassVariantTitle_(leaf.title);
+    const familyBase = parsed && hardBlockFamilies.has(parsed.base)
+      ? parsed.base
+      : '';
+    if (familyBase) {
+      if (emittedFamilies.has(familyBase)) return;
+      emittedFamilies.add(familyBase);
+      const familyLeaves = families.get(familyBase).leaves
+        .slice()
+        .sort(compareSimilarityLeaves_);
+      clusters.push({
+        id: clusters.length,
+        anchor: familyLeaves[0],
+        leaves: familyLeaves
+      });
+      return;
+    }
+    clusters.push({
+      id: clusters.length,
+      anchor: leaf,
+      leaves: [leaf]
+    });
+  });
+  return clusters;
+}
+
+function calculateCompleteLinkSimilarity_(first, second) {
+  let similarity = 1;
+  first.leaves.forEach(firstLeaf => {
+    second.leaves.forEach(secondLeaf => {
+      similarity = Math.min(
+        similarity,
+        calculateTitleSimilarity_(firstLeaf.title, secondLeaf.title)
+      );
+    });
+  });
+  return similarity;
+}
+
+function orientSimilarityClusters_(first, second) {
+  const firstForward = first.leaves.slice();
+  const firstReverse = first.leaves.slice().reverse();
+  const secondForward = second.leaves.slice();
+  const secondReverse = second.leaves.slice().reverse();
+  const candidates = [];
+  [firstForward, firstReverse].forEach(firstSequence => {
+    [secondForward, secondReverse].forEach(secondSequence => {
+      candidates.push({
+        joinIndex: firstSequence.length,
+        leaves: firstSequence.concat(secondSequence)
+      });
+      candidates.push({
+        joinIndex: secondSequence.length,
+        leaves: secondSequence.concat(firstSequence)
+      });
+    });
+  });
+  candidates.sort((left, right) => {
+    const leftSimilarity = calculateTitleSimilarity_(
+      left.leaves[left.joinIndex - 1].title,
+      left.leaves[left.joinIndex].title
+    );
+    const rightSimilarity = calculateTitleSimilarity_(
+      right.leaves[right.joinIndex - 1].title,
+      right.leaves[right.joinIndex].title
+    );
+    return rightSimilarity - leftSimilarity ||
+      compareSimilaritySequences_(left.leaves, right.leaves);
+  });
+  return candidates[0].leaves;
+}
+
+function sortCatalogItemsBySimilarity_(catalogItems) {
+  const sourceItems = Array.isArray(catalogItems) ? catalogItems : [];
+  const leaves = sourceItems.map((item, originalIndex) => ({
+    item,
+    originalIndex,
+    title: String(item && item.title || ''),
+    period: item && item.period === 'vacation' ? 'vacation' : 'term'
+  })).sort(compareSimilarityLeaves_);
+  if (leaves.length < 2) return leaves.map(leaf => leaf.item);
+
+  let clusters = buildInitialSimilarityClusters_(leaves);
+  let nextClusterId = clusters.length;
+  const clusterSimilarities = new Map();
+  const pairKey = (leftId, rightId) => leftId < rightId
+    ? leftId + ':' + rightId
+    : rightId + ':' + leftId;
+  const getClusterSimilarity = (left, right) =>
+    clusterSimilarities.get(pairKey(left.id, right.id));
+  const setClusterSimilarity = (left, right, similarity) => {
+    clusterSimilarities.set(pairKey(left.id, right.id), similarity);
+  };
+
+  for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
+      setClusterSimilarity(
+        clusters[leftIndex],
+        clusters[rightIndex],
+        calculateCompleteLinkSimilarity_(clusters[leftIndex], clusters[rightIndex])
+      );
+    }
+  }
+
+  while (clusters.length > 1) {
+    clusters.sort((left, right) => compareSimilarityLeaves_(left.anchor, right.anchor));
+    let bestPair = null;
+    for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
+        const similarity = getClusterSimilarity(clusters[leftIndex], clusters[rightIndex]);
+        if (
+          similarity >= TITLE_SIMILARITY_CLUSTER_THRESHOLD &&
+          (!bestPair || similarity > bestPair.similarity + TITLE_SIMILARITY_EPSILON)
+        ) {
+          bestPair = { leftIndex, rightIndex, similarity };
+        }
+      }
+    }
+    if (!bestPair) break;
+    const first = clusters[bestPair.leftIndex];
+    const second = clusters[bestPair.rightIndex];
+    const remaining = clusters.filter((cluster, index) =>
+      index !== bestPair.leftIndex && index !== bestPair.rightIndex
+    );
+    const mergedLeaves = orientSimilarityClusters_(first, second);
+    const merged = {
+      id: nextClusterId,
+      anchor: mergedLeaves.slice().sort(compareSimilarityLeaves_)[0],
+      leaves: mergedLeaves
+    };
+    nextClusterId += 1;
+    remaining.forEach(cluster => {
+      setClusterSimilarity(
+        merged,
+        cluster,
+        Math.min(
+          getClusterSimilarity(first, cluster),
+          getClusterSimilarity(second, cluster)
+        )
+      );
+    });
+    clusters = remaining.concat(merged);
+  }
+
+  const orderedLeaves = [];
+  clusters
+    .sort((left, right) => compareSimilarityLeaves_(left.anchor, right.anchor))
+    .forEach(cluster => {
+      Array.prototype.push.apply(orderedLeaves, cluster.leaves);
+    });
+  return orderedLeaves.map(leaf => leaf.item);
+}
+
+function sortCatalogItemsForSelection_(catalogItems) {
+  const items = Array.isArray(catalogItems) ? catalogItems : [];
+  const regularItems = items.filter(item => !isDefaultSelectedTitle_(item && item.title));
+  const defaultSelectedItems = items.filter(item => isDefaultSelectedTitle_(item && item.title));
+  return sortCatalogItemsBySimilarity_(regularItems)
+    .concat(sortCatalogItemsBySimilarity_(defaultSelectedItems));
+}
+
+function sortCatalogItemsByPeriod_(catalogItems) {
+  const items = Array.isArray(catalogItems) ? catalogItems : [];
+  return sortCatalogItemsForSelection_(items.filter(item => item.period === 'term'))
+    .concat(sortCatalogItemsForSelection_(items.filter(item => item.period === 'vacation')));
+}
+
 function makeCatalogFingerprintRows_(catalogItems) {
   return sortCanonicalRows_((Array.isArray(catalogItems) ? catalogItems : []).map(item => [
     String(item && item.title || ''),
-    item && item.type === 'activity' ? 'activity' : 'course',
     item && item.period === 'vacation' ? 'vacation' : 'term'
   ]));
 }
@@ -1500,6 +1791,21 @@ function makeLegacySetupCatalogFingerprint_(termKey, lastDateKey, catalogItems) 
   ]));
 }
 
+function makeLegacyClassifiedSetupCatalogFingerprint_(termKey, lastDateKey, catalogItems) {
+  const rows = sortCanonicalRows_((Array.isArray(catalogItems) ? catalogItems : []).map(item => [
+    String(item && item.title || ''),
+    item && item.type === 'activity' ? 'activity' : 'course',
+    item && item.period === 'vacation' ? 'vacation' : 'term'
+  ]));
+  return hashText_(JSON.stringify([
+    'setup-catalog',
+    1,
+    String(termKey || ''),
+    String(lastDateKey || ''),
+    rows
+  ]));
+}
+
 function makeSetupContextFingerprint_(source) {
   return hashText_(JSON.stringify([
     'setup-context',
@@ -1518,19 +1824,37 @@ function normalizeSetupSourceContext_(source, gradeName) {
   if (!source || !source.catalog || !Array.isArray(source.catalog.all)) {
     throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
   }
+  const sourceCatalogItems = source.catalog.all;
+  const sourceFingerprintVersion = Number(source.catalogFingerprintVersion) || 0;
+  const suppliedFingerprint = String(source.catalogFingerprint || source.fingerprint || '');
   const seen = {};
-  const catalogAll = source.catalog.all.map(item => {
+  const catalogAll = sortCatalogItemsByPeriod_(sourceCatalogItems.map(item => {
     const title = String(item && item.title || '').trim().slice(0, 300);
-    const type = item && item.type;
     const period = item && item.period;
     const key = normalizeTitle_(title);
-    if (!key || seen[key] || ['course', 'activity'].indexOf(type) === -1 ||
-        ['term', 'vacation'].indexOf(period) === -1) {
+    if (!key || seen[key] || ['term', 'vacation'].indexOf(period) === -1) {
       throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
     }
     seen[key] = true;
-    return { title, type, period };
-  }).sort((left, right) => left.title.localeCompare(right.title, 'zh-Hant'));
+    return { title, period };
+  }));
+  if (sourceFingerprintVersion === SETUP_CATALOG_FINGERPRINT_VERSION) {
+    const expected = makeSetupCatalogFingerprint_(source.termKey, source.lastDateKey, catalogAll);
+    if (!suppliedFingerprint || suppliedFingerprint !== expected) {
+      throw new Error('設定碼的課表摘要指紋不一致，請回網站重新產生。');
+    }
+  } else if (sourceFingerprintVersion === 1) {
+    const expected = makeLegacyClassifiedSetupCatalogFingerprint_(
+      source.termKey,
+      source.lastDateKey,
+      sourceCatalogItems
+    );
+    if (!suppliedFingerprint || suppliedFingerprint !== expected) {
+      throw new Error('舊版設定碼的課表摘要指紋不一致，請回網站重新產生。');
+    }
+  } else if (sourceFingerprintVersion !== 0) {
+    throw new Error('設定碼的課表摘要版本無法辨識，請回網站重新產生。');
+  }
   const normalized = {
     gradeName: String(source.gradeName || gradeName || ''),
     firstDateKey: String(source.firstDateKey || ''),
@@ -1539,30 +1863,22 @@ function normalizeSetupSourceContext_(source, gradeName) {
     sourceStale: Boolean(source.sourceStale),
     catalog: {
       all: catalogAll,
-      courses: catalogAll.filter(item => item.type === 'course'),
-      activities: catalogAll.filter(item => item.type === 'activity'),
+      termItems: catalogAll.filter(item => item.period === 'term'),
       vacationItems: catalogAll.filter(item => item.period === 'vacation')
     },
     termKey: String(source.termKey || ''),
-    catalogFingerprintVersion: Number(source.catalogFingerprintVersion) || 0,
-    catalogFingerprint: String(source.catalogFingerprint || source.fingerprint || ''),
+    catalogFingerprintVersion: SETUP_CATALOG_FINGERPRINT_VERSION,
+    catalogFingerprint: makeSetupCatalogFingerprint_(
+      source.termKey,
+      source.lastDateKey,
+      catalogAll
+    ),
     events: [],
     initialSetupSnapshot: true
   };
-  if (normalized.catalogFingerprintVersion === SETUP_CATALOG_FINGERPRINT_VERSION) {
-    const expected = makeSetupCatalogFingerprint_(
-      normalized.termKey,
-      normalized.lastDateKey,
-      catalogAll
-    );
-    if (!normalized.catalogFingerprint || normalized.catalogFingerprint !== expected) {
-      throw new Error('設定碼的課表摘要指紋不一致，請回網站重新產生。');
-    }
-  } else if (normalized.catalogFingerprintVersion !== 0) {
-    throw new Error('設定碼的課表摘要版本無法辨識，請回網站重新產生。');
-  }
   normalized.setupContextFingerprint = makeSetupContextFingerprint_(normalized);
-  if ((source.setupContextFingerprint || source.contextFingerprint) &&
+  if (sourceFingerprintVersion === SETUP_CATALOG_FINGERPRINT_VERSION &&
+      (source.setupContextFingerprint || source.contextFingerprint) &&
       String(source.setupContextFingerprint || source.contextFingerprint) !==
         normalized.setupContextFingerprint) {
     throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
@@ -1581,6 +1897,9 @@ function setupPayloadCatalogMatchesSource_(payload, source) {
   if (version === SETUP_CATALOG_FINGERPRINT_VERSION) {
     return Number(source.catalogFingerprintVersion) === version &&
       supplied === source.catalogFingerprint;
+  }
+  if (version === 1) {
+    return Boolean(payload && payload.sourceSnapshot);
   }
   if (version !== 0) return false;
   return supplied === source.catalogFingerprint || supplied === makeLegacySetupCatalogFingerprint_(
@@ -1608,9 +1927,11 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
   if (!String(payload.termKey || '').trim() || !getSetupPayloadCatalogFingerprint_(payload)) {
     throw new Error('設定碼缺少課表版本，請回網站重新產生。');
   }
-  if (!Array.isArray(payload.selectedCourses) || !Array.isArray(payload.excludedActivities) ||
-      typeof payload.includeActivities !== 'boolean' ||
-      typeof payload.instantNotificationsEnabled !== 'boolean') {
+  if (typeof payload.instantNotificationsEnabled !== 'boolean' ||
+      (payload.schemaVersion === SETUP_CODE_SCHEMA_VERSION && !Array.isArray(payload.selectedTitles)) ||
+      (payload.schemaVersion === 1 &&
+        (!Array.isArray(payload.selectedCourses) || !Array.isArray(payload.excludedActivities) ||
+          typeof payload.includeActivities !== 'boolean'))) {
     throw new Error('設定碼的設定欄位無法辨識，請回網站重新產生。');
   }
   const notificationEmail = String(payload.notificationEmail || '').trim();
@@ -1622,22 +1943,14 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
     throw new Error('這份設定碼屬於不同學期，請回網站依目前課表重新產生。');
   }
 
-  const courseByKey = {};
-  source.catalog.courses.forEach(item => {
-    courseByKey[normalizeTitle_(item.title)] = item.title;
-  });
-  const activityByKey = {};
-  source.catalog.activities.forEach(item => {
-    activityByKey[normalizeTitle_(item.title)] = item.title;
+  const itemByKey = {};
+  source.catalog.all.forEach(item => {
+    itemByKey[normalizeTitle_(item.title)] = item.title;
   });
   const missingItems = [];
-  const selectedCourses = uniqueStrings_(payload.selectedCourses || []).map(title => {
-    const current = courseByKey[normalizeTitle_(title)] || '';
-    if (!current) missingItems.push(String(title));
-    return current;
-  }).filter(Boolean);
-  const excludedActivities = uniqueStrings_(payload.excludedActivities || []).map(title => {
-    const current = activityByKey[normalizeTitle_(title)] || '';
+  const requestedTitles = getSelectedTitlesFromSetupPayload_(payload, source);
+  const selectedTitles = requestedTitles.map(title => {
+    const current = itemByKey[normalizeTitle_(title)] || '';
     if (!current) missingItems.push(String(title));
     return current;
   }).filter(Boolean);
@@ -1650,17 +1963,15 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
     source.catalogFingerprint,
     source.setupContextFingerprint || '',
     payload.gradeName,
-    selectedCourses.join('|'),
-    excludedActivities.join('|'),
+    selectedTitles.join('|'),
     notificationEmail,
     notificationHours.join(',')
   ].join('::'));
 
   return {
+    schemaVersion: payload.schemaVersion,
     gradeName: payload.gradeName,
-    selectedCourses,
-    includeActivities: payload.includeActivities !== false,
-    excludedActivities,
+    selectedTitles,
     notificationEmail,
     instantNotificationsEnabled: payload.instantNotificationsEnabled !== false,
     notificationHours,
@@ -1669,6 +1980,31 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
     confirmationToken,
     source_: source
   };
+}
+
+function getSelectedTitlesFromSetupPayload_(payload, source) {
+  if (payload && payload.schemaVersion === SETUP_CODE_SCHEMA_VERSION) {
+    return uniqueStrings_(payload.selectedTitles || []);
+  }
+  const snapshotItems = payload && payload.sourceSnapshot && payload.sourceSnapshot.items;
+  const sourceItems = source && source.catalog && Array.isArray(source.catalog.all)
+    ? source.catalog.all
+    : [];
+  const legacyItems = Array.isArray(snapshotItems) ? snapshotItems : sourceItems;
+  const excludedKeys = uniqueStrings_(payload.excludedActivities || []).map(normalizeTitle_);
+  const selected = uniqueStrings_(payload.selectedCourses || []);
+  if (payload.includeActivities !== false) {
+    legacyItems.forEach(item => {
+      const selectedByLegacyType = Array.isArray(snapshotItems) && item && item.type === 'activity';
+      const selectedByCurrentDefault = !Array.isArray(snapshotItems) &&
+        isDefaultSelectedTitle_(item && item.title);
+      if ((selectedByLegacyType || selectedByCurrentDefault) &&
+          excludedKeys.indexOf(normalizeTitle_(item.title)) === -1) {
+        selected.push(String(item.title || ''));
+      }
+    });
+  }
+  return uniqueStrings_(selected);
 }
 
 function buildSetupSourceContextFromPayload_(payload) {
@@ -1687,15 +2023,18 @@ function buildSetupSourceContextFromPayload_(payload) {
   const seen = {};
   const catalogAll = items.map(item => {
     const title = String(item && item.title || '').trim().slice(0, 300);
-    const type = item && item.type;
     const period = item && item.period;
     const key = normalizeTitle_(title);
-    if (!key || seen[key] || ['course', 'activity'].indexOf(type) === -1 ||
+    const legacyTypeValid = payload.schemaVersion !== 1 ||
+      ['course', 'activity'].indexOf(item && item.type) !== -1;
+    if (!key || seen[key] || !legacyTypeValid ||
         ['term', 'vacation'].indexOf(period) === -1) {
       throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
     }
     seen[key] = true;
-    return { title, type, period };
+    return payload.schemaVersion === 1
+      ? { title, type: item.type, period }
+      : { title, period };
   });
   const updateMatch = String(snapshot.sourceUpdatedLabel || '').match(/(\\d{8})/);
   const sourceUpdatedLabel = updateMatch ? updateMatch[1] : '';
@@ -1707,10 +2046,7 @@ function buildSetupSourceContextFromPayload_(payload) {
     sourceUpdatedLabel,
     sourceStale: isSourceStale_(sourceUpdatedLabel, scheduleBusinessNow_()),
     catalog: {
-      all: catalogAll,
-      courses: catalogAll.filter(item => item.type === 'course'),
-      activities: catalogAll.filter(item => item.type === 'activity'),
-      vacationItems: catalogAll.filter(item => item.period === 'vacation')
+      all: catalogAll
     },
     termKey: String(payload.termKey || ''),
     catalogFingerprintVersion: Number(payload.catalogFingerprintVersion) || 0,
@@ -1724,9 +2060,7 @@ function setupImportPreviewForClient_(preview) {
   const accountCheck = getActiveGoogleAccountCheck_(preview.notificationEmail);
   return {
     gradeName: preview.gradeName,
-    selectedCourses: preview.selectedCourses,
-    includeActivities: preview.includeActivities,
-    excludedActivities: preview.excludedActivities,
+    selectedTitles: preview.selectedTitles,
     notificationEmail: preview.notificationEmail,
     instantNotificationsEnabled: preview.instantNotificationsEnabled,
     notificationHours: preview.notificationHours,
@@ -1780,7 +2114,7 @@ function decodeSetupCode_(code) {
   } catch (error) {
     throw new Error('設定碼內容無法讀取，請回網站重新複製。');
   }
-  if (!payload || payload.schemaVersion !== SETUP_CODE_SCHEMA_VERSION) {
+  if (!payload || [1, SETUP_CODE_SCHEMA_VERSION].indexOf(payload.schemaVersion) === -1) {
     throw new Error('設定碼版本不受支援，請回網站重新產生。');
   }
   return { payload, codeHash: hashText_(normalized) };
@@ -2142,8 +2476,8 @@ function confirmPendingTitleFromUi(title) {
     const normalized = normalizeTitle_(title);
     settings.pendingTitles = settings.pendingTitles.filter(item => normalizeTitle_(item) !== normalized);
 
-    if (!settings.selectedCourses.some(item => normalizeTitle_(item) === normalized)) {
-      settings.selectedCourses.push(String(title));
+    if (!settings.selectedTitles.some(item => normalizeTitle_(item) === normalized)) {
+      settings.selectedTitles.push(String(title));
     }
 
     settings.excludedTitles = settings.excludedTitles.filter(item => normalizeTitle_(item) !== normalized);
@@ -2161,7 +2495,7 @@ function rejectPendingTitleFromUi(title) {
     const settings = loadSettings_();
     const normalized = normalizeTitle_(title);
     settings.pendingTitles = settings.pendingTitles.filter(item => normalizeTitle_(item) !== normalized);
-    settings.selectedCourses = settings.selectedCourses.filter(item => normalizeTitle_(item) !== normalized);
+    settings.selectedTitles = settings.selectedTitles.filter(item => normalizeTitle_(item) !== normalized);
 
     if (!settings.excludedTitles.some(item => normalizeTitle_(item) === normalized)) {
       settings.excludedTitles.push(String(title));
@@ -2172,7 +2506,7 @@ function rejectPendingTitleFromUi(title) {
     lock.releaseLock();
   }
   return attachUiDataSafely_({
-    message: '已排除「' + title + '」，下次同步會移除同名活動'
+    message: '已排除「' + title + '」，下次同步會移除同名行程'
   }, getSettingsUiData);
 }
 
@@ -2215,7 +2549,7 @@ function saveSettingsCore_(input) {
 function assertFirstSetupTermStillCurrent_(settings, source) {
   if (settings && !settings.setupComplete && settings.termKey && source && source.termKey &&
       settings.termKey !== source.termKey) {
-    throw new Error('課表已進入不同學期，請回設定網站重新選課並產生新的設定碼。');
+    throw new Error('課表已進入不同學期，請回設定網站重新選擇課程與活動並產生新的設定碼。');
   }
 }
 
@@ -2223,8 +2557,7 @@ function sanitizeSettingsInput_(input, previous, source) {
   const value = input || {};
   const gradeName = sanitizeGrade_(value.gradeName);
   const gradeChanged = previous.gradeName !== gradeName;
-  const selectedCourses = uniqueStrings_(Array.isArray(value.selectedCourses) ? value.selectedCourses : []);
-  const excludedActivities = uniqueStrings_(Array.isArray(value.excludedActivities) ? value.excludedActivities : []);
+  const selectedTitles = uniqueStrings_(Array.isArray(value.selectedTitles) ? value.selectedTitles : []);
   const sourceTitles = source.catalog.all.map(item => item.title);
   const sourceKeys = sourceTitles.map(normalizeTitle_);
   const sourceTitleByKey = {};
@@ -2232,24 +2565,22 @@ function sanitizeSettingsInput_(input, previous, source) {
     const key = normalizeTitle_(title);
     if (!sourceTitleByKey[key]) sourceTitleByKey[key] = title;
   });
-  const cleanSelected = uniqueStrings_(selectedCourses
+  const cleanSelected = uniqueStrings_(selectedTitles
     .map(title => sourceTitleByKey[normalizeTitle_(title)] || '')
     .filter(Boolean));
-  const activityKeys = source.catalog.activities.map(item => normalizeTitle_(item.title));
-  const cleanExcludedActivities = uniqueStrings_(excludedActivities
-    .filter(title => activityKeys.indexOf(normalizeTitle_(title)) !== -1)
-    .map(title => sourceTitleByKey[normalizeTitle_(title)] || title));
   const notificationEmail = String(value.notificationEmail || '').trim();
 
   if (notificationEmail) {
     assertSingleEmail_(notificationEmail);
   }
 
-  if (previous.pendingTermKey && cleanSelected.length === 0) {
-    throw new Error('新學期必須重新選擇至少一門課程後才能儲存。');
+  if (cleanSelected.length === 0) {
+    throw new Error(previous.pendingTermKey
+      ? '新學期必須重新選擇至少一項課程或活動後才能儲存。'
+      : '請至少選擇一項課程或活動後再儲存。');
   }
   if (previous.pendingTermKey && value.termGradeConfirmed !== true) {
-    throw new Error('請先確認新學期就讀年級，再儲存選課。');
+    throw new Error('請先確認新學期就讀年級，再儲存課程與活動選擇。');
   }
 
   const calendarId = String(value.calendarId || '').trim();
@@ -2307,13 +2638,11 @@ function sanitizeSettingsInput_(input, previous, source) {
     calendarMigrationFromId = previous.calendarId;
   }
 
-  return Object.assign({}, previous, {
+  const next = Object.assign({}, previous, {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     appVersion: APP_VERSION,
     gradeName,
-    selectedCourses: cleanSelected,
-    includeActivities: value.includeActivities !== false,
-    excludedActivities: cleanExcludedActivities,
+    selectedTitles: cleanSelected,
     calendarId,
     calendarName,
     notificationEmail,
@@ -2330,7 +2659,10 @@ function sanitizeSettingsInput_(input, previous, source) {
     reminderMinutes: sanitizeReminderMinutes_(value.reminderMinutes),
     knownTitles: sourceTitles,
     pendingTitles: gradeChanged ? [] : previous.pendingTitles.filter(title => sourceKeys.indexOf(normalizeTitle_(title)) !== -1),
-    excludedTitles: gradeChanged ? [] : previous.excludedTitles,
+    excludedTitles: gradeChanged ? [] : previous.excludedTitles.filter(title =>
+      sourceKeys.indexOf(normalizeTitle_(title)) !== -1 &&
+      cleanSelected.map(normalizeTitle_).indexOf(normalizeTitle_(title)) === -1
+    ),
     termKey: source.termKey,
     scheduleFingerprint: String(source.scheduleFingerprint || previous.scheduleFingerprint || ''),
     pendingTermKey: '',
@@ -2341,6 +2673,10 @@ function sanitizeSettingsInput_(input, previous, source) {
     termTransitionNoticeLastError: '',
     calendarMigrationFromId
   });
+  delete next.selectedCourses;
+  delete next.includeActivities;
+  delete next.excludedActivities;
+  return next;
 }
 
 function buildUiData_(settings, source) {
@@ -2384,8 +2720,7 @@ function buildSourceUiModel_(source, gradeName) {
     gradeName,
     firstDate: source.firstDateKey,
     lastDate: source.lastDateKey,
-    courseCount: source.catalog.courses.length,
-    activityCount: source.catalog.activities.length,
+    itemCount: source.catalog.all.length,
     updateLabel: source.sourceUpdatedLabel,
     warning: source.sourceStale || source.sourceUnavailable,
     unavailable: Boolean(source.sourceUnavailable),
@@ -2766,7 +3101,6 @@ function buildSyncJobInput_(settings, source, desiredEvents, calendar) {
     .getProperty(COURSE_OUTLINE_ACTIVE_VERSION_PROPERTY) || '';
   const scheduleRows = sortCanonicalRows_((desiredEvents || []).map(item => [
     item.originalTitle,
-    item.type,
     Boolean(item.isAllDay),
     item.dateKey,
     Number(item.periodStart) || 0,
@@ -2784,9 +3118,7 @@ function buildSyncJobInput_(settings, source, desiredEvents, calendar) {
     settings.gradeName,
     settings.termKey,
     calendar.getId(),
-    uniqueStrings_(settings.selectedCourses).map(normalizeTitle_).sort(),
-    Boolean(settings.includeActivities),
-    uniqueStrings_(settings.excludedActivities).map(normalizeTitle_).sort(),
+    uniqueStrings_(settings.selectedTitles).map(normalizeTitle_).sort(),
     uniqueStrings_(settings.excludedTitles).map(normalizeTitle_).sort(),
     settings.descriptionPreset,
     settings.customDescription,
@@ -2809,9 +3141,7 @@ function makeSyncApprovalToken_(settings, source, desiredEvents, plan) {
     settings.gradeName,
     source.termKey,
     source.scheduleFingerprint,
-    uniqueStrings_(settings.selectedCourses).map(normalizeTitle_).sort(),
-    Boolean(settings.includeActivities),
-    uniqueStrings_(settings.excludedActivities).map(normalizeTitle_).sort(),
+    uniqueStrings_(settings.selectedTitles).map(normalizeTitle_).sort(),
     uniqueStrings_(settings.excludedTitles).map(normalizeTitle_).sort(),
     sortCanonicalRows_((desiredEvents || []).map(item => [
       makeOccurrenceKey_(item),
@@ -3701,7 +4031,6 @@ function dedupeAndValidateDesiredEvents_(events) {
     const key = makeOccurrenceKey_(item);
     const fingerprint = hashText_(JSON.stringify([
       normalizeTitle_(item.originalTitle),
-      item.type,
       item.start.toISOString(),
       item.end.toISOString(),
       normalizeTitle_(item.location),
@@ -3729,12 +4058,13 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
         typeof settings.autoSyncEnabledBeforeTermTransition !== 'boolean') {
       settings.autoSyncEnabledBeforeTermTransition = Boolean(settings.autoSyncEnabled);
     }
-    settings.selectedCourses = [];
-    settings.excludedActivities = [];
+    settings.selectedTitles = source.catalog.all
+      .filter(item => isDefaultSelectedTitle_(item.title))
+      .map(item => item.title);
     settings.pendingTitles = [];
     settings.pendingTermKey = source.termKey;
     settings.autoSyncEnabled = false;
-    settings.pausedReason = '偵測到新學期，請重新選擇課程。';
+    settings.pausedReason = '偵測到新學期，請重新選擇課程與活動。';
     settings.termTransitionNoticeAttempts = 0;
     settings.termTransitionNoticeSentAt = '';
     settings.termTransitionNoticeLastError = '';
@@ -3754,7 +4084,7 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
   }
 
   if (!quiet) {
-    throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟控制臺介面並重新選課。');
+    throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟控制臺介面並重新選擇課程與活動。');
   }
 
   return settings;
@@ -3765,13 +4095,13 @@ function buildTermTransitionNotice_(settings, source) {
     ? source.firstDateKey + (source.lastDateKey ? '–' + source.lastDateKey : '')
     : '新學期';
   return {
-    subject: '需要重新選課',
+    subject: '需要重新選擇課程與活動',
     dateRange,
     body:
       '系統偵測到 ' + dateRange + ' 的新學期行程\\n\\n' +
-      '已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課\\n' +
+      '已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程與活動\\n' +
       '完成新學期同步前，系統不會改動現有日曆事件\\n' +
-      '請在控制臺確認新學期就讀年級、重新選課，並在同步前檢查新增與移除預覽'
+      '請在控制臺確認新學期就讀年級、重新選擇課程與活動，並在同步前檢查新增與移除預覽'
   };
 }
 
@@ -3832,7 +4162,6 @@ function registerNewTitles_(settings, source) {
   const known = settings.knownTitles.map(normalizeTitle_);
   const excluded = settings.excludedTitles.map(normalizeTitle_);
   const pending = settings.pendingTitles.map(normalizeTitle_);
-  const activityKeys = source.catalog.activities.map(item => normalizeTitle_(item.title));
   const discovered = source.catalog.all
     .map(item => item.title)
     .filter(title => known.indexOf(normalizeTitle_(title)) === -1)
@@ -3844,11 +4173,11 @@ function registerNewTitles_(settings, source) {
 
   discovered.forEach(title => {
     settings.knownTitles.push(title);
-    if (!settings.includeActivities && activityKeys.indexOf(normalizeTitle_(title)) !== -1) {
-      return;
-    }
     if (pending.indexOf(normalizeTitle_(title)) === -1) {
       settings.pendingTitles.push(title);
+    }
+    if (!settings.selectedTitles.some(item => normalizeTitle_(item) === normalizeTitle_(title))) {
+      settings.selectedTitles.push(title);
     }
   });
 
@@ -3881,27 +4210,18 @@ function registerNewTitles_(settings, source) {
 function shouldIncludeEvent_(event, settings) {
   const normalized = normalizeTitle_(event.originalTitle);
 
+  if (settings.selectedTitles.some(title => normalizeTitle_(title) === normalized)) {
+    return true;
+  }
+
   if (settings.excludedTitles.some(title => normalizeTitle_(title) === normalized)) {
-    return false;
-  }
-
-  if (event.type === 'activity' && settings.excludedActivities.some(title => normalizeTitle_(title) === normalized)) {
-    return false;
-  }
-
-  if (event.type === 'activity' && !settings.includeActivities) {
     return false;
   }
 
   if (settings.pendingTitles.some(title => normalizeTitle_(title) === normalized)) {
     return true;
   }
-
-  if (event.type === 'activity') {
-    return true;
-  }
-
-  return settings.selectedCourses.some(title => normalizeTitle_(title) === normalized);
+  return false;
 }
 
 function buildSyncPlan_(oldState, desiredEvents, todayKey) {
@@ -3910,7 +4230,11 @@ function buildSyncPlan_(oldState, desiredEvents, todayKey) {
     .filter(item => item.dateKey >= todayKey);
   const oldPast = Object.keys(oldState)
     .filter(key => oldState[key].dateKey < todayKey)
-    .reduce((result, key) => { result[key] = oldState[key]; return result; }, {});
+    .reduce((result, key) => {
+      result[key] = Object.assign({}, oldState[key]);
+      delete result[key].type;
+      return result;
+    }, {});
   const oldByKey = {};
   oldFuture.forEach(item => { oldByKey[item.stateKey] = item; });
 
@@ -4329,11 +4653,8 @@ function buildEventLocation_(item) {
 }
 
 function buildEventTitle_(item) {
-  const baseTitle = item.type === 'activity'
-    ? '活動｜' + item.originalTitle
-    : item.originalTitle;
   const location = buildEventLocation_(item);
-  return location ? baseTitle + ' [' + location + ']' : baseTitle;
+  return location ? item.originalTitle + ' [' + location + ']' : item.originalTitle;
 }
 
 function buildManagedDescription_(item, stateKey, settings) {
@@ -4431,7 +4752,16 @@ function makeBaseEventSignature_(item, settings) {
 
 function makeBaseEventSignaturePayload_(item, settings) {
   return JSON.stringify([
-    item.originalTitle, item.type, item.isAllDay, item.dateKey, item.periodStart, item.periodEnd,
+    item.originalTitle, item.isAllDay, item.dateKey, item.periodStart, item.periodEnd,
+    eventDateIso_(item.start), eventDateIso_(item.end), item.location,
+    settings.descriptionPreset, settings.customDescription,
+    settings.reminderMode, settings.reminderMinutes
+  ]);
+}
+
+function makeLegacyClassifiedBaseEventSignaturePayload_(item, settings, type) {
+  return JSON.stringify([
+    item.originalTitle, type, item.isAllDay, item.dateKey, item.periodStart, item.periodEnd,
     eventDateIso_(item.start), eventDateIso_(item.end), item.location,
     settings.descriptionPreset, settings.customDescription,
     settings.reminderMode, settings.reminderMinutes
@@ -4451,6 +4781,11 @@ function eventDateIso_(value) {
 function storedBaseSignatureMatches_(oldItem, newItem, settings) {
   const expected = makeBaseEventSignature_(newItem, settings);
   if (oldItem.baseSyncSignature === expected) return true;
+  if (Number(oldItem.signatureVersion) === 2 && oldItem.type === 'course') {
+    return oldItem.baseSyncSignature === hashText_(
+      makeLegacyClassifiedBaseEventSignaturePayload_(newItem, settings, 'course')
+    );
+  }
   if (Number(oldItem.signatureVersion) >= 2) return false;
   if (!oldItem.start || !oldItem.end) return false;
   const legacyPayload = makeBaseEventSignaturePayload_(oldItem, settings);
@@ -4465,6 +4800,16 @@ function needsEventMetadataMigration_(oldItem) {
 function storedEventContentSignatureMatches_(oldItem, newItem, settings) {
   const expected = makeEventSignature_(newItem, settings);
   if (oldItem.syncSignature === expected) return true;
+  if (Number(oldItem.signatureVersion) === 2 && oldItem.type === 'course') {
+    const legacyPayload = makeLegacyClassifiedBaseEventSignaturePayload_(
+      newItem,
+      settings,
+      'course'
+    );
+    return oldItem.syncSignature === hashText_(
+      newItem.outlineHash ? legacyPayload + '|outline:' + newItem.outlineHash : legacyPayload
+    );
+  }
   if (Number(oldItem.signatureVersion) >= 2) return false;
   if (!oldItem.start || !oldItem.end) return false;
   const legacyPayload = makeBaseEventSignaturePayload_(oldItem, settings);
@@ -4482,10 +4827,9 @@ function storedEventSignatureMatches_(oldItem, newItem, settings) {
 
 function serializeStateItem_(item, calendarEventId, signature, settings) {
   return {
-    signatureVersion: 2,
+    signatureVersion: 3,
     metadataVersion: EVENT_METADATA_VERSION,
     originalTitle: item.originalTitle,
-    type: item.type,
     isAllDay: Boolean(item.isAllDay),
     dateKey: item.dateKey,
     weekday: item.weekday,
@@ -5232,7 +5576,7 @@ function getRelevantCourseOutlineSourceSets_(gradeName, events) {
 }
 
 function getRelevantCourseOutlineSourceSetsFromIndex_(gradeName, events, sourceIndex) {
-  const datedEvents = (events || []).filter(event => event && event.type === 'course' && !event.isAllDay && event.dateKey);
+  const datedEvents = (events || []).filter(event => event && !event.isAllDay && event.dateKey);
   return getConfiguredCourseOutlineSourceSetsFromIndex_(gradeName, sourceIndex)
     .filter(sourceSet => datedEvents.some(event => isDateInCourseOutlineSourceSet_(event.dateKey, sourceSet)));
 }
@@ -5252,7 +5596,7 @@ function makeCourseOutlineSourceSetsFingerprint_(sourceSets) {
 
 function makeCourseOutlineContextFingerprint_(settings, source, events, sourceSets) {
   const courseNames = uniqueExactStrings_((events || [])
-    .filter(event => event && event.type === 'course' && !event.isAllDay)
+    .filter(event => event && !event.isAllDay)
     .map(event => event.originalTitle))
     .sort();
   return hashText_(JSON.stringify([
@@ -5290,7 +5634,7 @@ function enrichEventsWithCourseOutlines_(events, settings, source) {
 
 function attachCourseOutlineLookup_(events, lookup) {
   return (events || []).map(event => {
-    if (!event || event.type !== 'course' || event.isAllDay) return event;
+    if (!event || event.isAllDay) return event;
     const key = makeCourseOutlineOccurrenceKey_(event.originalTitle, event.dateKey, event.periodStart, event.periodEnd);
     const outline = lookup && lookup[key];
     if (!outline || !outline.hash) return event;
@@ -5471,11 +5815,6 @@ function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, source
 function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSets) {
   const lookup = {};
   const origins = {};
-  const foundSheetNames = {};
-  const availableSheetNames = {};
-  const desiredCourseNames = uniqueExactStrings_((desiredEvents || [])
-    .filter(event => event.type === 'course' && !event.isAllDay)
-    .map(event => event.originalTitle));
   const diagnostics = {
     sourceSetCount: sourceSets.length,
     spreadsheetCount: 0,
@@ -5489,7 +5828,6 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
 
   sourceSets.forEach(sourceSet => {
     const setEvents = (desiredEvents || []).filter(event =>
-      event.type === 'course' &&
       !event.isAllDay &&
       isDateInCourseOutlineSourceSet_(event.dateKey, sourceSet)
     );
@@ -5511,7 +5849,6 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
       spreadsheet.sheets.forEach(sheet => {
         const sheetName = String(sheet && sheet.properties && sheet.properties.title || '');
         if (!sheetName) return;
-        availableSheetNames[sheetName] = true;
         if (setCourseNames.indexOf(sheetName) === -1) return;
         relevantSheets.push(sheet);
       });
@@ -5522,7 +5859,6 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
 
       relevantSheets.forEach(sheet => {
         const sheetName = sheet.properties.title;
-        foundSheetNames[sheetName] = true;
         const sheetValues = valuesBySheet[sheetName] || [];
         if (!sheetValues.length) throw new Error('課綱分頁「' + sheetName + '」沒有可讀取的資料。');
         const values = expandVerticalMergedCourseOutlineValues_(
@@ -5563,16 +5899,6 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
     });
   });
 
-  const missing = desiredCourseNames.filter(name => !foundSheetNames[name]);
-  diagnostics.ignoredCrossSchoolSheetNames = missing.filter(isCrossSchoolCourseName_);
-  diagnostics.missingSheetNames = missing.filter(name => !isCrossSchoolCourseName_(name));
-  const allSheetNames = Object.keys(availableSheetNames);
-  diagnostics.nearMatchSheetNames = diagnostics.missingSheetNames.map(name => ({
-    courseName: name,
-    candidates: allSheetNames.filter(sheetName =>
-      sheetName !== name && normalizeTitle_(sheetName) === normalizeTitle_(name)
-    )
-  })).filter(item => item.candidates.length > 0);
   const now = new Date();
   return {
     schemaVersion: COURSE_OUTLINE_CACHE_SCHEMA_VERSION,
@@ -5729,7 +6055,7 @@ function getDesiredCourseOutlineEvents_(settings, source, now) {
     COURSE_OUTLINE_LOOKAHEAD_DAYS
   )
     .filter(event => shouldIncludeEvent_(event, settings))
-    .filter(event => event.type === 'course' && !event.isAllDay);
+    .filter(event => !event.isAllDay);
 }
 
 function hasFreshCourseOutlineSnapshot_(settings, source) {
@@ -5842,7 +6168,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
       return { ok: true, skipped: true, message: '完成第一次同步後，系統才會更新課綱資料。' };
     }
     if (settings.pendingTermKey) {
-      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選課再更新課綱資料。' };
+      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程與活動再更新課綱資料。' };
     }
     if (!settings.autoSyncEnabled &&
         !canRunCourseOutlineRefreshWhileAutoSyncDisabled_(reason, existingState)) {
@@ -5857,7 +6183,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
     const source = loadSourceContext_(settings.gradeName);
     if (settings.termKey && source.termKey !== settings.termKey) {
       finishCourseOutlineRefreshRun_(run, null);
-      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選課再更新課綱資料。' };
+      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程與活動再更新課綱資料。' };
     }
     const desiredEvents = getDesiredCourseOutlineEvents_(
       settings,
@@ -6153,7 +6479,6 @@ function assertSourcePayload_(payload, expectedGrade) {
 
 function parseSchedulePayload_(payload, gradeName, now) {
   const datedHeaders = inferHeaderDates_(payload, now);
-  const scheduledPeriodCounts = countScheduledPeriodsByTitle_(payload);
   const dateLookup = {};
   datedHeaders.forEach(item => { dateLookup[item.rowIndex + '|' + item.dayIndex] = item.dateKey; });
   const events = [];
@@ -6189,7 +6514,6 @@ function parseSchedulePayload_(payload, gradeName, now) {
           if (!parsed.title || !dateKey) return;
           events.push({
             originalTitle: parsed.title,
-            type: classifyScheduleTitle_(parsed.title, scheduledPeriodCounts),
             isAllDay: false,
             weekNum,
             weekday: WEEKDAY_LABELS[dayIndex],
@@ -6215,13 +6539,11 @@ function parseSchedulePayload_(payload, gradeName, now) {
       splitCellEntries_(cell.value).forEach(rawEntry => {
         if (isStructuralValue_(rawEntry)) return;
         const parsed = parseEntry_(rawEntry);
-        if (!parsed.title || !dateKey ||
-            classifyScheduleTitle_(parsed.title, scheduledPeriodCounts) !== 'activity') return;
+        if (!parsed.title || !dateKey) return;
         const start = makeTaipeiDate_(dateKey, '00:00');
         const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
         events.push({
           originalTitle: parsed.title,
-          type: 'activity',
           isAllDay: true,
           weekNum,
           weekday: WEEKDAY_LABELS[dayIndex],
@@ -6239,14 +6561,13 @@ function parseSchedulePayload_(payload, gradeName, now) {
     });
   });
 
-  const catalogAll = extractCatalogFromPayload_(payload, scheduledPeriodCounts);
+  const catalogAll = extractCatalogFromPayload_(payload);
   const firstDateKey = datedHeaders[0].dateKey;
   const lastDateKey = datedHeaders[datedHeaders.length - 1].dateKey;
   const termKey = GRADE_API_NAMES[gradeName] + '|' + firstDateKey;
   const sourceUpdatedLabel = latestUpdateLabel_(events.map(event => event.sourceUpdatedLabel));
   const sourceEventRows = sortCanonicalRows_(events.map(event => [
     event.originalTitle,
-    event.type,
     Boolean(event.isAllDay),
     event.dateKey,
     event.periodStart,
@@ -6277,8 +6598,7 @@ function parseSchedulePayload_(payload, gradeName, now) {
     sourceStale: isSourceStale_(sourceUpdatedLabel, now),
     catalog: {
       all: catalogAll,
-      courses: catalogAll.filter(item => item.type === 'course'),
-      activities: catalogAll.filter(item => item.type === 'activity'),
+      termItems: catalogAll.filter(item => item.period === 'term'),
       vacationItems: catalogAll.filter(item => item.period === 'vacation')
     },
     events
@@ -6303,10 +6623,9 @@ function getVacationWeekNumbersFromPayload_(payload) {
   return vacationWeeks;
 }
 
-function extractCatalogFromPayload_(payload, scheduledPeriodCounts) {
+function extractCatalogFromPayload_(payload) {
   const catalogMap = {};
   const vacationWeeks = getVacationWeekNumbersFromPayload_(payload);
-  const titlePeriodCounts = scheduledPeriodCounts || countScheduledPeriodsByTitle_(payload);
   (payload.tableData || []).forEach(row => {
     if (!row || row.isHeader || !Array.isArray(row.cells)) return;
     row.cells.forEach(cell => {
@@ -6317,7 +6636,6 @@ function extractCatalogFromPayload_(payload, scheduledPeriodCounts) {
         if (!key) return;
         const existing = catalogMap[key] || {
           title: parsed.title,
-          type: classifyScheduleTitle_(parsed.title, titlePeriodCounts),
           hasVacationOccurrence: false
         };
         existing.hasVacationOccurrence =
@@ -6327,13 +6645,12 @@ function extractCatalogFromPayload_(payload, scheduledPeriodCounts) {
       });
     });
   });
-  return Object.keys(catalogMap)
+  return sortCatalogItemsByPeriod_(Object.keys(catalogMap)
     .map(key => ({
       title: catalogMap[key].title,
-      type: catalogMap[key].type,
       period: catalogMap[key].hasVacationOccurrence ? 'vacation' : 'term'
     }))
-    .sort((a, b) => a.title.localeCompare(b.title));
+  );
 }
 
 function inferHeaderDates_(payload, now) {
@@ -6405,44 +6722,6 @@ function isStructuralValue_(value) {
   return !text || /^第\\s*\\d+\\s*週$/.test(text) || /^星期[一二三四五六日]/.test(text) || /^[1-8]$/.test(text) || text === '節次' || text === '備註' || text.indexOf('更新時間') === 0 || /^\\d{1,2}:\\d{2}/.test(text);
 }
 
-function isActivityTitle_(title) {
-  return ACTIVITY_PATTERNS.some(pattern => pattern.test(normalizeText_(title)));
-}
-
-function countScheduledPeriodsByTitle_(payload) {
-  const counts = Object.create(null);
-  (payload.tableData || []).forEach(row => {
-    if (!row || row.isHeader || !Array.isArray(row.cells)) return;
-    row.cells.forEach(cell => {
-      const day = Number(cell && cell.day);
-      const periodStart = Number(cell && cell.period);
-      if (!isFinite(day) || !isFinite(periodStart)) return;
-      const rowSpan = Math.max(1, Number(cell.rowSpan) || 1);
-      const scheduledPeriods = Math.max(1, Math.min(8 - periodStart + 1, rowSpan));
-      splitCellEntries_(cell.value).forEach(rawEntry => {
-        if (isStructuralValue_(rawEntry)) return;
-        const key = normalizeTitle_(parseEntry_(rawEntry).title);
-        if (key) counts[key] = (counts[key] || 0) + scheduledPeriods;
-      });
-    });
-  });
-  return counts;
-}
-
-function classifyScheduleTitle_(title, scheduledPeriodCounts) {
-  const key = normalizeTitle_(title);
-  const scheduledPeriods = key && scheduledPeriodCounts
-    ? Number(scheduledPeriodCounts[key]) || 0
-    : 0;
-  return isActivityTitle_(title) || scheduledPeriods < MIN_COURSE_SCHEDULED_PERIODS
-    ? 'activity'
-    : 'course';
-}
-
-function isCrossSchoolCourseName_(title) {
-  return /跨校/.test(normalizeText_(title));
-}
-
 function extractUpdateLabel_(row) {
   let result = '';
   (row && row.cells || []).forEach(cell => {
@@ -6469,6 +6748,7 @@ function isSourceStale_(label, now) {
 function loadSettings_() {
   const stored = readChunkedJson_(SETTINGS_STORE, null);
   const settings = Object.assign({}, DEFAULT_SETTINGS, stored || {});
+  const storedSchemaVersion = Number(stored && stored.schemaVersion) || 0;
   settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
   settings.scheduleFingerprint = String(
     settings.scheduleFingerprint || settings.sourceFingerprint || ''
@@ -6488,11 +6768,54 @@ function loadSettings_() {
   settings.notifySyncHour = Math.max.apply(null, settings.notificationHours);
   settings.instantNotificationsEnabled = settings.instantNotificationsEnabled !== false;
   settings.autoSyncHours = SCHEDULE_SYNC_HOURS.slice();
-  settings.selectedCourses = uniqueStrings_(settings.selectedCourses || []);
-  settings.excludedActivities = uniqueStrings_(settings.excludedActivities || []);
-  settings.knownTitles = uniqueStrings_(settings.knownTitles || []);
+  const legacyCatalog = storedSchemaVersion < SETTINGS_SCHEMA_VERSION
+    ? loadLegacyClassifiedCatalogItems_(settings)
+    : { items: [], reliable: false };
+  if (storedSchemaVersion < SETTINGS_SCHEMA_VERSION) {
+    const legacyExcludedActivities = uniqueStrings_(settings.excludedActivities || []);
+    const excludedActivityKeys = legacyExcludedActivities.map(normalizeTitle_);
+    const requiresImplicitActivityMigration = settings.includeActivities !== false;
+    const needsSelectionReview = Boolean(settings.pendingTermKey) ||
+      (requiresImplicitActivityMigration && !legacyCatalog.reliable);
+    const selectedTitles = needsSelectionReview
+      ? []
+      : uniqueStrings_(settings.selectedCourses || []);
+    if (requiresImplicitActivityMigration && !needsSelectionReview) {
+      legacyCatalog.items.forEach(item => {
+        if (item.type === 'activity' &&
+            excludedActivityKeys.indexOf(normalizeTitle_(item.title)) === -1) {
+          selectedTitles.push(item.title);
+        }
+      });
+    }
+    settings.selectedTitles = uniqueStrings_(selectedTitles);
+    settings.excludedTitles = uniqueStrings_([].concat(
+      settings.excludedTitles || [],
+      legacyExcludedActivities
+    ));
+    settings.knownTitles = uniqueStrings_(
+      settings.knownTitles && settings.knownTitles.length
+        ? settings.knownTitles
+        : settings.selectedTitles
+    );
+    if (needsSelectionReview && settings.setupComplete && settings.termKey) {
+      if (typeof settings.autoSyncEnabledBeforeTermTransition !== 'boolean') {
+        settings.autoSyncEnabledBeforeTermTransition = Boolean(settings.autoSyncEnabled);
+      }
+      settings.pendingTermKey = settings.pendingTermKey || settings.termKey;
+      settings.pendingTitles = [];
+      settings.autoSyncEnabled = false;
+      settings.pausedReason = '版本更新後，請重新選擇課程與活動。';
+    }
+  } else {
+    settings.selectedTitles = uniqueStrings_(settings.selectedTitles || []);
+    settings.knownTitles = uniqueStrings_(settings.knownTitles || []);
+  }
   settings.pendingTitles = uniqueStrings_(settings.pendingTitles || []);
   settings.excludedTitles = uniqueStrings_(settings.excludedTitles || []);
+  delete settings.selectedCourses;
+  delete settings.includeActivities;
+  delete settings.excludedActivities;
   if (settings.pendingTermKey &&
       typeof settings.autoSyncEnabledBeforeTermTransition !== 'boolean') {
     settings.autoSyncEnabledBeforeTermTransition = true;
@@ -6509,6 +6832,28 @@ function loadSettings_() {
     settings.customDescription || STANDARD_DESCRIPTION_TEMPLATE
   ).slice(0, 4000);
   return settings;
+}
+
+function loadLegacyClassifiedCatalogItems_(settings) {
+  const storeKeys = [SOURCE_UI_CACHE_STORE, SETUP_SOURCE_CONTEXT_STORE];
+  const acceptedTerms = uniqueStrings_([settings && settings.pendingTermKey, settings && settings.termKey]);
+  for (let index = 0; index < storeKeys.length; index += 1) {
+    const snapshot = readChunkedJson_(storeKeys[index], null);
+    if (!snapshot || !snapshot.catalog ||
+        String(snapshot.gradeName || '') !== String(settings && settings.gradeName || '') ||
+        (acceptedTerms.length && acceptedTerms.indexOf(String(snapshot.termKey || '')) === -1)) {
+      continue;
+    }
+    const items = snapshot && snapshot.catalog && snapshot.catalog.all;
+    if (!Array.isArray(items)) continue;
+    const classified = items.filter(item =>
+      item && item.title && ['course', 'activity'].indexOf(item.type) !== -1
+    );
+    if (classified.length === items.length && classified.length) {
+      return { items: classified, reliable: true };
+    }
+  }
+  return { items: [], reliable: false };
 }
 
 function loadSyncState_() {
@@ -6700,7 +7045,7 @@ function setupAutoSyncTriggers() {
     const settings = loadSettings_();
     assertSetupImported_(settings);
     if (settings.pendingTermKey) {
-      throw new Error('已偵測到新學期，請先在控制臺重新選課，再啟用自動同步。');
+      throw new Error('已偵測到新學期，請先在控制臺重新選擇課程與活動，再啟用自動同步。');
     }
     settings.autoSyncEnabled = true;
     saveSettings_(settings);
@@ -6895,7 +7240,7 @@ function toggleAutoSyncFromMenu() {
     settings = loadSettings_();
     assertSetupImported_(settings);
     if (!settings.autoSyncEnabled && settings.pendingTermKey) {
-      throw new Error('已偵測到新學期，請先在控制臺重新選課，再啟用自動同步。');
+      throw new Error('已偵測到新學期，請先在控制臺重新選擇課程與活動，再啟用自動同步。');
     }
     settings.autoSyncEnabled = !settings.autoSyncEnabled;
     settings.pausedReason = settings.autoSyncEnabled ? '' : '由使用者關閉。';

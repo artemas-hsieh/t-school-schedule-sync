@@ -39,20 +39,6 @@ const SETUP_CODE_FILE_NAME = 'T-SCHOOL-Schedule-Sync-設定碼.txt';
 const SCHOOL_EMAIL_DOMAIN = '@tschool.tp.edu.tw';
 const SCHOOL_EMAIL_PATTERN =
   /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@tschool\.tp\.edu\.tw$/;
-const TRADITIONAL_CHINESE_STROKE_COLLATOR = (() => {
-  try {
-    return new Intl.Collator('zh-Hant-u-co-stroke', {
-      numeric: true,
-      sensitivity: 'base'
-    });
-  } catch {
-    return new Intl.Collator('zh-Hant', {
-      numeric: true,
-      sensitivity: 'base'
-    });
-  }
-})();
-
 // Journey tuning: each completed section reveals the next one in the vertical narrative.
 // Manual input uses frame-based Lenis interpolation so a missed frame extends
 // the settle time instead of jumping forward to catch a fixed duration.
@@ -125,8 +111,8 @@ document.documentElement.style.setProperty(
 );
 
 const state = {
-  selectedByGrade: new Map(),
-  excludedActivitiesByGrade: new Map(),
+  selectedTitlesByGrade: new Map(),
+  defaultSelectionSeededByGrade: new Set(),
   sourceByGrade: new Map(),
   sourceSummary: null,
   sourceLoading: false,
@@ -323,12 +309,12 @@ function bindEvents() {
       return;
     }
 
-    // Search text is presentation-only, while course/activity changes are
-    // finalized by the course-list change handler. Avoid rebuilding the large
+    // Search text is presentation-only, while schedule-item changes are
+    // finalized by the item-list change handler. Avoid rebuilding the large
     // generated Apps Script once (or twice) for these unrelated input events.
     if (
       event.target === elements.courseSearch ||
-      event.target.matches('[data-course], [data-activity]')
+      event.target.matches('[data-schedule-item]')
     ) {
       return;
     }
@@ -411,7 +397,7 @@ function updateCourseSearchAction() {
   elements.courseSearchSubmit?.classList.toggle('is-cancel', isSearching);
   elements.courseSearchSubmit?.setAttribute(
     'aria-label',
-    isSearching ? '取消搜尋' : '搜尋課程和活動'
+    isSearching ? '取消搜尋' : '搜尋課程與活動'
   );
 
   if (elements.courseSearchSubmit) {
@@ -439,6 +425,7 @@ async function loadGradeSchedule(gradeName, options) {
 
   if (cached && !force) {
     state.sourceSummary = cached.summary;
+    seedDefaultSelections(gradeName, cached.summary);
     state.sourceError = null;
     renderSourceStatus();
     renderCourses();
@@ -464,6 +451,7 @@ async function loadGradeSchedule(gradeName, options) {
 
     state.sourceByGrade.set(gradeName, { payload, summary });
     state.sourceSummary = summary;
+    seedDefaultSelections(gradeName, summary);
   } catch (error) {
     if (requestId !== state.requestId) {
       return;
@@ -510,14 +498,14 @@ function renderSourceStatus() {
   if (!state.sourceSummary) {
     elements.sourceStatus.dataset.state = 'idle';
     elements.sourceStatusTitle.textContent = '請先選擇年級';
-    elements.sourceStatusDetail.textContent = '系統將整理出對應的課程、活動給你選擇';
+    elements.sourceStatusDetail.textContent = '系統將整理出對應的課程與活動給你選擇';
     elements.sourceRefresh.disabled = true;
     return;
   }
 
   elements.sourceStatus.dataset.state = 'success';
   elements.sourceStatusTitle.textContent = `${getCurrentGrade()}課表可用`;
-  elements.sourceStatusDetail.textContent = '系統將整理出對應的課程、活動給你選擇';
+  elements.sourceStatusDetail.textContent = '系統將整理出對應的課程與活動給你選擇';
 }
 
 function initMobileOutput() {
@@ -811,56 +799,40 @@ function notifyStepConfigurationChanged() {
   renderSettingsSummary();
 }
 
-function getSelectedCourses(gradeName) {
+function getSelectedTitles(gradeName) {
   const grade = gradeName || getCurrentGrade();
 
-  if (!state.selectedByGrade.has(grade)) {
-    state.selectedByGrade.set(grade, new Set());
+  if (!state.selectedTitlesByGrade.has(grade)) {
+    state.selectedTitlesByGrade.set(grade, new Set());
   }
 
-  return state.selectedByGrade.get(grade);
+  return state.selectedTitlesByGrade.get(grade);
 }
 
-function getExcludedActivities(gradeName) {
-  const grade = gradeName || getCurrentGrade();
-
-  if (!state.excludedActivitiesByGrade.has(grade)) {
-    state.excludedActivitiesByGrade.set(grade, new Set());
+function seedDefaultSelections(gradeName, summary) {
+  if (!gradeName || !summary || state.defaultSelectionSeededByGrade.has(gradeName)) {
+    return;
   }
 
-  return state.excludedActivitiesByGrade.get(grade);
+  const isDefaultSelectedTitle = window.TSchoolScheduleData?.isDefaultSelectedTitle;
+  const defaults = typeof isDefaultSelectedTitle === 'function'
+    ? (summary.catalog.all || [])
+      .filter(item => isDefaultSelectedTitle(item.title))
+      .map(item => item.title)
+    : [];
+
+  state.selectedTitlesByGrade.set(gradeName, new Set(defaults));
+  state.defaultSelectionSeededByGrade.add(gradeName);
 }
 
 function handleCourseSelectionChange(event) {
-  const input = event.target.closest('input[data-course], input[data-activity]');
+  const input = event.target.closest('input[data-schedule-item]');
 
   if (!input) {
     return;
   }
 
-  if (input.hasAttribute('data-activity')) {
-    const excluded = getExcludedActivities();
-
-    if (input.checked) {
-      excluded.delete(input.value);
-    } else {
-      excluded.add(input.value);
-    }
-
-    document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
-      detail: { step: 2 }
-    }));
-    const card = input.closest('.course-card');
-    if (card) {
-      card.dataset.cursorLabel = input.checked ? '取消活動' : '選取活動';
-    }
-    renderSelectionCounts();
-    updateOutput();
-    renderSettingsSummary();
-    return;
-  }
-
-  const selected = getSelectedCourses();
+  const selected = getSelectedTitles();
 
   if (input.checked) {
     selected.add(input.value);
@@ -871,8 +843,12 @@ function handleCourseSelectionChange(event) {
   document.dispatchEvent(new CustomEvent('tschool:configuration-change', {
     detail: { step: 2 }
   }));
+  const card = input.closest('.course-card');
+  if (card) {
+    card.dataset.cursorLabel = input.checked ? '取消選取此項' : '選取此項';
+  }
   // The checkbox already reflects the new selection. Replacing the whole
-  // course grid here destroys and rebuilds every card, which is especially
+  // item grid here destroys and rebuilds every card, which is especially
   // expensive on lower-end phones and also discards the current focus node.
   renderSelectionCounts();
   updateOutput();
@@ -893,7 +869,7 @@ function renderCourses() {
   }
 
   if (!state.sourceSummary) {
-    elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前課程</p>';
+    elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前的課程與活動</p>';
     renderSelectionCounts();
     return;
   }
@@ -901,42 +877,23 @@ function renderCourses() {
   const query = normalizeSearchText(elements.courseSearch.value);
   const catalog = state.sourceSummary.catalog;
   const sections = [];
-  const hasVacationItems = catalog.vacationItems.length > 0;
+  const termItems = (catalog.termItems || [])
+    .filter(item => normalizeSearchText(item.title).includes(query));
+  const vacationItems = (catalog.vacationItems || [])
+    .filter(item => normalizeSearchText(item.title).includes(query));
+  const hasVacationItems = (catalog.vacationItems || []).length > 0;
 
-  const courses = catalog.courses
-    .filter(item => item.period !== 'vacation')
-    .filter(item => normalizeSearchText(item.title).includes(query))
-    .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
-
-  if (courses.length > 0) {
+  if (termItems.length > 0) {
     sections.push(renderCourseSection(
-      hasVacationItems ? '學期間課程' : '課程',
-      courses.map(renderCourseCard).join('')
+      hasVacationItems ? '學期間課程與活動' : '',
+      termItems.map(renderScheduleItemCard).join('')
     ));
   }
-
-  const activities = catalog.activities
-    .filter(item => item.period !== 'vacation')
-    .filter(item => normalizeSearchText(item.title).includes(query))
-    .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
-
-  if (activities.length > 0) {
-    sections.push(renderCourseSection(
-      hasVacationItems ? '學期間活動' : '活動',
-      activities.map(renderActivityCard).join('')
-    ));
-  }
-
-  const vacationItems = catalog.vacationItems
-    .filter(item => normalizeSearchText(item.title).includes(query))
-    .sort((a, b) => compareByTraditionalStroke(a.title, b.title));
 
   if (vacationItems.length > 0) {
     sections.push(renderCourseSection(
-      '寒暑假期間課程 / 活動',
-      vacationItems.map(item =>
-        item.type === 'activity' ? renderActivityCard(item) : renderCourseCard(item)
-      ).join('')
+      '寒暑假期間課程與活動',
+      vacationItems.map(renderScheduleItemCard).join('')
     ));
   }
 
@@ -950,37 +907,25 @@ function renderCourses() {
 function renderCourseSection(title, content, note) {
   return [
     '<section class="course-group">',
-    '<div class="course-group-heading">',
-    `<h3>${escapeHtml(title)}</h3>`,
-    note ? `<span>${escapeHtml(note)}</span>` : '',
-    '</div>',
+    title ? '<div class="course-group-heading">' : '',
+    title ? `<h3>${escapeHtml(title)}</h3>` : '',
+    title && note ? `<span>${escapeHtml(note)}</span>` : '',
+    title ? '</div>' : '',
     `<div class="course-grid">${content}</div>`,
     '</section>'
   ].join('');
 }
 
-function renderCourseCard(item) {
-  const checked = getSelectedCourses().has(item.title) ? 'checked' : '';
-  return `<label class="course-card" data-cursor-label="選取課程"><input type="checkbox" data-course value="${escapeHtml(item.title)}" ${checked}><span>${escapeHtml(item.title)}</span></label>`;
-}
-
-function renderActivityCard(item) {
-  const selected = isActivitySelected(item.title);
-  return `<label class="course-card activity-card" data-cursor-label="${selected ? '取消活動' : '選取活動'}"><input type="checkbox" data-activity value="${escapeHtml(item.title)}" ${selected ? 'checked' : ''}><span>${escapeHtml(item.title)}</span></label>`;
-}
-
-function isActivitySelected(title) {
-  return !getExcludedActivities().has(title);
+function renderScheduleItemCard(item) {
+  const selected = getSelectedTitles().has(item.title);
+  return `<label class="course-card" data-cursor-label="${selected ? '取消選取此項' : '選取此項'}"><input type="checkbox" data-schedule-item value="${escapeHtml(item.title)}" ${selected ? 'checked' : ''}><span>${escapeHtml(item.title)}</span></label>`;
 }
 
 function renderSelectionCounts() {
-  const selected = Array.from(getSelectedCourses()).sort((a, b) =>
-    a.localeCompare(b, 'zh-Hant')
-  );
-
-  const activities = state.sourceSummary ? state.sourceSummary.catalog.activities : [];
-  const selectedActivities = activities.filter(item => isActivitySelected(item.title));
-  const label = `已選 ${selected.length} 門課 ・ ${selectedActivities.length} 項活動`;
+  const catalogItems = state.sourceSummary ? state.sourceSummary.catalog.all || [] : [];
+  const selected = getSelectedTitles();
+  const selectedCount = catalogItems.filter(item => selected.has(item.title)).length;
+  const label = `已選 ${selectedCount} 項`;
   elements.courseCount.textContent = label;
   if (elements.notificationSelectionCount) {
     elements.notificationSelectionCount.textContent = '包含行程調整、同步狀態通知';
@@ -1006,9 +951,12 @@ function getSettings() {
     : DEFAULTS.notifyHour;
 
   const summary = state.sourceSummary;
-  const activityTitles = summary ? summary.catalog.activities.map(item => item.title) : [];
-  const excludedActivities = getExcludedActivities();
-  const includeActivities = activityTitles.some(title => !excludedActivities.has(title));
+  const selected = getSelectedTitles();
+  const selectedTitles = summary
+    ? (summary.catalog.all || [])
+      .filter(item => selected.has(item.title))
+      .map(item => item.title)
+    : [];
 
   return {
     appVersion: '2.0.0-rc.2',
@@ -1019,13 +967,7 @@ function getSettings() {
     instantNotificationsEnabled,
     notificationHours,
     notifySyncHour: notifyHour,
-    includeActivities,
-    excludedActivities: Array.from(excludedActivities).sort((a, b) =>
-      a.localeCompare(b, 'zh-Hant')
-    ),
-    selectedCourses: Array.from(getSelectedCourses()).sort((a, b) =>
-      a.localeCompare(b, 'zh-Hant')
-    ),
+    selectedTitles,
     descriptionPreset: DEFAULTS.descriptionPreset,
     customDescription: DEFAULTS.customDescription,
     reminderMode: DEFAULTS.reminderMode,
@@ -1045,6 +987,8 @@ function getSettings() {
 
 function updateOutput() {
   const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
+  const hasSelectedScheduleItem = ready && (state.sourceSummary.catalog.all || [])
+    .some(item => getSelectedTitles().has(item.title));
   state.generatedCodeReady = false;
   updateGeneratedCodeAvailability(ready);
   if (elements.outputEmail) {
@@ -1058,7 +1002,7 @@ function updateOutput() {
   }
 
   if (courseStepComplete) {
-    courseStepComplete.disabled = !ready;
+    courseStepComplete.disabled = !hasSelectedScheduleItem;
   }
 }
 
@@ -2242,11 +2186,11 @@ function initStepJourney() {
     button.classList.toggle('is-confirmed', nextState === 'confirmed');
     button.setAttribute('aria-pressed', String(nextState === 'confirmed'));
     button.dataset.cursorLabel = nextState === 'review'
-      ? '再次確認選課'
+      ? '再次確認行程'
       : nextState === 'correction'
         ? '修正 Email'
         : stepNumber === 2
-          ? '確認選課'
+          ? '確認行程'
           : stepNumber === 3
             ? '確認通知設定'
             : '產生安裝設定碼';
@@ -2262,6 +2206,11 @@ function initStepJourney() {
       (!state.sourceSummary || state.sourceLoading || state.sourceError)
     ) {
       showToast(state.sourceError ? '請先重新讀取課表' : '課表仍在讀取中');
+      return;
+    }
+
+    if (completedStep === 2 && !getSelectedTitles().size) {
+      showToast('請至少選擇一項課程或活動');
       return;
     }
 
@@ -3543,22 +3492,14 @@ function renderSettingsSummary() {
     return;
   }
 
-  const selected = Array.from(getSelectedCourses()).sort(compareByTraditionalStroke);
-  const catalog = state.sourceSummary?.catalog || { courses: [], activities: [] };
-  const selectedActivities = catalog.activities
-    .filter(item => isActivitySelected(item.title))
-    .map(item => item.title)
-    .sort(compareByTraditionalStroke);
-  const unselectedCourses = catalog.courses
-    .filter(item => !getSelectedCourses().has(item.title))
-    .map(item => item.title)
-    .sort(compareByTraditionalStroke);
-  const unselectedActivities = catalog.activities
-    .filter(item => !isActivitySelected(item.title))
-    .map(item => item.title)
-    .sort(compareByTraditionalStroke);
-  const selectedItems = selected.concat(selectedActivities).sort(compareByTraditionalStroke);
-  const unselectedItems = unselectedCourses.concat(unselectedActivities).sort(compareByTraditionalStroke);
+  const selectedTitles = getSelectedTitles();
+  const catalogItems = state.sourceSummary?.catalog?.all || [];
+  const selectedItems = catalogItems
+    .filter(item => selectedTitles.has(item.title))
+    .map(item => item.title);
+  const unselectedItems = catalogItems
+    .filter(item => !selectedTitles.has(item.title))
+    .map(item => item.title);
   const email = elements.notificationEmail.value.trim();
   const hasValidEmail = isValidNotificationEmail(email);
   const instantNotificationsEnabled = elements.instantNotifications?.checked !== false;
@@ -3572,9 +3513,9 @@ function renderSettingsSummary() {
       ['你選的年級是：', grade ? [grade] : ['尚未選擇'], grade ? '' : 'is-error']
     ], 1, '修改年級'),
     renderSummaryRow([
-      ['你選的課程與活動有：', selectedItems],
-      ['你「沒」選的課程與活動有：', unselectedItems]
-    ], 2, '修改課程與活動'),
+      ['你選的行程有：', selectedItems],
+      ['你「沒」選的行程有：', unselectedItems]
+    ], 2, '修改行程'),
     renderSummaryRow([
       ['你想用來收通知的 Email 是：', [email || '未填寫'], hasValidEmail ? '' : 'is-error'],
       ['你想收到通知的時間是：', notificationSummary]
@@ -3833,13 +3774,6 @@ function normalizeSearchText(value) {
     .replace(/（/g, '(')
     .replace(/）/g, ')')
     .toLowerCase();
-}
-
-function compareByTraditionalStroke(first, second) {
-  return TRADITIONAL_CHINESE_STROKE_COLLATOR.compare(
-    String(first || ''),
-    String(second || '')
-  );
 }
 
 function escapeHtml(value) {

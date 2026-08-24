@@ -1167,8 +1167,7 @@ textarea::placeholder {
   line-height: 1.45;
 }
 
-.course-card:has(input:checked),
-.activity-card.is-selected {
+.course-card:has(input:checked) {
   border-color: var(--ink);
   background: var(--bell);
   box-shadow: 4px 4px 0 var(--ink);
@@ -1182,32 +1181,6 @@ textarea::placeholder {
   color: var(--ink);
   font-family: var(--technical);
   font-weight: 900;
-}
-
-.activity-card {
-  display: grid;
-  grid-template-columns: 5px minmax(0, 1fr);
-  gap: 10px;
-  padding-right: 12px;
-}
-
-.activity-marker {
-  grid-row: 1 / span 2;
-  align-self: stretch;
-  min-height: 30px;
-  background: var(--calendar);
-}
-
-.activity-card small {
-  grid-column: 2;
-  color: var(--ink-soft);
-  font-size: 0.68rem;
-}
-
-.activity-card[aria-disabled="true"] {
-  opacity: 0.48;
-  box-shadow: none;
-  transform: none;
 }
 
 .course-loading {
@@ -2938,8 +2911,7 @@ textarea:focus {
 }
 
 .source-status::after,
-.loading-track::after,
-.activity-marker {
+.loading-track::after {
   background: var(--sync);
 }
 
@@ -2948,8 +2920,7 @@ textarea:focus {
 }
 
 .segmented-control input:checked + span,
-.course-card:has(input:checked),
-.activity-card.is-selected {
+.course-card:has(input:checked) {
   border-color: var(--sync-dark);
   background: var(--surface-green);
   box-shadow: 4px 4px 0 var(--sync-dark);
@@ -3536,12 +3507,6 @@ select,
   color: var(--paper-bright);
 }
 
-.activity-master-toggle {
-  margin: 0 0 var(--space-5);
-  padding: var(--space-3) 0 var(--space-4);
-  border-bottom: 1px solid var(--line);
-}
-
 .toggle-row span {
   grid-template-columns: var(--space-12) minmax(0, 1fr);
   gap: var(--space-3);
@@ -3578,11 +3543,6 @@ select,
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-caption);
   line-height: var(--leading-small);
-}
-
-.activity-pill {
-  border-color: var(--shift);
-  color: var(--ink);
 }
 
 .course-list {
@@ -3625,24 +3585,6 @@ select,
   border-color: var(--ink);
   background: var(--surface-green);
   box-shadow: var(--space-1) var(--space-1) 0 var(--ink);
-}
-
-.activity-card {
-  display: flex;
-  gap: var(--space-2);
-  padding-right: var(--space-10);
-}
-
-.activity-card small {
-  margin-left: auto;
-  color: var(--ink-soft);
-  font-size: var(--text-caption);
-  line-height: var(--leading-caption);
-  white-space: nowrap;
-}
-
-.activity-card:has(input:checked)::after {
-  right: var(--space-3);
 }
 
 .course-loading {
@@ -3870,10 +3812,6 @@ select,
   .course-grid,
   .two-column {
     grid-template-columns: 1fr;
-  }
-
-  .activity-card small {
-    display: none;
   }
 
   .format-preview {
@@ -4726,8 +4664,7 @@ select,
   text-align: center;
 }
 
-.course-card,
-.activity-card {
+.course-card {
   justify-content: center;
   gap: 0;
   padding: var(--space-3) var(--space-4);

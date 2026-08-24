@@ -17,7 +17,7 @@ const controlPanelGenerator = require(path.join(
 ));
 const immutableManifestUrl =
   'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
-  '3fae71be483f6c1039a77f6e55a34ba158d4e6c8/notification-email-templates.json';
+  '5f31cd2fb263b9b5e579eab0d25c1b4f278f854f/notification-email-templates.json';
 const expectedAppsScriptOAuthScopes = [
   'https://www.googleapis.com/auth/documents.currentonly',
   'https://www.googleapis.com/auth/spreadsheets.readonly',
@@ -41,6 +41,7 @@ const setupDialogHtml = global.TSCHOOL_SETUP_DIALOG_HTML;
 const configuratorHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const configuratorAppSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const configuratorStylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+const scheduleDataSource = fs.readFileSync(path.join(root, 'schedule-data.js'), 'utf8');
 const emailTemplateManifestText = fs.readFileSync(
   path.join(root, 'notification-email-templates.json'),
   'utf8'
@@ -316,10 +317,10 @@ assert.equal(sidebarHtml.includes('id="status-message" role="alert" hidden'), tr
 assert.equal(sidebarHtml.includes('class="grade-options" role="radiogroup" aria-label="選年級"'), true);
 assert.equal(sidebarHtml.includes('<span>同步目標日曆</span>'), true);
 assert.equal(sidebarHtml.includes('<span>同步目標</span>'), false);
-assert.equal(sidebarHtml.includes('<span>活動提醒</span>'), true);
+assert.equal(sidebarHtml.includes('<span>行程提醒</span>'), true);
 assert.equal(
-  sidebarHtml.indexOf('<span>活動提醒</span>') > calendarHeadingIndex &&
-    sidebarHtml.indexOf('<span>活動提醒</span>') < gradeHeadingIndex,
+  sidebarHtml.indexOf('<span>行程提醒</span>') > calendarHeadingIndex &&
+    sidebarHtml.indexOf('<span>行程提醒</span>') < gradeHeadingIndex,
   true
 );
 assert.match(
@@ -400,7 +401,7 @@ assert.equal(
   sidebarHtml.includes('data-state="attention" role="status" aria-live="polite">待首次同步</p>'),
   true
 );
-['待首次同步', '需檢查狀態', '待重新選課', '狀態正常'].forEach(statusLabel => {
+['待首次同步', '需檢查狀態', '待重新選擇課程與活動', '狀態正常'].forEach(statusLabel => {
   assert.equal(sidebarHtml.includes(statusLabel), true);
 });
 assert.equal(sidebarHtml.includes('同步功能正常'), false);
@@ -408,15 +409,16 @@ assert.equal(sidebarHtml.includes("? '同步正常'"), false);
 assert.equal(sidebarHtml.includes('需要檢查同步狀態'), false);
 assert.equal(sidebarHtml.includes('尚未完成第一次同步'), false);
 assert.equal(sidebarHtml.includes('<h2>課程與活動</h2>'), true);
-['<h2>設定日曆</h2>', '<h2>選年級</h2>', '<h2>選課程和活動</h2>'].forEach(
+['<h2>設定日曆</h2>', '<h2>選年級</h2>', '<h2>選課程和活動</h2>', '<h2>行程</h2>'].forEach(
   obsoleteHeading => {
     assert.equal(sidebarHtml.includes(obsoleteHeading), false);
   }
 );
-assert.equal(sidebarHtml.includes('輸入課名、活動名、班別等'), true);
-assert.equal(sidebarHtml.includes('學期間課程'), true);
-assert.equal(sidebarHtml.includes('學期間活動'), true);
-assert.equal(sidebarHtml.includes('寒暑假期間課程 / 活動'), true);
+assert.equal(sidebarHtml.includes('輸入課程或活動名稱、班別等'), true);
+assert.equal(sidebarHtml.includes('學期間課程與活動'), true);
+assert.equal(sidebarHtml.includes('寒暑假期間課程與活動'), true);
+assert.equal(sidebarHtml.includes("renderCourseGroup('學期間課程'"), false);
+assert.equal(sidebarHtml.includes("renderCourseGroup('學期間活動'"), false);
 assert.equal(sidebarHtml.includes('<span>收通知的 Email</span>'), true);
 assert.equal(
   sidebarHtml.includes('<small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small>'),
@@ -461,7 +463,7 @@ assert.equal(sidebarHtml.includes('id="include-activities"'), false);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), false);
 [
   ['1', '選年級'],
-  ['2', '選課程和活動'],
+  ['2', '選課程與活動'],
   ['3', '設定通知偏好'],
   ['4', '檢查設定'],
   ['5', '變出控制臺']
@@ -615,11 +617,11 @@ assert.equal(
 });
 assert.equal(
   emailTemplateManifest.notifications.term_transition.headline,
-  '需要重新選課'
+  '需要重新選擇課程與活動'
 );
 assert.equal(
   emailTemplateManifest.notifications.term_transition.lede,
-  '已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課'
+  '已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程與活動'
 );
 assert.equal(
   emailTemplateManifest.notifications.term_transition.content.includes('完整保留'),
@@ -684,10 +686,30 @@ assert.equal(
 assert.equal(emailTemplateManifestText.includes('課表異動'), false);
 assert.equal(configuratorAppSource.includes('HIGH_LOAD_TEST_QUERY_PARAMETER'), false);
 assert.equal(
-  configuratorAppSource.includes("'寒暑假期間課程 / 活動'"),
+  configuratorAppSource.includes("'寒暑假期間課程與活動'"),
   true,
-  '有寒暑假資料時應顯示獨立的課程／活動分類'
+  '有寒暑假資料時應顯示獨立的行程區段'
 );
+assert.equal(
+  configuratorAppSource.includes("hasVacationItems ? '學期間課程與活動' : ''"),
+  true,
+  '只有單一期間清單時，網站不應額外顯示泛稱「行程」h3'
+);
+assert.equal(
+  sidebarHtml.includes("hasVacationItems ? '學期間課程與活動' : ''"),
+  true,
+  '只有單一期間清單時，控制臺不應額外顯示泛稱「行程」h3'
+);
+assert.equal(configuratorHtml.includes('<p id="course-count">已選 0 項</p>'), true);
+assert.equal(configuratorHtml.includes('已選 0 項行程'), false);
+assert.equal(configuratorAppSource.includes('function seedDefaultSelections('), true);
+assert.equal(
+  configuratorAppSource.includes('.filter(item => isDefaultSelectedTitle(item.title))'),
+  true,
+  '設定網站應只在來源首次載入時加入明確的預設勾選項目'
+);
+assert.equal(sidebarHtml.includes('function seedDefaultSelections(source)'), true);
+assert.equal(sidebarHtml.includes("byId('course-count').textContent = '已選 ' + selectedCount + ' 項';"), true);
 assert.equal(
   configuratorAppSource.includes(
     "elements.notificationEmail.addEventListener('blur', scheduleNotificationEmailCommit);"
@@ -935,7 +957,7 @@ assert.match(
 );
 assert.match(
   configuratorHtml,
-  /data-initial-label="實體課 \[吉林基地\]" data-final-label="實體課 \[吉林基地-協作坊\]"[\s\S]*?data-initial-label="線上課 \[線上教室\]" data-final-label="線上課 \[線上教室\]"[\s\S]*?data-initial-label="活動 \[弘道基地\]" data-final-label="活動 \[弘道基地-未來教室\]"/,
+  /data-initial-label="實體課 \[吉林基地\]" data-final-label="實體課 \[吉林基地-協作坊\]"[\s\S]*?data-initial-label="線上課 \[線上教室\]" data-final-label="線上課 \[線上教室\]"[\s\S]*?data-initial-label="學習分享會 \[弘道基地\]" data-final-label="學習分享會 \[弘道基地-未來教室\]"/,
   'Hero 三張行程卡應分別保留課表起點與日曆終點文案'
 );
 assert.match(
@@ -1169,6 +1191,33 @@ assert.equal(
   true,
   '清單不重建時仍應原地更新選取統計'
 );
+assert.equal(configuratorAppSource.includes('selectedTitlesByGrade: new Map()'), true);
+assert.equal(configuratorAppSource.includes('selectedCoursesByGrade'), false);
+assert.equal(configuratorAppSource.includes('includeActivities'), false);
+assert.equal(configuratorAppSource.includes('excludedActivities'), false);
+assert.equal(sidebarHtml.includes('var selectedTitles = new Set();'), true);
+assert.equal(sidebarHtml.includes('selectedTitles: Array.from(selectedTitles)'), true);
+assert.equal(sidebarHtml.includes('selectedCourses'), false);
+assert.equal(sidebarHtml.includes('includeActivities'), false);
+assert.equal(sidebarHtml.includes('excludedActivities'), false);
+const configuratorRenderCoursesSource = configuratorAppSource.slice(
+  configuratorAppSource.indexOf('function renderCourses()'),
+  configuratorAppSource.indexOf('function renderCourseSection(')
+);
+const sidebarRenderCoursesSource = sidebarHtml.slice(
+  sidebarHtml.indexOf('function renderCourses()'),
+  sidebarHtml.indexOf('function updateCourseScrollShadows()')
+);
+assert.equal(
+  configuratorRenderCoursesSource.includes('.sort('),
+  false,
+  '網站搜尋只能過濾 schedule-data 已排定的順序'
+);
+assert.equal(
+  sidebarRenderCoursesSource.includes('.sort('),
+  false,
+  '控制臺搜尋只能過濾已排定的目錄順序'
+);
 assert.equal(configuratorHtml.includes('TSCHOOL_GENERATION_ASSETS_READY'), false);
 assert.equal(configuratorHtml.includes("'setup-code.js'"), true);
 assert.equal(configuratorHtml.includes("'sidebar-template.js'"), false);
@@ -1232,16 +1281,29 @@ assert.deepEqual(
 );
 const vacationCatalog = scheduleData.extractCatalog(vacationCatalogPayload);
 assert.deepEqual(
-  vacationCatalog.vacationItems.map(item => item.title).sort(),
-  ['暑假課程', '模擬考Day1'].sort(),
-  '寒暑假區段的課程與活動都應進入同一分類'
+  Object.keys(vacationCatalog).sort(),
+  ['all', 'termItems', 'vacationItems'],
+  '行程目錄只保留完整清單與學期／寒暑假區段'
 );
 assert.equal(
-  vacationCatalog.courses.find(item => item.title === '學期間課程').period,
+  vacationCatalog.all.every(item =>
+    Object.keys(item).sort().join(',') === 'period,title' &&
+    !Object.prototype.hasOwnProperty.call(item, 'type')
+  ),
+  true,
+  '正常行程目錄項目只能有 title 與 period'
+);
+assert.deepEqual(
+  vacationCatalog.vacationItems.map(item => item.title).sort(),
+  ['暑假課程', '模擬考Day1'].sort(),
+  '寒暑假區段的行程應進入同一區段'
+);
+assert.equal(
+  vacationCatalog.termItems.find(item => item.title === '學期間課程').period,
   'term'
 );
 assert.equal(
-  vacationCatalog.activities.find(item => item.title === '全校活動').period,
+  vacationCatalog.termItems.find(item => item.title === '全校活動').period,
   'term'
 );
 
@@ -1252,12 +1314,12 @@ const regularCatalog = scheduleData.extractCatalog(makeCatalogPayload(
 assert.equal(
   regularCatalog.vacationItems.length,
   0,
-  '連續週次的課表應維持原本的課程／活動兩類'
+  '連續週次的課表應只有學期間行程'
 );
 assert.equal(
-  scheduleData.MIN_COURSE_SCHEDULED_PERIODS,
-  5,
-  '無活動關鍵字項目的節數邊界應設定為 5 節'
+  scheduleDataSource.includes('MIN_COURSE_SCHEDULED_PERIODS'),
+  false,
+  '中性行程模型不應保留節數分類邊界'
 );
 const lowPeriodCatalog = scheduleData.extractCatalog(makeCatalogPayload(
   [1],
@@ -1265,9 +1327,9 @@ const lowPeriodCatalog = scheduleData.extractCatalog(makeCatalogPayload(
   4
 ));
 assert.deepEqual(
-  lowPeriodCatalog.activities.map(item => item.title),
-  ['沒有活動關鍵字的單次講座'],
-  '沒有活動關鍵字但全期少於 5 節的項目仍應判定為活動'
+  lowPeriodCatalog.all,
+  [{ title: '沒有活動關鍵字的單次講座', period: 'term' }],
+  '項目不得再依排定節數判定類別'
 );
 const boundaryPeriodCatalog = scheduleData.extractCatalog(makeCatalogPayload(
   [1],
@@ -1275,14 +1337,106 @@ const boundaryPeriodCatalog = scheduleData.extractCatalog(makeCatalogPayload(
   5
 ));
 assert.deepEqual(
-  boundaryPeriodCatalog.courses.map(item => item.title),
-  ['五節正式課程'],
-  '剛好 5 節的正式課程不得被節數邊界誤判為活動'
+  boundaryPeriodCatalog.all,
+  [{ title: '五節正式課程', period: 'term' }],
+  '五節項目與單次項目應使用同一中性資料結構'
+);
+assert.equal(scheduleDataSource.includes('function classifyScheduleTitle'), false);
+assert.equal(scheduleDataSource.includes('ACTIVITY_TITLE_PATTERNS'), false);
+
+const similarityCatalogItems = [
+  { title: '數學（二）星河班', period: 'term' },
+  { title: '國與文進階（一）', period: 'term' },
+  { title: '國語文（三）山嵐班', period: 'term' },
+  { title: '國語文（三）海風班', period: 'term' },
+  { title: '自然探索', period: 'term' }
+];
+const similarityOrder = scheduleData.sortCatalogItemsBySimilarity(similarityCatalogItems)
+  .map(item => item.title);
+const reversedSimilarityOrder = scheduleData.sortCatalogItemsBySimilarity(
+  similarityCatalogItems.slice().reverse()
+).map(item => item.title);
+assert.deepEqual(
+  reversedSimilarityOrder,
+  similarityOrder,
+  '相似度排序不得因課表輸入順序改變'
+);
+const seaClassIndex = similarityOrder.indexOf('國語文（三）海風班');
+const mountainClassIndex = similarityOrder.indexOf('國語文（三）山嵐班');
+const advancedChineseIndex = similarityOrder.indexOf('國與文進階（一）');
+assert.equal(
+  Math.abs(seaClassIndex - mountainClassIndex),
+  1,
+  '同課名的不同班別必須相鄰'
+);
+assert.equal(
+  advancedChineseIndex > Math.min(seaClassIndex, mountainClassIndex) &&
+    advancedChineseIndex < Math.max(seaClassIndex, mountainClassIndex),
+  false,
+  '「國與文進階（一）」不得插入兩個國語文班別之間'
+);
+
+[
+  '全校活動',
+  '學習分享會',
+  '中秋節放假',
+  '週六補課',
+  '國定假日',
+  '第一次模考',
+  '第二次模擬考'
+].forEach(title => {
+  assert.equal(
+    scheduleData.isDefaultSelectedTitle(title),
+    true,
+    `「${title}」應套用預設勾選規則`
+  );
+});
+['國語文（三）海風班', '自然探索', '期末考'].forEach(title => {
+  assert.equal(
+    scheduleData.isDefaultSelectedTitle(title),
+    false,
+    `「${title}」不應被預設勾選規則誤選`
+  );
+});
+const selectionOrderItems = similarityCatalogItems.concat([
+  { title: '全校活動', period: 'term' },
+  { title: '學習分享會', period: 'term' },
+  { title: '第二次模擬考', period: 'term' },
+  { title: '中秋節放假', period: 'term' }
+]);
+const selectionOrder = scheduleData.sortCatalogItemsForSelection(selectionOrderItems)
+  .map(item => item.title);
+const reversedSelectionOrder = scheduleData.sortCatalogItemsForSelection(
+  selectionOrderItems.slice().reverse()
+).map(item => item.title);
+assert.deepEqual(
+  reversedSelectionOrder,
+  selectionOrder,
+  '預設選項置底後仍不得因來源列順序改變'
+);
+const firstDefaultSelectionIndex = selectionOrder.findIndex(title =>
+  scheduleData.isDefaultSelectedTitle(title)
+);
+assert.equal(firstDefaultSelectionIndex > 0, true);
+assert.equal(
+  selectionOrder.slice(firstDefaultSelectionIndex).every(title =>
+    scheduleData.isDefaultSelectedTitle(title)
+  ),
+  true,
+  '預設勾選項目必須排在同期間的一般選項之後'
+);
+assert.equal(
+  Math.abs(
+    selectionOrder.indexOf('國語文（三）海風班') -
+    selectionOrder.indexOf('國語文（三）山嵐班')
+  ),
+  1,
+  '置底規則不得拆開一般選項中的同課不同班別'
 );
 
 const roundTripSetupCatalog = [
-  { title: '公民／社會探究', type: 'course', period: 'term' },
-  { title: '全校活動（上午）', type: 'activity', period: 'term' }
+  { title: '公民／社會探究', period: 'term' },
+  { title: '全校活動（上午）', period: 'term' }
 ];
 const roundTripCatalogFingerprint = scheduleData.makeCatalogFingerprint(
   '二年級|2026-02-23',
@@ -1301,9 +1455,7 @@ const roundTripSetupCode = setupCode.encode({
     sourceUpdatedLabel: '更新時間\n08011200',
     items: roundTripSetupCatalog
   },
-  selectedCourses: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
-  includeActivities: true,
-  excludedActivities: ['全校活動（上午）'],
+  selectedTitles: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
   notificationEmail: 'student+sync@example.com',
   instantNotificationsEnabled: false,
   notificationHours: [22, 6, 12, 18]
@@ -1311,17 +1463,14 @@ const roundTripSetupCode = setupCode.encode({
 const decodedSetupCode = setupCode.decode(roundTripSetupCode);
 assert.equal(roundTripSetupCode.startsWith('TSCHOOL_SETUP_V1.'), true);
 assert.deepEqual(decodedSetupCode, {
-  schemaVersion: 1,
+  schemaVersion: 2,
   createdAt: '2026-08-01T00:00:00.000Z',
   generatorVersion: '2.0.0-rc.1',
   gradeName: '高二',
   termKey: '二年級|2026-02-23',
-  catalogFingerprintVersion: 1,
+  catalogFingerprintVersion: 2,
   catalogFingerprint: roundTripCatalogFingerprint,
-  sourceFingerprint: roundTripCatalogFingerprint,
-  selectedCourses: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
-  includeActivities: true,
-  excludedActivities: ['全校活動（上午）'],
+  selectedTitles: ['從巴士底到車諾比：歷史', '公民／社會探究', '程式設計 & AI'],
   notificationEmail: 'student+sync@example.com',
   instantNotificationsEnabled: false,
   notificationHours: [6, 12, 18, 22],
@@ -1331,6 +1480,19 @@ assert.deepEqual(decodedSetupCode, {
     sourceUpdatedLabel: '更新時間\n08011200',
     items: roundTripSetupCatalog
   }
+});
+assert.equal(setupCode.SCHEMA_VERSION, 2);
+assert.equal(scheduleData.CATALOG_FINGERPRINT_VERSION, 2);
+assert.deepEqual(
+  scheduleData.makeCatalogFingerprintRows(roundTripSetupCatalog),
+  [
+    ['全校活動（上午）', 'term'],
+    ['公民／社會探究', 'term']
+  ],
+  '第 2 版目錄指紋只能使用 title 與 period'
+);
+['selectedCourses', 'includeActivities', 'excludedActivities', 'sourceFingerprint'].forEach(field => {
+  assert.equal(Object.prototype.hasOwnProperty.call(decodedSetupCode, field), false);
 });
 assert.throws(() => setupCode.decode(''), /請貼上設定碼/);
 assert.throws(() => setupCode.decode('WRONG.abc.123'), /不是可用/);
@@ -1347,9 +1509,7 @@ const generatedCode = global.buildAppsScriptCode({
   instantNotificationsEnabled: true,
   notificationHours: [5, 12, 18, 22],
   notifySyncHour: 5,
-  includeActivities: true,
-  excludedActivities: ['高一全校活動'],
-  selectedCourses: ['公民'],
+  selectedTitles: ['公民'],
   descriptionPreset: 'standard',
   customDescription: '{course}',
   reminderMode: 'none',
@@ -1481,10 +1641,11 @@ assert.equal(
     `控制臺呼叫的 Apps Script handler ${handler} 必須存在`
   );
 });
-assert.equal(generatedCode.includes('const SETTINGS_SCHEMA_VERSION = 8;'), true);
-assert.equal(generatedCode.includes('const SETUP_CATALOG_FINGERPRINT_VERSION = 1;'), true);
-assert.equal(generatedCode.includes('const SETUP_CONTEXT_FINGERPRINT_VERSION = 1;'), true);
-assert.equal(generatedCode.includes('const SCHEDULE_FINGERPRINT_VERSION = 1;'), true);
+assert.equal(generatedCode.includes('const SETTINGS_SCHEMA_VERSION = 9;'), true);
+assert.equal(generatedCode.includes('const SETUP_CODE_SCHEMA_VERSION = 2;'), true);
+assert.equal(generatedCode.includes('const SETUP_CATALOG_FINGERPRINT_VERSION = 2;'), true);
+assert.equal(generatedCode.includes('const SETUP_CONTEXT_FINGERPRINT_VERSION = 2;'), true);
+assert.equal(generatedCode.includes('const SCHEDULE_FINGERPRINT_VERSION = 2;'), true);
 assert.equal(
   generatedCode.includes('source.fingerprint === settings.sourceFingerprint'),
   false,
@@ -1682,12 +1843,33 @@ assert.equal(
   generatedCode.includes("vacationItems: catalogAll.filter(item => item.period === 'vacation')"),
   true
 );
+assert.equal(generatedCode.includes('function classifyScheduleTitle_('), false);
+assert.equal(generatedCode.includes('function countScheduledPeriodsByTitle_('), false);
+assert.equal(generatedCode.includes('MIN_COURSE_SCHEDULED_PERIODS'), false);
+assert.equal(generatedCode.includes('ACTIVITY_TITLE_PATTERNS'), false);
+assert.equal(generatedCode.includes('活動｜'), false, '事件標題不得再加上活動分類前綴');
+const runtimeCatalogParserSource = generatedCode.slice(
+  generatedCode.indexOf('function extractCatalogFromPayload_('),
+  generatedCode.indexOf('function inferHeaderDates_(')
+);
+assert.equal(runtimeCatalogParserSource.includes('.type'), false);
+assert.equal(runtimeCatalogParserSource.includes('type:'), false);
+const runtimeScheduleParserSource = generatedCode.slice(
+  generatedCode.indexOf('function parseSchedulePayload_('),
+  generatedCode.indexOf('function getVacationWeekNumbersFromPayload_(')
+);
+assert.equal(runtimeScheduleParserSource.includes('type:'), false);
+const runtimeStateSerializerSource = generatedCode.slice(
+  generatedCode.indexOf('function serializeStateItem_('),
+  generatedCode.indexOf('function getConfiguredCourseOutlineSourceSets_(')
+);
+assert.equal(runtimeStateSerializerSource.includes('type:'), false);
 assert.equal(generatedCode.includes('NOTIFICATION_QUEUE_STORE'), true);
 assert.equal(generatedCode.includes('notification-email-templates.json'), true);
 assert.equal(
   generatedCode.includes(
     'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
-    '3fae71be483f6c1039a77f6e55a34ba158d4e6c8/notification-email-templates.json'
+    '5f31cd2fb263b9b5e579eab0d25c1b4f278f854f/notification-email-templates.json'
   ),
   true,
   'HTML Email 版型必須固定到已核准的 commit'
@@ -1793,8 +1975,7 @@ const highLoadGeneratedCode = global.buildAppsScriptCode({
   notificationEmail: 'test@example.com',
   notificationHours: [6],
   notifySyncHour: 6,
-  includeActivities: true,
-  selectedCourses: ['國語文'],
+  selectedTitles: ['國語文'],
   highLoadTestingEnabled: true
 });
 assert.doesNotThrow(() => new Function(highLoadGeneratedCode));
@@ -1909,6 +2090,16 @@ const context = vm.createContext({
 });
 
 vm.runInContext(generatedCode, context);
+
+assert.deepEqual(
+  Array.from(context.sortCatalogItemsByPeriod_(selectionOrderItems), item => item.title),
+  selectionOrder,
+  '設定網站與產生的 Code.gs 必須使用同一套預設置底與相似度排序'
+);
+['全校集會', '學習分享會', '補課日', '模擬考'].forEach(title => {
+  assert.equal(context.isDefaultSelectedTitle_(title), true);
+});
+assert.equal(context.isDefaultSelectedTitle_('國語文（三）'), false);
 
 const progressTestJob = { initialOperationCount: 100, processedOperations: 0 };
 assert.equal(context.calculateSyncJobProgressPercent_(progressTestJob), 35);
@@ -2045,13 +2236,12 @@ const currentSetupSource = {
   firstDateKey: '2026-02-23',
   lastDateKey: '2026-08-30',
   termKey: '二年級|2026-02-23',
-  catalogFingerprintVersion: 1,
+  catalogFingerprintVersion: 2,
   catalogFingerprint: roundTripCatalogFingerprint,
   scheduleFingerprint: 'current-schedule-fingerprint',
   catalog: {
-    courses: [roundTripSetupCatalog[0]],
-    activities: [roundTripSetupCatalog[1]],
     all: roundTripSetupCatalog,
+    termItems: roundTripSetupCatalog,
     vacationItems: []
   }
 };
@@ -2066,7 +2256,7 @@ assert.equal(
   0,
   '新版設定碼應直接使用內嵌的唯讀課表摘要，匯入時不得等待課表端點'
 );
-assert.deepEqual(Array.from(setupPreview.selectedCourses), ['公民／社會探究']);
+assert.deepEqual(Array.from(setupPreview.selectedTitles), ['公民／社會探究']);
 assert.deepEqual(
   Array.from(setupPreview.missingItems),
   ['從巴士底到車諾比：歷史', '程式設計 & AI']
@@ -2076,7 +2266,7 @@ const mismatchedCatalogFingerprintCode = setupCode.encode({
   appVersion: '2.0.0-rc.1',
   gradeName: '高二',
   termKey: '二年級|2026-02-23',
-  initialCatalogFingerprintVersion: 1,
+  initialCatalogFingerprintVersion: 2,
   initialCatalogFingerprint: 'tampered-catalog-fingerprint',
   setupSourceSnapshot: {
     firstDateKey: '2026-02-23',
@@ -2084,9 +2274,7 @@ const mismatchedCatalogFingerprintCode = setupCode.encode({
     sourceUpdatedLabel: '0801',
     items: roundTripSetupCatalog
   },
-  selectedCourses: ['公民／社會探究'],
-  includeActivities: true,
-  excludedActivities: [],
+  selectedTitles: ['公民／社會探究'],
   notificationEmail: 'student+sync@example.com',
   instantNotificationsEnabled: true,
   notificationHours: [6]
@@ -2096,30 +2284,28 @@ assert.throws(
   /課表摘要指紋不一致/,
   '設定碼 checksum 正確但內嵌目錄與明確指紋不一致時仍必須拒絕'
 );
-const legacySetupCode = setupCode.encode({
+const liveSetupCode = setupCode.encode({
   appVersion: '2.0.0-rc.1',
   gradeName: '高二',
   termKey: currentSetupSource.termKey,
   initialCatalogFingerprintVersion: currentSetupSource.catalogFingerprintVersion,
   initialCatalogFingerprint: currentSetupSource.catalogFingerprint,
-  selectedCourses: ['公民／社會探究'],
-  includeActivities: true,
-  excludedActivities: ['全校活動（上午）'],
+  selectedTitles: ['公民／社會探究'],
   notificationEmail: 'student+sync@example.com',
   instantNotificationsEnabled: false,
   notificationHours: [6, 12, 18, 22]
 });
-const firstConfirmationToken = context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken;
+const firstConfirmationToken = context.buildSetupImportPreview_(liveSetupCode, {}).confirmationToken;
 context.loadSourceContext_ = () => Object.assign({}, currentSetupSource, {
   scheduleFingerprint: 'newer-schedule-fingerprint'
 });
 assert.equal(
-  context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken,
+  context.buildSetupImportPreview_(liveSetupCode, {}).confirmationToken,
   firstConfirmationToken,
   '行程細節改變不得冒充設定目錄改變，也不得讓設定碼確認失效'
 );
 const changedSetupCatalog = roundTripSetupCatalog.concat([
-  { title: '新增選修', type: 'course', period: 'term' }
+  { title: '新增選修', period: 'term' }
 ]);
 context.loadSourceContext_ = () => Object.assign({}, currentSetupSource, {
   catalogFingerprint: scheduleData.makeCatalogFingerprint(
@@ -2128,25 +2314,89 @@ context.loadSourceContext_ = () => Object.assign({}, currentSetupSource, {
     changedSetupCatalog
   ),
   catalog: {
-    courses: [roundTripSetupCatalog[0], changedSetupCatalog[2]],
-    activities: [roundTripSetupCatalog[1]],
     all: changedSetupCatalog,
+    termItems: changedSetupCatalog,
     vacationItems: []
   }
 });
 assert.notEqual(
-  context.buildSetupImportPreview_(legacySetupCode, {}).confirmationToken,
+  context.buildSetupImportPreview_(liveSetupCode, {}).confirmationToken,
   firstConfirmationToken,
   '設定目錄再次變動後，既有 confirmationToken 必須失效'
 );
 context.loadSourceContext_ = () => currentSetupSource;
+function encodeRawSetupPayload(payload) {
+  const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  return [setupCode.PREFIX, encodedPayload, setupCode.hashText(encodedPayload)].join('.');
+}
+const legacySetupCatalog = [
+  { title: '公民／社會探究', type: 'course', period: 'term' },
+  { title: '全校活動（上午）', type: 'activity', period: 'term' }
+];
+const legacySetupFingerprint = context.makeLegacyClassifiedSetupCatalogFingerprint_(
+  currentSetupSource.termKey,
+  currentSetupSource.lastDateKey,
+  legacySetupCatalog
+);
+const legacySetupCode = encodeRawSetupPayload({
+  schemaVersion: 1,
+  createdAt: '2026-07-31T00:00:00.000Z',
+  generatorVersion: '1.9.0',
+  gradeName: '高二',
+  termKey: currentSetupSource.termKey,
+  catalogFingerprintVersion: 1,
+  catalogFingerprint: legacySetupFingerprint,
+  sourceFingerprint: legacySetupFingerprint,
+  selectedCourses: ['公民／社會探究'],
+  includeActivities: true,
+  excludedActivities: ['全校活動（上午）'],
+  notificationEmail: 'legacy@example.com',
+  instantNotificationsEnabled: false,
+  notificationHours: [6],
+  sourceSnapshot: {
+    firstDateKey: currentSetupSource.firstDateKey,
+    lastDateKey: currentSetupSource.lastDateKey,
+    sourceUpdatedLabel: '0731',
+    items: legacySetupCatalog
+  }
+});
+const legacySetupPreview = context.buildSetupImportPreview_(legacySetupCode, {});
+assert.equal(legacySetupPreview.schemaVersion, 1);
+assert.deepEqual(
+  Array.from(legacySetupPreview.selectedTitles),
+  ['公民／社會探究'],
+  '舊版 schema 1 設定碼必須依原本課程／活動設定遷移為 selectedTitles'
+);
+const legacySetupWithoutSnapshotCode = encodeRawSetupPayload({
+  schemaVersion: 1,
+  createdAt: '2026-07-31T00:00:00.000Z',
+  generatorVersion: '1.8.0',
+  gradeName: '高二',
+  termKey: currentSetupSource.termKey,
+  catalogFingerprintVersion: currentSetupSource.catalogFingerprintVersion,
+  catalogFingerprint: currentSetupSource.catalogFingerprint,
+  sourceFingerprint: currentSetupSource.catalogFingerprint,
+  selectedCourses: ['公民／社會探究'],
+  includeActivities: true,
+  excludedActivities: [],
+  notificationEmail: 'legacy-no-snapshot@example.com',
+  instantNotificationsEnabled: true,
+  notificationHours: [6]
+});
+const legacySetupWithoutSnapshotPreview = context.buildSetupImportPreview_(
+  legacySetupWithoutSnapshotCode,
+  {}
+);
+assert.deepEqual(
+  Array.from(legacySetupWithoutSnapshotPreview.selectedTitles),
+  ['公民／社會探究', '全校活動（上午）'],
+  '沒有 optional sourceSnapshot 的 schema 1 設定碼應以即時目錄與目前預設規則安全遷移'
+);
 const crossTermCode = setupCode.encode({
   gradeName: '高二',
   termKey: '二年級|2025-09-01',
   sourceFingerprint: 'old',
-  selectedCourses: ['公民／社會探究'],
-  includeActivities: true,
-  excludedActivities: [],
+  selectedTitles: ['公民／社會探究'],
   notificationEmail: 'student@example.com',
   instantNotificationsEnabled: true,
   notificationHours: [6]
@@ -2161,9 +2411,7 @@ const invalidEmailCode = setupCode.encode({
   termKey: currentSetupSource.termKey,
   initialCatalogFingerprintVersion: currentSetupSource.catalogFingerprintVersion,
   initialCatalogFingerprint: currentSetupSource.catalogFingerprint,
-  selectedCourses: ['公民／社會探究'],
-  includeActivities: true,
-  excludedActivities: [],
+  selectedTitles: ['公民／社會探究'],
   notificationEmail: 'not-an-email',
   instantNotificationsEnabled: true,
   notificationHours: [6]
@@ -2227,14 +2475,21 @@ assert.deepEqual(
 );
 const runtimeVacationCatalog = context.extractCatalogFromPayload_(vacationCatalogPayload);
 assert.deepEqual(
-  Array.from(runtimeVacationCatalog, item => `${item.type}:${item.period}:${item.title}`).sort(),
+  Array.from(runtimeVacationCatalog, item => `${item.period}:${item.title}`).sort(),
   [
-    'activity:term:全校活動',
-    'activity:vacation:模擬考Day1',
-    'course:term:學期間課程',
-    'course:vacation:暑假課程'
+    'term:全校活動',
+    'vacation:模擬考Day1',
+    'term:學期間課程',
+    'vacation:暑假課程'
   ].sort(),
-  '控制臺的 Code.gs 課程目錄應保留學期間與寒暑假分類'
+  '控制臺的 Code.gs 行程目錄應只保留學期間與寒暑假區段'
+);
+assert.equal(
+  Array.from(runtimeVacationCatalog).every(item =>
+    Object.keys(item).sort().join(',') === 'period,title'
+  ),
+  true,
+  'Code.gs 正常目錄項目不得產生 type'
 );
 assert.equal(
   context.makeSetupCatalogFingerprint_(
@@ -2247,26 +2502,122 @@ assert.equal(
     '2026-08-31',
     vacationCatalog.all
   ),
-  '網站與 Code.gs 必須對同一課程目錄產生完全相同的指紋'
+  '網站與 Code.gs 必須對同一行程目錄產生完全相同的第 2 版指紋'
 );
 assert.deepEqual(
   Array.from(context.extractCatalogFromPayload_(makeCatalogPayload(
     [1],
     ['沒有活動關鍵字的單次講座'],
     4
-  )), item => `${item.type}:${item.title}`),
-  ['activity:沒有活動關鍵字的單次講座'],
-  'Code.gs 也應將少於 5 節、無活動關鍵字的項目判定為活動'
+  )), item => `${item.period}:${item.title}`),
+  ['term:沒有活動關鍵字的單次講座'],
+  'Code.gs 不得依節數判定類別'
 );
 assert.deepEqual(
   Array.from(context.extractCatalogFromPayload_(makeCatalogPayload(
     [1],
     ['五節正式課程'],
     5
-  )), item => `${item.type}:${item.title}`),
-  ['course:五節正式課程'],
-  'Code.gs 應保留剛好 5 節的正式課程'
+  )), item => `${item.period}:${item.title}`),
+  ['term:五節正式課程'],
+  'Code.gs 應以同一中性結構保留剛好 5 節的項目'
 );
+assert.equal(typeof context.classifyScheduleTitle_, 'undefined');
+assert.equal(typeof context.countScheduledPeriodsByTitle_, 'undefined');
+
+const neutralRuntimeTimes = [
+  '08:10~09:00',
+  '09:10~10:00',
+  '10:10~11:00',
+  '11:10~12:00',
+  '13:10~14:00',
+  '14:10~15:00',
+  '15:10~16:00',
+  '16:10~17:00'
+];
+const neutralRuntimePayload = {
+  currentGrade: '一年級',
+  weekDataList: [{ week: 1, date: '8/3' }],
+  tableData: [{
+    isHeader: true,
+    weekNum: '1',
+    cells: [
+      { value: '第 1 週' },
+      { value: '節次' },
+      { value: '8/3' },
+      { value: '8/4' },
+      { value: '8/5' },
+      { value: '8/6' },
+      { value: '8/7' },
+      { value: '8/8' },
+      { value: '8/9' }
+    ]
+  }].concat(neutralRuntimeTimes.map((time, index) => ({
+    isHeader: false,
+    weekNum: '1',
+    cells: [
+      { value: time },
+      { value: String(index + 1) },
+      { value: index === 0 ? '國語文（三）海風班 [教室]' : '', rowSpan: 1 },
+      { value: '' },
+      { value: '' },
+      { value: '' },
+      { value: '' },
+      { value: '' },
+      { value: '' }
+    ]
+  })), [{
+    isHeader: false,
+    weekNum: '1',
+    cells: [
+      { value: '更新時間\n08010000' },
+      { value: '備註' },
+      { value: '學習分享會 [弘道基地]' },
+      { value: '' },
+      { value: '' },
+      { value: '' },
+      { value: '' },
+      { value: '' },
+      { value: '' }
+    ]
+  }])
+};
+const neutralInstallerSummary = scheduleData.summarizePayload(
+  neutralRuntimePayload,
+  new Date('2026-08-01T12:00:00+08:00')
+);
+const neutralRuntimeSummary = context.parseSchedulePayload_(
+  neutralRuntimePayload,
+  '高一',
+  new Date('2026-08-01T12:00:00+08:00')
+);
+assert.deepEqual(
+  Object.keys(neutralRuntimeSummary.catalog).sort(),
+  ['all', 'termItems', 'vacationItems']
+);
+assert.deepEqual(
+  Array.from(neutralRuntimeSummary.catalog.all, item => `${item.period}:${item.title}`),
+  neutralInstallerSummary.catalog.all.map(item => `${item.period}:${item.title}`)
+);
+assert.equal(
+  neutralRuntimeSummary.catalogFingerprint,
+  neutralInstallerSummary.catalogFingerprint
+);
+assert.equal(neutralRuntimeSummary.events.length, 2);
+assert.equal(
+  Array.from(neutralRuntimeSummary.catalog.all).every(item =>
+    Object.keys(item).sort().join(',') === 'period,title'
+  ),
+  true
+);
+assert.equal(
+  neutralRuntimeSummary.events.every(event => !Object.prototype.hasOwnProperty.call(event, 'type')),
+  true,
+  '節次行程與全天備註行程都不得有 type'
+);
+const neutralAllDayEvent = neutralRuntimeSummary.events.find(event => event.isAllDay);
+assert.equal(neutralAllDayEvent.originalTitle, '學習分享會');
+assert.equal(neutralAllDayEvent.location, '弘道基地');
 
 const parsedOutlineIndex = context.parseCourseOutlineSourceIndexValues_([
   ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '備註', '課綱試算表連結'],
@@ -2504,9 +2855,7 @@ const noActivityCode = global.buildAppsScriptCode({
   notificationEmail: 'test@example.com',
   notificationHours: [6],
   notifySyncHour: 6,
-  includeActivities: false,
-  excludedActivities: [],
-  selectedCourses: ['公民'],
+  selectedTitles: ['公民'],
   initialKnownTitles: ['公民', '高二全校活動']
 });
 const noActivityContext = vm.createContext({ console, Intl });
@@ -2519,7 +2868,10 @@ assert.equal(
 );
 assert.equal(noActivitySettings.gradeName, '');
 assert.equal(noActivitySettings.notificationEmail, '');
-assert.deepEqual(Array.from(noActivitySettings.selectedCourses), []);
+assert.deepEqual(Array.from(noActivitySettings.selectedTitles), []);
+assert.equal(Object.prototype.hasOwnProperty.call(noActivitySettings, 'selectedCourses'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(noActivitySettings, 'includeActivities'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(noActivitySettings, 'excludedActivities'), false);
 assert.equal(noActivityCode.includes('test@example.com'), false);
 assert.equal(noActivityCode.includes('高二全校活動'), false);
 
@@ -2530,7 +2882,6 @@ assert.equal(context.getConfiguredCourseOutlineSourceSets_('高二')[0].key, '11
 assert.equal(context.getConfiguredCourseOutlineSourceSets_('高二')[0].spreadsheetIds.length, 4);
 assert.equal(
   context.getRelevantCourseOutlineSourceSets_('高二', [{
-    type: 'course',
     isAllDay: false,
     dateKey: '2026-07-27'
   }]).length,
@@ -2539,7 +2890,6 @@ assert.equal(
 );
 assert.equal(
   context.getRelevantCourseOutlineSourceSets_('高二', [{
-    type: 'course',
     isAllDay: false,
     dateKey: '2026-09-01'
   }]).length,
@@ -2663,7 +3013,6 @@ const outlineSettings = {
 };
 const outlineBaseItem = {
   originalTitle: '測試課程',
-  type: 'course',
   isAllDay: false,
   dateKey: '2026-07-27',
   weekday: '一',
@@ -2725,15 +3074,39 @@ assert.equal(
   '',
   '單元主題與課程內容都缺少時不得創造課綱身分'
 );
+const neutralSerializedStateItem = context.serializeStateItem_(
+  Object.assign({}, outlineBaseItem, { outlineIdentityHash }),
+  'outline-identity-calendar-event',
+  'outline-identity-signature',
+  outlineSettings
+);
 assert.equal(
-  context.serializeStateItem_(
-    Object.assign({}, outlineBaseItem, { outlineIdentityHash }),
-    'outline-identity-calendar-event',
-    'outline-identity-signature',
-    outlineSettings
-  ).outlineIdentityHash,
+  neutralSerializedStateItem.outlineIdentityHash,
   outlineIdentityHash,
   '課綱事件身分必須保存到同步狀態，下次讀取才能跨時間比對'
+);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(neutralSerializedStateItem, 'type'),
+  false,
+  '新寫入的同步狀態不得保留課程／活動 type'
+);
+const legacyPastStatePlan = context.buildSyncPlan_(
+  {
+    legacyPast: {
+      originalTitle: '舊活動',
+      type: 'activity',
+      dateKey: '2025-01-01',
+      start: '2025-01-01T00:00:00.000Z',
+      end: '2025-01-02T00:00:00.000Z'
+    }
+  },
+  [],
+  '2026-08-01'
+);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(legacyPastStatePlan.oldPast.legacyPast, 'type'),
+  false,
+  '下一次同步保存過去索引時也必須移除舊 type 欄位'
 );
 
 function haveCompatibleMoveShapeReference(oldItem, newItem) {
@@ -3607,13 +3980,13 @@ const settingsOnlyUiSource = context.loadSourceContextForUi_({
   pendingTermKey: '',
   scheduleFingerprint: 'stored-schedule',
   knownTitles: ['既有課程'],
-  selectedCourses: ['既有課程'],
+  selectedTitles: ['既有課程'],
   pendingTitles: [],
-  excludedActivities: []
+  excludedTitles: []
 });
 assert.equal(settingsOnlyUiSource.sourceUnavailable, true);
 assert.deepEqual(
-  Array.from(settingsOnlyUiSource.catalog.courses, item => item.title),
+  Array.from(settingsOnlyUiSource.catalog.termItems, item => item.title),
   ['既有課程'],
   '沒有持久摘要的舊安裝也應至少用既有設定開啟唯讀控制臺'
 );
@@ -3640,11 +4013,28 @@ assert.deepEqual(
   [6],
   '即時通知開啟時，每日摘要觸發時間應固定為 06:00'
 );
+context.writeChunkedJson_('TSCHOOL_SOURCE_UI_CACHE', {
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  catalog: {
+    all: [
+      { title: '公民', type: 'course', period: 'term' },
+      { title: '校慶', type: 'activity', period: 'term' },
+      { title: '不參加的講座', type: 'activity', period: 'term' }
+    ]
+  }
+});
 context.writeChunkedJson_('TSCHOOL_SETTINGS', {
   schemaVersion: 4,
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  setupComplete: true,
   autoSyncHours: [7, 19],
   notifySyncHour: 19,
-  sourceFingerprint: 'legacy-schedule-fingerprint'
+  sourceFingerprint: 'legacy-schedule-fingerprint',
+  selectedCourses: ['公民'],
+  includeActivities: true,
+  excludedActivities: ['不參加的講座']
 });
 const migratedNotificationSettings = context.loadSettings_();
 assert.deepEqual(
@@ -3667,7 +4057,86 @@ assert.deepEqual(
   [3, 11, 18, 21],
   '遷移舊設定後仍應使用固定同步時段'
 );
+assert.deepEqual(
+  Array.from(migratedNotificationSettings.selectedTitles),
+  ['公民', '校慶'],
+  '舊版 settings 應將所選課程與未排除活動遷移為單一 selectedTitles'
+);
+assert.deepEqual(
+  Array.from(migratedNotificationSettings.excludedTitles),
+  ['不參加的講座']
+);
+['selectedCourses', 'includeActivities', 'excludedActivities'].forEach(field => {
+  assert.equal(Object.prototype.hasOwnProperty.call(migratedNotificationSettings, field), false);
+});
 context.clearChunkedStore_('TSCHOOL_SETTINGS');
+context.clearChunkedStore_('TSCHOOL_SOURCE_UI_CACHE');
+
+context.writeChunkedJson_('TSCHOOL_SOURCE_UI_CACHE', {
+  gradeName: '高二',
+  termKey: '二年級|2026-09-01',
+  catalog: {
+    all: [
+      { title: '公民', type: 'course', period: 'term' },
+      { title: '第一次模擬考', type: 'activity', period: 'term' }
+    ]
+  }
+});
+context.writeChunkedJson_('TSCHOOL_SETTINGS', {
+  schemaVersion: 8,
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  pendingTermKey: '二年級|2026-09-01',
+  setupComplete: true,
+  autoSyncEnabled: true,
+  selectedCourses: ['公民'],
+  includeActivities: true,
+  excludedActivities: []
+});
+const migratedPendingTermSettings = context.loadSettings_();
+assert.deepEqual(
+  Array.from(migratedPendingTermSettings.selectedTitles),
+  [],
+  '舊版已進入新學期待選狀態時，不得把舊分類活動直接變成已確認選擇'
+);
+assert.equal(migratedPendingTermSettings.pendingTermKey, '二年級|2026-09-01');
+assert.equal(migratedPendingTermSettings.autoSyncEnabled, false);
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
+context.clearChunkedStore_('TSCHOOL_SOURCE_UI_CACHE');
+
+context.writeChunkedJson_('TSCHOOL_SOURCE_UI_CACHE', {
+  gradeName: '高一',
+  termKey: '二年級|2026-02-23',
+  catalog: {
+    all: [{ title: '錯年級活動', type: 'activity', period: 'term' }]
+  }
+});
+context.writeChunkedJson_('TSCHOOL_SETTINGS', {
+  schemaVersion: 8,
+  gradeName: '高二',
+  termKey: '二年級|2026-02-23',
+  pendingTermKey: '',
+  setupComplete: true,
+  autoSyncEnabled: true,
+  selectedCourses: ['公民'],
+  includeActivities: true,
+  excludedActivities: []
+});
+const migratedWithoutReliableCatalog = context.loadSettings_();
+assert.deepEqual(
+  Array.from(migratedWithoutReliableCatalog.selectedTitles),
+  [],
+  '缺少同年級同學期的舊分類摘要時，不得只遷移部分選擇並靜默漏掉活動'
+);
+assert.equal(
+  migratedWithoutReliableCatalog.pendingTermKey,
+  '二年級|2026-02-23',
+  '無法可靠重建舊預設時應沿用既有新學期流程要求重新選擇'
+);
+assert.equal(migratedWithoutReliableCatalog.autoSyncEnabled, false);
+assert.match(migratedWithoutReliableCatalog.pausedReason, /重新選擇課程與活動/);
+context.clearChunkedStore_('TSCHOOL_SETTINGS');
+context.clearChunkedStore_('TSCHOOL_SOURCE_UI_CACHE');
 assert.equal(initialGeneratedSettings.notificationPreset, 'standard');
 assert.equal(initialGeneratedSettings.customNotification, '');
 const utf8ChunkPayload = { text: '課綱😀'.repeat(4000) };
@@ -3909,16 +4378,16 @@ assert.equal(importResult.accountVerificationUnavailable, false);
 assert.equal(importResult.message, '網站設定已匯入');
 const importedSettings = context.loadSettings_();
 assert.equal(importedSettings.setupComplete, false);
-assert.equal(importedSettings.setupCodeVersion, 1);
+assert.equal(importedSettings.setupCodeVersion, 2);
 assert.notEqual(importedSettings.setupImportedAt, '');
 assert.equal(importedSettings.calendarId, '');
-assert.deepEqual(Array.from(importedSettings.selectedCourses), ['公民／社會探究']);
+assert.deepEqual(Array.from(importedSettings.selectedTitles), ['公民／社會探究']);
 assert.deepEqual(Array.from(importedSettings.notificationHours), [6, 12, 18, 22]);
 const importedSourceContext = context.readChunkedJson_('TSCHOOL_SETUP_SOURCE_CONTEXT', null);
 assert.equal(importedSourceContext.gradeName, '高二');
 assert.equal(importedSourceContext.initialSetupSnapshot, true);
 assert.equal(importedSourceContext.events.length, 0);
-assert.equal(importedSourceContext.catalogFingerprintVersion, 1);
+assert.equal(importedSourceContext.catalogFingerprintVersion, 2);
 assert.equal(importedSourceContext.catalogFingerprint, roundTripCatalogFingerprint);
 assert.equal(
   importedSettings.setupContextFingerprint,
@@ -3985,7 +4454,7 @@ context.UrlFetchApp = {
     assert.equal(
       url,
       'https://raw.githubusercontent.com/artemas-hsieh/t-school-schedule-sync/' +
-      '3fae71be483f6c1039a77f6e55a34ba158d4e6c8/notification-email-templates.json'
+      '5f31cd2fb263b9b5e579eab0d25c1b4f278f854f/notification-email-templates.json'
     );
     assert.equal(options.followRedirects, true);
     assert.equal(options.muteHttpExceptions, true);
@@ -4776,7 +5245,6 @@ try {
     { gradeName: '高一' },
     {
       events: [{
-        type: 'course',
         isAllDay: false,
         dateKey: '2026-09-15'
       }]
@@ -4817,12 +5285,11 @@ context.loadSourceContext_ = function (gradeName) {
     firstDateKey: '2026-09-01',
     lastDateKey: '2027-01-31',
     sourceUpdatedLabel: '08102026',
-    events: [{ type: 'course', isAllDay: false, dateKey: '2026-09-15' }],
+    events: [{ isAllDay: false, dateKey: '2026-09-15' }],
     catalog: {
-      all: [{ title: '高二新課程', type: 'course' }],
-      courses: [{ title: '高二新課程', type: 'course' }],
-      activities: [],
-      vacation: []
+      all: [{ title: '高二新課程', period: 'term' }],
+      termItems: [{ title: '高二新課程', period: 'term' }],
+      vacationItems: []
     }
   };
 };
@@ -4843,7 +5310,7 @@ context.loadCourseOutlineSourceIndex_ = function () {
 try {
   const switchedGradeContext = context.getGradeContextForUi('高二');
   assert.equal(switchedGradeContext.source.gradeName, '高二');
-  assert.equal(switchedGradeContext.source.courseCount, 1);
+  assert.equal(switchedGradeContext.source.itemCount, 1);
   assert.equal(switchedGradeContext.courseOutlineStatus.enabled, true);
   assert.deepEqual(
     Array.from(switchedGradeContext.courseOutlineStatus.sourceSetLabels),
@@ -5099,7 +5566,6 @@ function makeBatchFixtureEvent(index) {
   const end = new Date(start.getTime() + 50 * 60 * 1000);
   return {
     originalTitle: `分批測試課程 ${index + 1}`,
-    type: 'course',
     isAllDay: false,
     dateKey: formatDate(start, 'yyyy-MM-dd'),
     weekday: '一',
@@ -5153,6 +5619,22 @@ const batchSettings = {
   reminderMode: 'none',
   reminderMinutes: 10
 };
+const neutralTitleCalendar = createMockCalendar();
+const neutralTitleItem = Object.assign({}, makeBatchFixtureEvent(0), {
+  originalTitle: '模擬考'
+});
+const neutralTitleEvent = context.createCalendarEvent_(
+  neutralTitleCalendar,
+  neutralTitleItem,
+  context.makeOccurrenceKey_(neutralTitleItem),
+  batchSettings
+);
+assert.equal(neutralTitleEvent.getTitle(), '模擬考 [測試教室]');
+assert.equal(
+  neutralTitleEvent.getTitle().includes('活動｜'),
+  false,
+  '類似活動的行程也不得在 Calendar 標題加上分類前綴'
+);
 const batchDesired = Array.from({ length: 422 }, (_, index) => makeBatchFixtureEvent(index));
 const batchCalendar = createMockCalendar();
 let batchState = {};
@@ -5179,9 +5661,11 @@ assert.equal(batchJob.created, 422);
 assert.equal(Object.keys(batchState).length, 422);
 assert.equal(batchCalendar.activeEvents().length, 422);
 assert.equal(
-  Object.values(batchState).every(item => item.signatureVersion === 2),
+  Object.values(batchState).every(item =>
+    item.signatureVersion === 3 && !Object.prototype.hasOwnProperty.call(item, 'type')
+  ),
   true,
-  '新狀態應只保存短雜湊簽章版本'
+  '新狀態應使用中性短雜湊簽章版本，且不得保存 type'
 );
 assert.equal(
   Object.values(batchState).every(item => item.metadataVersion === 2),
@@ -5418,9 +5902,7 @@ assert.throws(
 const migrationSanitized = context.sanitizeSettingsInput_(
   {
     gradeName: '高二',
-    selectedCourses: ['測試課程'],
-    includeActivities: true,
-    excludedActivities: [],
+    selectedTitles: ['測試課程'],
     calendarId: '',
     calendarName: '新專用日曆',
     notificationEmail: '',
@@ -5435,11 +5917,10 @@ const migrationSanitized = context.sanitizeSettingsInput_(
     reminderMinutes: 10
   },
   {
-    schemaVersion: 3,
+    schemaVersion: 9,
     gradeName: '高二',
     setupComplete: true,
-    selectedCourses: ['測試課程'],
-    excludedActivities: [],
+    selectedTitles: ['測試課程'],
     knownTitles: ['測試課程'],
     pendingTitles: [],
     excludedTitles: [],
@@ -5462,8 +5943,7 @@ const migrationSanitized = context.sanitizeSettingsInput_(
     termKey: '二年級|2026-02-23',
     fingerprint: 'source',
     catalog: {
-      all: [{ title: '測試課程', type: 'course' }],
-      activities: []
+      all: [{ title: '測試課程', period: 'term' }]
     }
   }
 );
@@ -5475,6 +5955,43 @@ assert.equal(
 assert.equal(migrationSanitized.descriptionPreset, 'standard');
 assert.equal(migrationSanitized.notificationPreset, 'standard');
 assert.equal(migrationSanitized.customNotification, '');
+const explicitSelectionOverridesExclusion = context.sanitizeSettingsInput_(
+  Object.assign({}, migrationSanitized, {
+    selectedTitles: ['第一次模擬考']
+  }),
+  Object.assign({}, migrationSanitized, {
+    selectedTitles: ['測試課程'],
+    excludedTitles: ['第一次模擬考']
+  }),
+  {
+    termKey: '二年級|2026-02-23',
+    scheduleFingerprint: 'source',
+    catalog: {
+      all: [{ title: '第一次模擬考', period: 'term' }]
+    }
+  }
+);
+assert.deepEqual(
+  Array.from(explicitSelectionOverridesExclusion.selectedTitles),
+  ['第一次模擬考']
+);
+assert.deepEqual(
+  Array.from(explicitSelectionOverridesExclusion.excludedTitles),
+  [],
+  '使用者明確重新勾選時必須同步移除舊 excludedTitles 衝突'
+);
+assert.equal(
+  context.shouldIncludeEvent_(
+    { originalTitle: '第一次模擬考' },
+    {
+      selectedTitles: ['第一次模擬考'],
+      excludedTitles: ['第一次模擬考'],
+      pendingTitles: []
+    }
+  ),
+  true,
+  '即使讀到舊衝突狀態，明確 selectedTitles 仍必須優先'
+);
 assert.match(
   migrationSanitized.customDescription,
   /第 \{week\} 週 \/ 週\{weekday\} \/ 第 \{period\} 節/
@@ -5493,8 +6010,7 @@ const legacyDescriptionPresetSanitized = context.sanitizeSettingsInput_(
     termKey: '二年級|2026-02-23',
     fingerprint: 'source',
     catalog: {
-      all: [{ title: '測試課程', type: 'course' }],
-      activities: []
+      all: [{ title: '測試課程', period: 'term' }]
     }
   }
 );
@@ -5520,8 +6036,7 @@ const preservedCustomDescription = context.sanitizeSettingsInput_(
     termKey: '二年級|2026-02-23',
     fingerprint: 'source',
     catalog: {
-      all: [{ title: '測試課程', type: 'course' }],
-      activities: []
+      all: [{ title: '測試課程', period: 'term' }]
     }
   }
 );
@@ -5543,16 +6058,19 @@ const newTermSource = {
   fingerprint: 'new-term-source',
   events: [],
   catalog: {
-    all: [{ title: '新學期課程', type: 'course' }],
-    activities: []
+    all: [
+      { title: '新學期課程', period: 'term' },
+      { title: '全校開學活動', period: 'term' },
+      { title: '第一次模擬考', period: 'term' }
+    ]
   }
 };
 const settingsBeforeTermTransition = Object.assign({}, migrationSanitized, {
   setupComplete: true,
   termKey: '二年級|2026-02-23',
   pendingTermKey: '',
-  selectedCourses: ['測試課程'],
-  excludedActivities: ['測試活動'],
+  selectedTitles: ['測試課程'],
+  excludedTitles: ['測試活動'],
   pendingTitles: ['待確認課程'],
   instantNotificationsEnabled: false,
   notificationHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
@@ -5570,7 +6088,10 @@ const transitionedSettings = context.applyTermTransitionIfNeeded_(
   true
 );
 assert.equal(transitionedSettings.pendingTermKey, newTermSource.termKey);
-assert.deepEqual(Array.from(transitionedSettings.selectedCourses), []);
+assert.deepEqual(
+  Array.from(transitionedSettings.selectedTitles),
+  ['全校開學活動', '第一次模擬考']
+);
 assert.equal(transitionedSettings.autoSyncEnabled, false);
 assert.equal(transitionedSettings.autoSyncEnabledBeforeTermTransition, true);
 assert.equal(transitionedSettings.termTransitionNoticeAttempts, 1);
@@ -5579,14 +6100,14 @@ assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition);
 assert.equal(context.loadNotificationQueueState_().pending.length, 1);
 context.flushQueuedNotificationsSafe_(transitionedSettings);
 assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition + 1);
-assert.match(sentEmailSubjects.at(-1), /需要重新選課/);
+assert.match(sentEmailSubjects.at(-1), /需要重新選擇課程與活動/);
 assert.match(
   sentEmailMessages.at(-1).body,
-  /已進入新學期，為避免把上學期的選課直接套到新學期，請重新選課/
+  /已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程與活動/
 );
 assert.match(
   sentEmailMessages.at(-1).htmlBody,
-  /在行程同步控制臺確認新學期就讀年級、重新選課/
+  /在行程同步控制臺確認新學期就讀年級、重新選擇課程與活動/
 );
 assert.match(sentEmailMessages.at(-1).body, /完成新學期同步前/);
 assert.match(sentEmailMessages.at(-1).body, /確認新學期就讀年級/);
@@ -5606,7 +6127,7 @@ const laterTermSource = Object.assign({}, newTermSource, {
 const failedNoticeSettings = Object.assign({}, settingsBeforeTermTransition, {
   termKey: newTermSource.termKey,
   pendingTermKey: '',
-  selectedCourses: ['新學期課程'],
+  selectedTitles: ['新學期課程'],
   autoSyncEnabled: true,
   notificationHours: [Number(formatDate(new Date(), 'H'))],
   notifySyncHour: Number(formatDate(new Date(), 'H'))
@@ -5641,7 +6162,7 @@ assert.equal(
 const restoredAfterSelection = context.sanitizeSettingsInput_(
   Object.assign({}, migrationSanitized, {
     gradeName: '高二',
-    selectedCourses: ['新學期課程'],
+    selectedTitles: ['新學期課程'],
     calendarId: '',
     calendarName: '新專用日曆',
     calendarMigrationFromId: '',
@@ -5661,7 +6182,7 @@ assert.throws(
   () => context.sanitizeSettingsInput_(
     Object.assign({}, migrationSanitized, {
       gradeName: '高二',
-      selectedCourses: ['新學期課程'],
+      selectedTitles: ['新學期課程'],
       calendarId: '',
       calendarName: '新專用日曆',
       calendarMigrationFromId: '',
@@ -5694,8 +6215,7 @@ assert.throws(
       termKey: '二年級|2026-02-23',
       fingerprint: 'source',
       catalog: {
-        all: [{ title: '測試課程', type: 'course' }],
-        activities: []
+        all: [{ title: '測試課程', period: 'term' }]
       }
     }
   ),
@@ -5843,17 +6363,21 @@ const nearMatchSnapshot = context.collectCourseOutlineSnapshot_(
   ],
   [configuredHigh2OutlineSet]
 );
-assert.deepEqual(Array.from(nearMatchSnapshot.diagnostics.missingSheetNames), ['測試課程']);
+assert.equal(nearMatchSnapshot.diagnostics.matchedRecordCount, 0);
+assert.deepEqual(
+  Array.from(nearMatchSnapshot.diagnostics.missingSheetNames),
+  [],
+  '未精確命中分頁名稱的行程不應被當成缺頁錯誤'
+);
 assert.deepEqual(
   Array.from(nearMatchSnapshot.diagnostics.ignoredCrossSchoolSheetNames),
-  ['週五跨校選修'],
-  '跨校課程不應列入課綱缺頁錯誤'
+  [],
+  '未命中的行程不需再依名稱類型分流'
 );
-assert.equal(nearMatchSnapshot.diagnostics.nearMatchSheetNames.length, 1);
-assert.equal(
-  nearMatchSnapshot.diagnostics.nearMatchSheetNames[0].candidates[0],
-  '測試課程 ',
-  '只差空格的課綱分頁只能提示，不得自動配對'
+assert.deepEqual(
+  Array.from(nearMatchSnapshot.diagnostics.nearMatchSheetNames),
+  [],
+  '只差空格的課綱分頁不得自動配對，也不應列為 near-match 錯誤'
 );
 outlineWorkbookSheets = Object.assign({}, outlineWorkbookSheets, {
   [configuredHigh2OutlineSet.spreadsheetIds[0]]: [makeOutlineSheet('測試課程', outlineValues)],
@@ -5871,13 +6395,12 @@ assert.throws(
 );
 
 const high2OutlineSets = context.getRelevantCourseOutlineSourceSets_('高二', [{
-  type: 'course',
   isAllDay: false,
   dateKey: '2026-07-27'
 }]);
 const snapshotLookupKey = context.makeCourseOutlineOccurrenceKey_('測試課程', '2026-07-27', 5, 6);
 const publishedSnapshot = context.publishCourseOutlineSnapshot_({
-  schemaVersion: 1,
+  schemaVersion: 2,
   gradeName: '高二',
   termKey: '二年級|2026-02-23',
   sourceSetKeys: ['114-2-high2'],
@@ -5922,7 +6445,7 @@ const switchedGradeOutlineStatus = context.buildCourseOutlineUiStatus_(
   { gradeName: '高一' },
   {
     termKey: '一年級|2026-09-01',
-    events: [{ type: 'course', isAllDay: false, dateKey: '2026-09-15' }]
+    events: [{ isAllDay: false, dateKey: '2026-09-15' }]
   },
   changedOutlineIndex
 );
@@ -6195,7 +6718,7 @@ context.saveSettings_(Object.assign({}, settingsBeforePendingTermOutline, {
 }));
 const pendingTermOutlineResult = context.runCourseOutlineRefreshAttempt_(1, 'manual');
 assert.equal(pendingTermOutlineResult.skipped, true);
-assert.match(pendingTermOutlineResult.message, /先重新選課/);
+assert.match(pendingTermOutlineResult.message, /先重新選擇課程與活動/);
 context.saveSettings_(settingsBeforePendingTermOutline);
 
 const settingsBeforeOutlineStartupFailure = context.loadSettings_();
@@ -6297,19 +6820,29 @@ const results = fixtures.map(fixture => {
   const runtimeSummary = context.parseSchedulePayload_(payload, fixture.grade, new Date('2026-07-20T12:00:00+08:00'));
 
   assert.deepEqual(
-    Array.from(runtimeSummary.catalog.courses, item => item.title).sort(),
-    Array.from(installerSummary.catalog.courses, item => item.title).sort(),
-    `${fixture.grade} 的課程目錄不一致`
+    Object.keys(runtimeSummary.catalog).sort(),
+    ['all', 'termItems', 'vacationItems'],
+    `${fixture.grade} 的 Code.gs 目錄不得恢復課程／活動分類`
   );
   assert.deepEqual(
-    Array.from(runtimeSummary.catalog.activities, item => item.title).sort(),
-    Array.from(installerSummary.catalog.activities, item => item.title).sort(),
-    `${fixture.grade} 的活動目錄不一致`
+    Object.keys(installerSummary.catalog).sort(),
+    ['all', 'termItems', 'vacationItems'],
+    `${fixture.grade} 的網站目錄不得恢復課程／活動分類`
   );
   assert.deepEqual(
-    Array.from(runtimeSummary.catalog.all, item => `${item.type}:${item.period}:${item.title}`).sort(),
-    Array.from(installerSummary.catalog.all, item => `${item.type}:${item.period}:${item.title}`).sort(),
-    `${fixture.grade} 的學期間／寒暑假分類不一致`
+    Array.from(runtimeSummary.catalog.all, item => `${item.period}:${item.title}`),
+    Array.from(installerSummary.catalog.all, item => `${item.period}:${item.title}`),
+    `${fixture.grade} 的學期間／寒暑假排序不一致`
+  );
+  assert.deepEqual(
+    Array.from(runtimeSummary.catalog.termItems, item => item.title),
+    Array.from(installerSummary.catalog.termItems, item => item.title),
+    `${fixture.grade} 的學期間行程排序不一致`
+  );
+  assert.deepEqual(
+    Array.from(runtimeSummary.catalog.vacationItems, item => item.title),
+    Array.from(installerSummary.catalog.vacationItems, item => item.title),
+    `${fixture.grade} 的寒暑假期間行程排序不一致`
   );
   assert.equal(runtimeSummary.firstDateKey, installerSummary.firstDateKey);
   assert.equal(runtimeSummary.lastDateKey, installerSummary.lastDateKey);
@@ -6324,18 +6857,22 @@ const results = fixtures.map(fixture => {
     `${fixture.grade} 的完整課表指紋必須與設定目錄指紋分離`
   );
   assert.equal(runtimeSummary.events.some(event => /\[[^\]]+\]\s*$/.test(event.originalTitle)), false);
-  const runtimePeriodCounts = context.countScheduledPeriodsByTitle_(payload);
   assert.equal(
-    runtimeSummary.catalog.activities.every(item =>
-      context.classifyScheduleTitle_(item.title, runtimePeriodCounts) === 'activity'
+    runtimeSummary.catalog.all.every(item =>
+      Object.keys(item).sort().join(',') === 'period,title'
     ),
-    true
+    true,
+    `${fixture.grade} 的目錄項目只能有 title 與 period`
+  );
+  assert.equal(
+    runtimeSummary.events.every(event => !Object.prototype.hasOwnProperty.call(event, 'type')),
+    true,
+    `${fixture.grade} 的正常行程事件不得有 type`
   );
 
   return {
     grade: fixture.grade,
-    courses: runtimeSummary.catalog.courses.length,
-    activities: runtimeSummary.catalog.activities.length,
+    items: runtimeSummary.catalog.all.length,
     events: runtimeSummary.events.length,
     range: `${runtimeSummary.firstDateKey}..${runtimeSummary.lastDateKey}`
   };

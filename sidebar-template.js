@@ -506,7 +506,7 @@
     <section class="term-transition" id="term-transition" role="alert" aria-live="assertive" tabindex="-1" hidden>
       <div>
         <h2>請完成新學期設定</h2>
-        <p id="term-transition-message">確認新學期年級 → 選擇新課程或活動 → 完成選課並同步</p>
+        <p id="term-transition-message">確認新學期年級 → 選擇課程與活動 → 完成選擇並同步</p>
         <p id="term-transition-outline-message" hidden></p>
         <button type="button" id="term-transition-action">前往確認年級</button>
       </div>
@@ -540,7 +540,7 @@
           </div>
         </div>
         <p class="hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆。</p>
-        <label class="field"><span>活動提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
+        <label class="field"><span>行程提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
         <label class="field" id="reminder-wrap" hidden><span>提前時間</span><select id="reminder-minutes"><option value="10">10 分鐘</option><option value="30">30 分鐘</option><option value="60">1 小時</option><option value="1440">1 天</option></select></label>
       </section>
 
@@ -564,10 +564,10 @@
       </section>
 
       <section class="section" id="course-section">
-        <div class="section-head"><h2>課程與活動</h2><span id="course-count">已選 0 門課 ・ 0 項活動</span></div>
+        <div class="section-head"><h2>課程與活動</h2><span id="course-count">已選 0 項</span></div>
         <div class="course-toolbar">
-          <input type="search" id="course-search" placeholder="輸入課名、活動名、班別等" aria-label="搜尋課程和活動">
-          <button type="button" class="icon-button" id="course-search-action" aria-label="搜尋課程和活動">⌕</button>
+          <input type="search" id="course-search" placeholder="輸入課程或活動名稱、班別等" aria-label="搜尋課程與活動">
+          <button type="button" class="icon-button" id="course-search-action" aria-label="搜尋課程與活動">⌕</button>
         </div>
         <div class="course-list-shell" id="course-list-shell" data-can-scroll-up="false" data-can-scroll-down="false">
           <div class="course-list" id="course-list"></div>
@@ -609,9 +609,7 @@
   <script>
     (function () {
       var model = null;
-      var selectedCourses = new Set();
-      var excludedActivities = new Set();
-      var includeActivities = true;
+      var selectedTitles = new Set();
       var busy = false;
       var syncProgressTimer = null;
       var syncProgressPollGeneration = 0;
@@ -628,6 +626,15 @@
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
       function normalize(value) { return String(value || '').replace(/\s+/g, '').toLowerCase(); }
       function defaultCalendarName(gradeName) { return (gradeName || '高一') + '行程｜T-SCHOOL Schedule Sync'; }
+      function isDefaultSelectedTitle(value) {
+        return /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(normalize(value));
+      }
+      function seedDefaultSelections(source) {
+        var catalog = source && source.catalog || {};
+        (catalog.all || []).forEach(function (item) {
+          if (isDefaultSelectedTitle(item.title)) selectedTitles.add(item.title);
+        });
+      }
       function setSyncMenuOpen(open, focusFirstItem) {
         var menu = byId('sync-menu');
         var toggle = byId('sync-menu-toggle');
@@ -740,9 +747,10 @@
       function render(data) {
         model = data;
         var settings = data.settings;
-        selectedCourses = new Set(settings.selectedCourses || []);
-        excludedActivities = new Set(settings.excludedActivities || []);
-        includeActivities = settings.includeActivities !== false;
+        selectedTitles = new Set(settings.selectedTitles || []);
+        if (data.termTransition && data.termTransition.required && selectedTitles.size === 0) {
+          seedDefaultSelections(data.source);
+        }
         document.querySelector('input[name="grade"][value="' + settings.gradeName + '"]').checked = true;
         byId('email').value = settings.notificationEmail || '';
         byId('auto-sync').checked = data.termTransition && data.termTransition.required
@@ -768,7 +776,7 @@
           ? 'success'
           : 'attention';
         byId('top-status').textContent = needsTermSelection
-          ? '待重新選課'
+          ? '待重新選擇課程與活動'
           : (sourceUnavailable
             ? '課表來源暫時離線'
           : (data.status && data.status.ok
@@ -776,7 +784,7 @@
             : (settings.setupComplete ? '需檢查狀態' : '待首次同步')));
         byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
-          ? '完成選課並同步'
+          ? '完成選擇並同步'
           : (settings.setupComplete ? '儲存並同步' : '儲存並首次同步');
         byId('reimport-setup').hidden = Boolean(settings.setupComplete);
         updateActionAvailability();
@@ -793,13 +801,13 @@
           return;
         }
         byId('term-transition-message').textContent =
-          '確認新學期年級 → 選擇新課程或活動 → 完成選課並同步';
+          '確認新學期年級 → 選擇課程與活動 → 完成選擇並同步';
         var outlineMessage = byId('term-transition-outline-message');
         var indexWarning = outlineStatus && outlineStatus.indexWarning || '';
         var missingCurrentOutline = outlineStatus && !outlineStatus.enabled;
         outlineMessage.hidden = !indexWarning && !missingCurrentOutline && !transition.noticeFailed;
         outlineMessage.textContent = transition.noticeFailed
-          ? '提醒信暫時無法寄出，但這裡會持續保留重新選課提示。'
+          ? '提醒信暫時無法寄出，但這裡會持續保留重新選擇課程與活動的提示。'
           : (indexWarning
             ? indexWarning
             : (missingCurrentOutline
@@ -811,7 +819,10 @@
         if (!model || busy) return;
         var requiresSelection = Boolean(model.termTransition && model.termTransition.required);
         var sourceUnavailable = Boolean(model.source && model.source.unavailable);
-        var missingSelection = requiresSelection && selectedCourses.size === 0;
+        var catalog = model.source && model.source.catalog || {};
+        var missingSelection = !(catalog.all || []).some(function (item) {
+          return selectedTitles.has(item.title);
+        });
         var missingGradeConfirmation = requiresSelection && !byId('term-grade-confirmed').checked;
         ['save', 'save-sync'].forEach(function (id) {
           var button = byId(id);
@@ -849,7 +860,9 @@
         var dateRange = source.firstDate
           ? source.firstDate + (source.lastDate ? '–' + source.lastDate : '') + ' · '
           : '';
-        var summary = dateRange + source.courseCount + ' 門課 · ' + source.activityCount + ' 項活動';
+        var catalog = source.catalog || {};
+        var itemCount = (catalog.termItems || []).length + (catalog.vacationItems || []).length;
+        var summary = dateRange + itemCount + ' 項行程';
         byId('source-detail').textContent = source.unavailable
           ? (source.unavailableMessage || '目前顯示上次可用摘要，恢復連線後才能儲存或同步。') +
             (summary ? ' ' + summary : '')
@@ -970,28 +983,22 @@
         var query = normalize(byId('course-search').value);
         var catalog = model.source.catalog || {};
         var hasVacationItems = (catalog.vacationItems || []).length > 0;
-        var termCourses = (catalog.courses || [])
-          .filter(function (item) { return item.period !== 'vacation' && normalize(item.title).indexOf(query) !== -1; })
-          .sort(compareCatalogItems);
-        var termActivities = (catalog.activities || [])
-          .filter(function (item) { return item.period !== 'vacation' && normalize(item.title).indexOf(query) !== -1; })
-          .sort(compareCatalogItems);
+        var termItems = (catalog.termItems || [])
+          .filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
         var vacationItems = (catalog.vacationItems || [])
-          .filter(function (item) { return normalize(item.title).indexOf(query) !== -1; })
-          .sort(compareCatalogItems);
+          .filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
         var sections = [];
-        if (termCourses.length) {
-          sections.push(renderCourseGroup(hasVacationItems ? '學期間課程' : '課程', termCourses));
-        }
-        if (termActivities.length) {
-          sections.push(renderCourseGroup(hasVacationItems ? '學期間活動' : '活動', termActivities));
+        if (termItems.length) {
+          sections.push(renderCourseGroup(hasVacationItems ? '學期間課程與活動' : '', termItems));
         }
         if (vacationItems.length) {
-          sections.push(renderCourseGroup('寒暑假期間課程 / 活動', vacationItems));
+          sections.push(renderCourseGroup('寒暑假期間課程與活動', vacationItems));
         }
         byId('course-list').innerHTML = sections.join('') || '<p class="empty">找不到符合條件的項目，請調整搜尋文字</p>';
-        var selectedActivityCount = (model.source.catalog.activities || []).filter(function (item) { return includeActivities && !excludedActivities.has(item.title); }).length;
-        byId('course-count').textContent = '已選 ' + selectedCourses.size + ' 門課 ・ ' + selectedActivityCount + ' 項活動';
+        var selectedCount = (catalog.all || []).filter(function (item) {
+          return selectedTitles.has(item.title);
+        }).length;
+        byId('course-count').textContent = '已選 ' + selectedCount + ' 項';
         updateCourseSearchAction();
         updateActionAvailability();
         requestAnimationFrame(updateCourseScrollShadows);
@@ -1008,24 +1015,17 @@
         );
       }
 
-      function compareCatalogItems(left, right) {
-        return left.title.localeCompare(right.title, 'zh-Hant-u-co-stroke');
-      }
-
       function renderCourseGroup(title, items) {
-        return '<section class="course-group"><h3>' + escapeHtml(title) + '</h3>' +
+        return '<section class="course-group">' +
+          (title ? '<h3>' + escapeHtml(title) + '</h3>' : '') +
           '<div class="course-group-list">' +
           items.map(renderCourseChoice).join('') +
           '</div></section>';
       }
 
       function renderCourseChoice(item) {
-        var isActivity = item.type === 'activity';
-        var checked = isActivity
-          ? includeActivities && !excludedActivities.has(item.title)
-          : selectedCourses.has(item.title);
-        return '<label class="choice"><input type="checkbox" data-kind="' +
-          (isActivity ? 'activity' : 'course') + '" value="' + escapeHtml(item.title) + '" ' +
+        var checked = selectedTitles.has(item.title);
+        return '<label class="choice"><input type="checkbox" data-kind="schedule-item" value="' + escapeHtml(item.title) + '" ' +
           (checked ? 'checked' : '') + '><span><span class="choice-copy"><strong>' +
           escapeHtml(item.title) + '</strong></span></span></label>';
       }
@@ -1034,7 +1034,7 @@
         var isSearching = Boolean(byId('course-search').value);
         var action = byId('course-search-action');
         action.textContent = isSearching ? '×' : '⌕';
-        action.setAttribute('aria-label', isSearching ? '取消搜尋' : '搜尋課程和活動');
+        action.setAttribute('aria-label', isSearching ? '取消搜尋' : '搜尋課程與活動');
       }
 
       function renderPending(items) {
@@ -1073,9 +1073,7 @@
           : getSelectedNotifyHours();
         return {
           gradeName: getCheckedGrade(),
-          selectedCourses: Array.from(selectedCourses),
-          includeActivities: includeActivities,
-          excludedActivities: Array.from(excludedActivities),
+          selectedTitles: Array.from(selectedTitles),
           calendarId: byId('calendar').value,
           calendarName: byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade()),
           notificationEmail: byId('email').value.trim(),
@@ -1164,23 +1162,10 @@
       }
 
       document.addEventListener('change', function (event) {
-        if (event.target.matches('#course-list input[data-kind="course"]')) { event.target.checked ? selectedCourses.add(event.target.value) : selectedCourses.delete(event.target.value); renderCourses(); }
-        if (event.target.matches('#course-list input[data-kind="activity"]')) {
-          var activities = model && model.source && model.source.catalog ? model.source.catalog.activities || [] : [];
-          if (event.target.checked) {
-            if (!includeActivities) {
-              excludedActivities = new Set(activities
-                .map(function (item) { return item.title; })
-                .filter(function (title) { return title !== event.target.value; }));
-            }
-            includeActivities = true;
-            excludedActivities.delete(event.target.value);
-          } else {
-            excludedActivities.add(event.target.value);
-            if (activities.length && activities.every(function (item) { return excludedActivities.has(item.title); })) {
-              includeActivities = false;
-            }
-          }
+        if (event.target.matches('#course-list input[data-kind="schedule-item"]')) {
+          event.target.checked
+            ? selectedTitles.add(event.target.value)
+            : selectedTitles.delete(event.target.value);
           renderCourses();
         }
         if (event.target.matches('[data-notify-hour]')) {
@@ -1202,9 +1187,8 @@
             model.source = data;
             model.courseOutlineStatus = gradeContext.courseOutlineStatus;
             model.termTransition = gradeContext.termTransition;
-            selectedCourses = new Set();
-            excludedActivities = new Set();
-            includeActivities = true;
+            selectedTitles = new Set();
+            seedDefaultSelections(data);
             renderSource(data);
             renderTermTransition(
               gradeContext.termTransition,
