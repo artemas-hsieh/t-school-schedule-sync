@@ -1015,6 +1015,7 @@ const COURSE_OUTLINE_RETRY_HANDLER = 'retryCourseOutlineRefresh';
 const COURSE_OUTLINE_WATCHDOG_HANDLER = 'watchCourseOutlineRefresh';
 const COURSE_OUTLINE_APPLY_HANDLER = 'applyCourseOutlineSnapshotToCalendar';
 const NATURAL_ADVANCED_BASE_TITLE = '自然進階(二)';
+const SCHEDULE_NOTE_TITLE_PREFIX = '備註｜';
 const NATURAL_ADVANCED_VARIANT_TITLES = [
   '自然進階(二)_化學',
   '自然進階(二)_生物',
@@ -1572,7 +1573,8 @@ function calculateTitleSimilarity_(left, right) {
 // assign a course/activity type or affect event parsing.
 function isDefaultSelectedTitle_(value) {
   const title = normalizeTitle_(value);
-  return /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
+  return isScheduleNoteTitle_(title) ||
+    /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|開學|始業式|結業式|休業式|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
 }
 
 function compareSimilarityLeaves_(left, right) {
@@ -4770,6 +4772,10 @@ function deliverPromotedNewTitleNoticeAfterSync_(settings, source, state) {
 function shouldIncludeEvent_(event, settings) {
   const normalized = normalizeTitle_(event.originalTitle);
 
+  if (isScheduleNoteTitle_(event.originalTitle)) {
+    return true;
+  }
+
   if (settings.selectedTitles.some(title => normalizeTitle_(title) === normalized)) {
     return true;
   }
@@ -5218,6 +5224,9 @@ function buildEventLocation_(item) {
 }
 
 function buildEventTitle_(item) {
+  if (isScheduleNoteTitle_(item && item.originalTitle)) {
+    return item.originalTitle;
+  }
   const location = buildEventLocation_(item);
   return location ? item.originalTitle + ' [' + location + ']' : item.originalTitle;
 }
@@ -6954,7 +6963,8 @@ function handleCourseOutlineRefreshStartupFailure_(settings, attempt, reason, er
       watchdogTriggerId: '',
       lastError: '',
       unavailableItemCount: Number(error && error.courseOutlineUnavailableItemCount) ||
-        uniqueExactStrings_(settings && settings.selectedTitles || []).length
+        uniqueExactStrings_(settings && settings.selectedTitles || [])
+          .filter(title => !isCourseSelectionHidden_(title)).length
     });
     saveCourseOutlineState_(run);
     handleCourseOutlineRefreshFailure_(run, error);
@@ -7000,7 +7010,8 @@ function beginCourseOutlineRefreshRun_(settings, attempt, reason) {
       retryTriggerId: reason === 'retry' ? '' : state.retryTriggerId || '',
       lastError: '',
       unavailableItemCount: Number(state.unavailableItemCount) ||
-        uniqueExactStrings_(settings.selectedTitles || []).length
+        uniqueExactStrings_(settings.selectedTitles || [])
+          .filter(title => !isCourseSelectionHidden_(title)).length
     });
     saveCourseOutlineState_(next);
     return next;
@@ -7274,10 +7285,12 @@ function parseSchedulePayload_(payload, gradeName, now) {
         if (isStructuralValue_(rawEntry)) return;
         const parsed = parseEntry_(rawEntry);
         if (!parsed.title || !dateKey) return;
+        const noteTitle = makeScheduleNoteTitle_(parsed.title);
+        if (!noteTitle) return;
         const start = makeTaipeiDate_(dateKey, '00:00');
         const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
         events.push({
-          originalTitle: parsed.title,
+          originalTitle: noteTitle,
           isAllDay: true,
           weekNum,
           weekday: WEEKDAY_LABELS[dayIndex],
@@ -7362,14 +7375,17 @@ function extractCatalogFromPayload_(payload) {
   const vacationWeeks = getVacationWeekNumbersFromPayload_(payload);
   (payload.tableData || []).forEach(row => {
     if (!row || row.isHeader || !Array.isArray(row.cells)) return;
-    row.cells.forEach(cell => {
+    const isNoteRow = normalizeTitle_(row.cells[1] && row.cells[1].value) === '備註';
+    row.cells.forEach((cell, cellIndex) => {
+      if (isNoteRow && cellIndex < 2) return;
       splitCellEntries_(cell && cell.value).forEach(rawEntry => {
         if (isStructuralValue_(rawEntry)) return;
         const parsed = parseEntry_(rawEntry);
-        const key = normalizeTitle_(parsed.title);
+        const title = isNoteRow ? makeScheduleNoteTitle_(parsed.title) : parsed.title;
+        const key = normalizeTitle_(title);
         if (!key) return;
         const existing = catalogMap[key] || {
-          title: parsed.title,
+          title,
           hasVacationOccurrence: false
         };
         existing.hasVacationOccurrence =
@@ -8942,7 +8958,18 @@ function normalizeTitle_(value) {
 }
 
 function isCourseSelectionHidden_(value) {
-  return normalizeTitle_(value) === normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE);
+  return normalizeTitle_(value) === normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE) ||
+    isScheduleNoteTitle_(value);
+}
+
+function isScheduleNoteTitle_(value) {
+  return normalizeTitle_(value).indexOf(normalizeTitle_(SCHEDULE_NOTE_TITLE_PREFIX)) === 0;
+}
+
+function makeScheduleNoteTitle_(value) {
+  const title = normalizeText_(value);
+  const content = title.replace(/^備註[|｜]\\s*/, '');
+  return content ? SCHEDULE_NOTE_TITLE_PREFIX + content : '';
 }
 
 function isNaturalAdvancedVariantTitle_(value) {
@@ -8957,6 +8984,10 @@ function applyCourseSelectionRules_(selectedTitles, catalogItems) {
   );
   const effectiveKeys = selectedKeys.filter(key => key !== baseKey);
   if (variantSelected) effectiveKeys.push(baseKey);
+  (catalogItems || []).forEach(item => {
+    const title = typeof item === 'string' ? item : item && item.title;
+    if (isScheduleNoteTitle_(title)) effectiveKeys.push(normalizeTitle_(title));
+  });
   return (catalogItems || [])
     .map(item => typeof item === 'string' ? item : item && item.title)
     .filter(title => title && effectiveKeys.indexOf(normalizeTitle_(title)) !== -1);

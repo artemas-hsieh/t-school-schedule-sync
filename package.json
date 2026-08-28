@@ -1,0 +1,14 @@
+{
+  "name": "t-school-schedule-sync",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host 127.0.0.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

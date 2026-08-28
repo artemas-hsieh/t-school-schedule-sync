@@ -41,6 +41,9 @@ const setupDialogHtml = global.TSCHOOL_SETUP_DIALOG_HTML;
 const configuratorHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const configuratorAppSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const configuratorStylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+const packageManifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const packageLock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+const viteConfigSource = fs.readFileSync(path.join(root, 'vite.config.mjs'), 'utf8');
 const scheduleDataSource = fs.readFileSync(path.join(root, 'schedule-data.js'), 'utf8');
 const emailTemplateManifestText = fs.readFileSync(
   path.join(root, 'notification-email-templates.json'),
@@ -58,6 +61,18 @@ const sidebarByIdReferences = Array.from(
   )
 );
 
+assert.equal(packageManifest.scripts.dev, 'vite --host 127.0.0.1');
+assert.match(packageManifest.devDependencies.vite, /^\^6\./);
+assert.equal(packageLock.packages[''].devDependencies.vite, packageManifest.devDependencies.vite);
+assert.match(viteConfigSource, /command === 'serve'/);
+assert.match(viteConfigSource, /connect-src 'self' ws:/);
+assert.match(viteConfigSource, /server\.ws\.send\(\{ type: 'full-reload', path: '\*' \}\)/);
+assert.equal(
+  configuratorHtml.includes("connect-src 'self' ws:"),
+  false,
+  '正式靜態首頁不應保留只供 Vite HMR 使用的 WebSocket CSP'
+);
+
 assert.equal(configuratorHtml.includes('id="instant-notifications"'), true);
 assert.equal(
   configuratorHtml.includes('id="instant-notifications" name="instantNotificationsEnabled" type="checkbox" role="switch" checked'),
@@ -66,6 +81,28 @@ assert.equal(
 );
 assert.equal(configuratorHtml.includes('偵測到行程調整就盡快通知'), true);
 assert.equal(configuratorHtml.includes('Email 和通知偏好都沒錯 ↵'), true);
+assert.equal(
+  configuratorAppSource.includes("initial: 'Email 和通知偏好都沒錯 ↵'"),
+  true,
+  '通知設定進入修正狀態後，按鈕文案仍應恢復既定的「通知偏好」用語'
+);
+assert.equal(configuratorAppSource.includes('initMobileOutput'), false);
+assert.equal(configuratorAppSource.includes('bindMobileOutputToggle'), false);
+assert.equal(configuratorAppSource.includes('initCodeDisclosure'), false);
+assert.equal(configuratorAppSource.includes('fullCodeToggle'), false);
+[
+  'wizard-progress',
+  'filter-tabs',
+  'advanced-settings',
+  'code-window-bar',
+  'output-actions'
+].forEach(obsoleteClassName => {
+  assert.equal(
+    configuratorStylesSource.includes(`.${obsoleteClassName}`),
+    false,
+    `已移除的舊版樣式不得重新出現：${obsoleteClassName}`
+  );
+});
 assert.equal(configuratorAppSource.includes('你的即時通知：'), false);
 assert.equal(configuratorAppSource.includes("appVersion: '2.0.0-rc.2'"), true);
 assert.equal(configuratorAppSource.includes('每日摘要時間：'), false);
@@ -90,14 +127,14 @@ assert.equal(configuratorHtml.includes('class="desktop-next-steps"'), true);
 assert.equal(configuratorHtml.includes('class="mobile-next-steps"'), true);
 assert.match(
   configuratorHtml,
-  /<ol class="desktop-next-steps">\s*<li><button[^>]*id="copy-setup-code-step"[^>]*>複製設定碼<\/button><\/li>\s*<li>登入/,
-  '電腦版後續指引應以可點擊的「複製設定碼」作為第一步，原三步依序後移'
+  /<ol class="desktop-next-steps">\s*<li><a[^>]*class="desktop-step-link is-disabled"[^>]*id="copy-setup-code-step"[^>]*>複製設定碼<\/a><\/li>\s*<li>登入/,
+  '電腦版後續指引應以一般文字連結「複製設定碼」作為第一步，原三步依序後移'
 );
 assert.equal(configuratorHtml.includes('在電腦上收信，依照信中指引完成後續操作'), true);
-assert.equal(
-  configuratorAppSource.includes("elements.copyCodeStep?.addEventListener('click', copyGeneratedCode)"),
-  true,
-  '第一步複製按鈕應直接沿用現有的設定碼複製流程'
+assert.match(
+  configuratorAppSource,
+  /elements\.copyCodeStep\?\.addEventListener\('click', event => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?copyGeneratedCode\(event\);/,
+  '第一步文字連結應阻止錨點跳動並沿用現有的設定碼複製流程'
 );
 assert.equal(
   configuratorAppSource.includes("elements.copyCodeStep.textContent = '再次複製設定碼'"),
@@ -106,13 +143,13 @@ assert.equal(
 );
 assert.match(
   configuratorStylesSource,
-  /\.control-panel-card \.desktop-step-copy-button,[\s\S]*?border: 0;[\s\S]*?text-decoration: underline;[\s\S]*?text-underline-offset: 0\.12em;/,
-  '第五步 inline action 應使用文字底線，不得以 border-bottom 假裝底線'
+  /\.control-panel-card \.desktop-step-link \{[\s\S]*?display: inline;[\s\S]*?min-height: 0;[\s\S]*?padding: 0;[\s\S]*?text-decoration: underline;[\s\S]*?text-underline-offset: 0\.12em;/,
+  '第五步 inline action 應使用正常行內文字與原生底線，不得擴大行盒或以 border-bottom 假裝底線'
 );
 assert.match(
   configuratorAppSource,
-  /function updateGeneratedCodeAvailability\(sourceReady\)[\s\S]*?elements\.copyCodeStep\.disabled = !enabled;/,
-  '後續指引的複製按鈕應與主要複製按鈕共用可用狀態'
+  /function updateGeneratedCodeAvailability\(sourceReady\)[\s\S]*?elements\.copyCodeStep\.classList\.toggle\('is-disabled', !enabled\);/,
+  '後續指引的複製文字連結應與主要複製按鈕共用可用狀態'
 );
 assert.equal(setupDialogHtml.includes('貼上「行程同步設定碼」'), true);
 assert.equal(setupDialogHtml.includes('placeholder="貼在這邊"'), true);
@@ -167,10 +204,63 @@ assert.equal(
   true,
   '網站應使用正式 Google Docs 母版 /copy URL'
 );
+const setupTransferCapabilityStart = configuratorAppSource.indexOf(
+  'function shouldOfferEmailSetupTransferForCapabilities(capabilities = {})'
+);
+const setupTransferCapabilityEnd = configuratorAppSource.indexOf(
+  '\nfunction shouldOfferEmailSetupTransfer()',
+  setupTransferCapabilityStart
+);
+assert.notEqual(setupTransferCapabilityStart, -1);
+assert.notEqual(setupTransferCapabilityEnd, -1);
+const setupTransferCapabilitySandbox = {};
+vm.runInNewContext(
+  `${configuratorAppSource.slice(setupTransferCapabilityStart, setupTransferCapabilityEnd)}\n` +
+    'this.detectSetupTransfer = shouldOfferEmailSetupTransferForCapabilities;',
+  setupTransferCapabilitySandbox
+);
+const detectSetupTransfer = setupTransferCapabilitySandbox.detectSetupTransfer;
+assert.equal(
+  detectSetupTransfer({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Safari/605.1.15',
+    platform: 'MacIntel',
+    maxTouchPoints: 5,
+    primaryPointerCoarse: true,
+    anyPointerFine: true
+  }),
+  true,
+  'iPadOS 桌面級 Safari 即使同時有精細指標，也應提供寄送設定信'
+);
+assert.equal(
+  detectSetupTransfer({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15',
+    platform: 'MacIntel',
+    maxTouchPoints: 0,
+    anyPointerFine: true
+  }),
+  false,
+  '沒有觸控能力的 Mac 不應誤判為 iPad'
+);
+assert.equal(
+  detectSetupTransfer({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    platform: 'Win32',
+    maxTouchPoints: 10,
+    primaryPointerCoarse: true,
+    anyPointerFine: true
+  }),
+  false,
+  '同時有觸控與滑鼠的 Windows 裝置不應只因觸控能力被誤判'
+);
+assert.equal(
+  detectSetupTransfer({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' }),
+  true,
+  'iPhone 行動 user-agent 應提供寄送設定信'
+);
 assert.match(
   configuratorAppSource,
-  /function shouldOfferEmailSetupTransfer\(\)[\s\S]*?userAgentData\?\.mobile[\s\S]*?pointer: coarse/,
-  '手機與只有粗指標的裝置應改以寄送設定信為主要動作'
+  /function shouldOfferEmailSetupTransfer\(\)[\s\S]*?navigator\.maxTouchPoints[\s\S]*?pointer: coarse/,
+  '裝置判定應把 iPad 多點觸控能力與既有粗指標 fallback 傳入純函式'
 );
 assert.equal(configuratorAppSource.includes("? '寄送設定信 ↵'"), true);
 assert.equal(
@@ -205,6 +295,12 @@ assert.equal(
   configuratorAppSource.includes("elements.outputStep.dataset.transferMode = state.emailSetupTransferEnabled"),
   true,
   '手機與桌機第五步應由同一裝置判定切換寄信或複製版面'
+);
+assert.equal(
+  fs.readFileSync(path.join(root, 'vendor', 'lenis-1.3.25.min.js'), 'utf8')
+    .includes('sourceMappingURL=lenis.min.js.map'),
+  false,
+  '未提供 source map 時不得保留失效引用，避免開發伺服器持續輸出警告'
 );
 const kineticCursorSource = configuratorAppSource.slice(
   configuratorAppSource.indexOf('function initKineticCursor()'),
@@ -286,6 +382,34 @@ assert.equal(
   '同步期間仍必須可關閉彈出式通知'
 );
 assert.equal(sidebarHtml.includes('側欄'), false, '控制臺內的使用者提示不應再稱為側欄');
+assert.equal(
+  sidebarHtml.includes("itemCount + ' 項行程'"),
+  false,
+  '控制臺課表來源摘要不應顯示行程數量'
+);
+['--field-label-gap', '--field-hint-gap', '--field-gap', '--field-group-gap'].forEach(token => {
+  assert.equal(sidebarHtml.includes(token), true, `控制臺應定義用途型間距 token ${token}`);
+});
+assert.match(
+  sidebarHtml,
+  /id="calendar-create"[\s\S]*?id="calendar-create-hint"[\s\S]*?<\/div>[\s\S]*?<\/div>/,
+  '日曆建立提示應收在建立日曆群組內'
+);
+[
+  ['calendar-name', 'calendar-create-hint'],
+  ['email', 'email-hint']
+].forEach(([controlId, hintId]) => {
+  assert.match(
+    sidebarHtml,
+    new RegExp(`id="${controlId}"[^>]*aria-describedby="${hintId}"`),
+    `控制項 ${controlId} 應與提示 ${hintId} 建立無障礙關聯`
+  );
+});
+assert.equal(
+  sidebarHtml.includes('data-notify-hour aria-describedby="notification-time-hint"'),
+  true,
+  '通知時間選單應與技術限制提示建立無障礙關聯'
+);
 assert.equal(sidebarHtml.includes('overscroll-behavior-y: auto'), true);
 assert.equal(sidebarHtml.includes('overscroll-behavior: contain'), false);
 assert.equal(sidebarHtml.includes('id="course-list-shell"'), true);
@@ -475,19 +599,19 @@ assert.equal(sidebarHtml.includes('<h2>課程與活動</h2>'), true);
     assert.equal(sidebarHtml.includes(obsoleteHeading), false);
   }
 );
-assert.equal(sidebarHtml.includes('輸入課程或活動名稱、班別等'), true);
+assert.equal(sidebarHtml.includes('輸入課程、活動名稱或班別等'), true);
 assert.equal(sidebarHtml.includes('學期間課程與活動'), true);
 assert.equal(sidebarHtml.includes('寒暑假期間課程與活動'), true);
 assert.equal(sidebarHtml.includes("renderCourseGroup('學期間課程'"), false);
 assert.equal(sidebarHtml.includes("renderCourseGroup('學期間活動'"), false);
 assert.equal(sidebarHtml.includes('<span>收通知的 Email</span>'), true);
 assert.equal(
-  sidebarHtml.includes('<small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small>'),
+  sidebarHtml.includes('<small class="hint field-hint" id="email-hint">為了讓程式能存取課綱，請輸入校內 Email</small>'),
   true
 );
 assert.equal(sidebarHtml.includes('<span>通知 Email</span>'), false);
 assert.equal(
-  sidebarHtml.includes('.field > span { color: var(--ink);'),
+  sidebarHtml.includes('.field > span { margin-bottom: var(--field-label-gap); color: var(--ink);'),
   true,
   '控制臺同層級欄位標題應使用近 #14211d 的系統深色'
 );
@@ -898,6 +1022,33 @@ assert.match(
   configuratorStylesSource,
   /#step-5\[data-transfer-mode="email"\] \.desktop-next-steps \{[\s\S]*?display: none;[\s\S]*?#step-5\[data-transfer-mode="email"\] \.mobile-next-steps \{[\s\S]*?display: block;/,
   '寄信模式只應顯示手機後續指引，不得顯示桌機母版連結'
+);
+['--heading-copy-gap', '--instruction-heading-gap', '--instruction-item-gap'].forEach(token => {
+  assert.equal(
+    configuratorStylesSource.includes(token),
+    true,
+    `第五步應使用用途型間距 token ${token}`
+  );
+});
+assert.match(
+  configuratorStylesSource,
+  /\.control-panel-card \.output-heading > div \{[\s\S]*?display: grid;[\s\S]*?gap: var\(--heading-copy-gap\);/,
+  '第五步標題與說明應由同一容器的 gap 統一排列'
+);
+assert.equal(
+  configuratorStylesSource.includes('margin-bottom: 33px;'),
+  false,
+  '第五步標題不得保留脫離共用間距網格的 33px 例外'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.control-panel-card \.next-steps \{[\s\S]*?display: grid;[\s\S]*?gap: var\(--instruction-heading-gap\);/,
+  '操作指引小標與內容應由群組 gap 統一控制'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.control-panel-card \.desktop-next-steps \{[\s\S]*?display: grid;[\s\S]*?gap: var\(--instruction-item-gap\);[\s\S]*?margin: 0;/,
+  '桌機操作指引內文間距應由單一 grid gap 控制'
 );
 assert.equal(
   configuratorStylesSource.includes(
@@ -1464,7 +1615,12 @@ assert.equal(
   '週六補課',
   '國定假日',
   '第一次模考',
-  '第二次模擬考'
+  '第二次模擬考',
+  '開學日',
+  '開學典禮',
+  '始業式',
+  '結業式',
+  '休業式'
 ].forEach(title => {
   assert.equal(
     scheduleData.isDefaultSelectedTitle(title),
@@ -1483,7 +1639,10 @@ const selectionOrderItems = similarityCatalogItems.concat([
   { title: '全校活動', period: 'term' },
   { title: '學習分享會', period: 'term' },
   { title: '第二次模擬考', period: 'term' },
-  { title: '中秋節放假', period: 'term' }
+  { title: '中秋節放假', period: 'term' },
+  { title: '開學典禮', period: 'term' },
+  { title: '結業式', period: 'term' },
+  { title: '休業式', period: 'term' }
 ]);
 const selectionOrder = scheduleData.sortCatalogItemsForSelection(selectionOrderItems)
   .map(item => item.title);
@@ -1520,22 +1679,29 @@ const naturalAdvancedCatalog = [
   { title: '自然進階(二)_化學', period: 'term' },
   { title: '自然進階(二)_生物', period: 'term' },
   { title: '自然進階(二)_物理', period: 'term' },
-  { title: '其他課程', period: 'term' }
+  { title: '其他課程', period: 'term' },
+  { title: '備註｜開放吉林六樓階梯教室自習。', period: 'term' }
 ];
 assert.equal(scheduleData.isCourseSelectionHidden('自然進階(二)'), true);
 assert.equal(scheduleData.isCourseSelectionHidden('自然進階(二)_化學'), false);
+assert.equal(scheduleData.isCourseSelectionHidden('備註｜開放吉林六樓階梯教室自習。'), true);
+assert.equal(
+  scheduleData.makeScheduleNoteTitle('備註|開放吉林六樓階梯教室自習。'),
+  '備註｜開放吉林六樓階梯教室自習。',
+  '備註標題前綴必須正規化且不重複累加'
+);
 assert.deepEqual(
   scheduleData.applyCourseSelectionRules(
     ['自然進階(二)_化學', '自然進階(二)_生物'],
     naturalAdvancedCatalog
   ),
-  ['自然進階(二)', '自然進階(二)_化學', '自然進階(二)_生物'],
-  '選擇任一自然進階分科時，設定必須自動包含共同事件'
+  ['自然進階(二)', '自然進階(二)_化學', '自然進階(二)_生物', '備註｜開放吉林六樓階梯教室自習。'],
+  '選擇任一自然進階分科時必須自動包含共同事件，並固定納入備註'
 );
 assert.deepEqual(
   scheduleData.applyCourseSelectionRules(['自然進階(二)'], naturalAdvancedCatalog),
-  [],
-  '自然進階共同事件不得成為可單獨保存的選項'
+  ['備註｜開放吉林六樓階梯教室自習。'],
+  '自然進階共同事件不得成為可單獨保存的選項，備註則必須固定納入'
 );
 
 const roundTripSetupCatalog = [
@@ -2245,7 +2411,7 @@ assert.deepEqual(
   selectionOrder,
   '設定網站與產生的 Code.gs 必須使用同一套預設置底與相似度排序'
 );
-['全校集會', '學習分享會', '補課日', '模擬考'].forEach(title => {
+['全校集會', '學習分享會', '補課日', '模擬考', '開學', '始業式', '結業式', '休業式'].forEach(title => {
   assert.equal(context.isDefaultSelectedTitle_(title), true);
 });
 assert.equal(context.isDefaultSelectedTitle_('國語文（三）'), false);
@@ -2254,8 +2420,8 @@ assert.deepEqual(
     ['自然進階(二)_物理'],
     naturalAdvancedCatalog
   )),
-  ['自然進階(二)', '自然進階(二)_物理'],
-  '控制臺後端必須再次補上自然進階共同事件'
+  ['自然進階(二)', '自然進階(二)_物理', '備註｜開放吉林六樓階梯教室自習。'],
+  '控制臺後端必須再次補上自然進階共同事件與所有備註'
 );
 const naturalAdvancedUiModel = context.buildSourceUiModel_({
   firstDateKey: '2026-08-31',
@@ -2274,6 +2440,11 @@ assert.equal(
   Array.from(naturalAdvancedUiModel.catalog.all, item => item.title).includes('自然進階(二)'),
   false,
   '控制臺課程選擇介面不得顯示自然進階共同事件'
+);
+assert.equal(
+  Array.from(naturalAdvancedUiModel.catalog.all, item => item.title).some(title => title.indexOf('備註｜') === 0),
+  false,
+  '控制臺課程選擇介面不得顯示備註行程'
 );
 
 const progressTestJob = { initialOperationCount: 100, processedOperations: 0 };
@@ -2811,8 +2982,13 @@ assert.equal(
   '節次行程與全天備註行程都不得有 type'
 );
 const neutralAllDayEvent = neutralRuntimeSummary.events.find(event => event.isAllDay);
-assert.equal(neutralAllDayEvent.originalTitle, '學習分享會');
+assert.equal(neutralAllDayEvent.originalTitle, '備註｜學習分享會');
 assert.equal(neutralAllDayEvent.location, '弘道基地');
+assert.equal(
+  neutralInstallerSummary.catalog.all.some(item => item.title === '備註｜學習分享會'),
+  true,
+  '設定網站目錄必須以專用前綴辨識備註行程'
+);
 
 const parsedOutlineIndex = context.parseCourseOutlineSourceIndexValues_([
   ['啟用', '來源組鍵', '課綱名稱', '年級', '適用起日', '適用迄日', '備註', '課綱試算表連結'],
@@ -5956,6 +6132,27 @@ assert.equal(
   false,
   '類似活動的行程也不得在 Calendar 標題加上分類前綴'
 );
+const scheduleNoteItem = Object.assign({}, makeBatchFixtureEvent(0), {
+  originalTitle: '備註｜開放吉林六樓階梯教室自習。',
+  isAllDay: true
+});
+const scheduleNoteEvent = context.createCalendarEvent_(
+  neutralTitleCalendar,
+  scheduleNoteItem,
+  context.makeOccurrenceKey_(scheduleNoteItem),
+  batchSettings
+);
+assert.equal(scheduleNoteEvent.isAllDayEvent(), true);
+assert.equal(scheduleNoteEvent.getTitle(), '備註｜開放吉林六樓階梯教室自習。');
+assert.equal(
+  context.shouldIncludeEvent_(scheduleNoteItem, {
+    selectedTitles: [],
+    excludedTitles: ['備註｜開放吉林六樓階梯教室自習。'],
+    pendingTitles: []
+  }),
+  true,
+  '備註行程不可被舊設定或隱藏的排除狀態漏掉'
+);
 const batchDesired = Array.from({ length: 422 }, (_, index) => makeBatchFixtureEvent(index));
 const batchCalendar = createMockCalendar();
 let batchState = {};
@@ -6333,8 +6530,8 @@ const naturalAdvancedSanitized = context.sanitizeSettingsInput_(
 );
 assert.deepEqual(
   Array.from(naturalAdvancedSanitized.selectedTitles),
-  ['自然進階(二)', '自然進階(二)_化學'],
-  '控制臺儲存時必須補上自然進階共同事件'
+  ['自然進階(二)', '自然進階(二)_化學', '備註｜開放吉林六樓階梯教室自習。'],
+  '控制臺儲存時必須補上自然進階共同事件與所有備註'
 );
 assert.equal(
   context.shouldIncludeEvent_(

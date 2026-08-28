@@ -9,5 +9,5 @@
 /outputs/
 /sync-success-email-preview.html
 
-# This project is build-free and does not use npm dependencies
-/package-lock.json
+# Local development dependencies
+/node_modules/

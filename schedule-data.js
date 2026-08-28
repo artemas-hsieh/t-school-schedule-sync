@@ -23,6 +23,7 @@
   const SOURCE_FETCH_RETRY_DELAY_MS = 750;
   const CATALOG_FINGERPRINT_VERSION = 3;
   const NATURAL_ADVANCED_BASE_TITLE = '自然進階(二)';
+  const SCHEDULE_NOTE_TITLE_PREFIX = '備註｜';
   const NATURAL_ADVANCED_VARIANT_TITLES = Object.freeze([
     '自然進階(二)_化學',
     '自然進階(二)_生物',
@@ -71,8 +72,19 @@
       .toLowerCase();
   }
 
+  function isScheduleNoteTitle(value) {
+    return normalizeTitle(value).startsWith(normalizeTitle(SCHEDULE_NOTE_TITLE_PREFIX));
+  }
+
+  function makeScheduleNoteTitle(value) {
+    const title = normalizeText(value);
+    const content = title.replace(/^備註[|｜]\s*/, '');
+    return content ? SCHEDULE_NOTE_TITLE_PREFIX + content : '';
+  }
+
   function isCourseSelectionHidden(value) {
-    return normalizeTitle(value) === normalizeTitle(NATURAL_ADVANCED_BASE_TITLE);
+    return normalizeTitle(value) === normalizeTitle(NATURAL_ADVANCED_BASE_TITLE) ||
+      isScheduleNoteTitle(value);
   }
 
   function applyCourseSelectionRules(selectedTitles, catalogItems) {
@@ -81,6 +93,10 @@
     const variantKeys = NATURAL_ADVANCED_VARIANT_TITLES.map(normalizeTitle);
     selectedKeys.delete(baseKey);
     if (variantKeys.some(key => selectedKeys.has(key))) selectedKeys.add(baseKey);
+    (catalogItems || []).forEach(item => {
+      const title = typeof item === 'string' ? item : item && item.title;
+      if (isScheduleNoteTitle(title)) selectedKeys.add(normalizeTitle(title));
+    });
     return (catalogItems || [])
       .map(item => typeof item === 'string' ? item : item && item.title)
       .filter(title => title && selectedKeys.has(normalizeTitle(title)));
@@ -91,7 +107,8 @@
   function isDefaultSelectedTitle(value) {
     const title = normalizeTitle(value);
 
-    return /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
+    return isScheduleNoteTitle(title) ||
+      /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|開學|始業式|結業式|休業式|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
   }
 
   function compareCanonicalStrings(left, right) {
@@ -547,21 +564,24 @@
         return;
       }
 
-      row.cells.forEach(cell => {
+      const isNoteRow = normalizeTitle(row.cells[1] && row.cells[1].value) === '備註';
+      row.cells.forEach((cell, cellIndex) => {
+        if (isNoteRow && cellIndex < 2) return;
         splitCellEntries(cell && cell.value).forEach(rawEntry => {
           if (isStructuralValue(rawEntry)) {
             return;
           }
 
           const parsed = parseEntry(rawEntry);
-          const key = normalizeTitle(parsed.title);
+          const title = isNoteRow ? makeScheduleNoteTitle(parsed.title) : parsed.title;
+          const key = normalizeTitle(title);
 
           if (!key) {
             return;
           }
 
           const existing = byKey.get(key) || {
-            title: parsed.title,
+            title,
             hasVacationOccurrence: false
           };
           existing.hasVacationOccurrence =
@@ -804,6 +824,9 @@
     normalizeTitle,
     NATURAL_ADVANCED_BASE_TITLE,
     NATURAL_ADVANCED_VARIANT_TITLES,
+    SCHEDULE_NOTE_TITLE_PREFIX,
+    isScheduleNoteTitle,
+    makeScheduleNoteTitle,
     isCourseSelectionHidden,
     applyCourseSelectionRules,
     isDefaultSelectedTitle,

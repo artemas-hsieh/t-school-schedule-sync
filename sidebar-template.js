@@ -31,6 +31,10 @@
       --space-5: 20px;
       --space-6: 24px;
       --space-7: 32px;
+      --field-label-gap: var(--space-2);
+      --field-hint-gap: var(--space-1);
+      --field-gap: var(--space-3);
+      --field-group-gap: var(--space-4);
       --section-gap: var(--space-7);
       --section-content-gap: var(--space-4);
       --chrome-line: #B7C6BF;
@@ -177,10 +181,11 @@
     .grade-source-health { margin-top: var(--space-4); }
     .choice input, .hour input, .switch input { position: absolute; opacity: 0; pointer-events: none; }
 
-    .field { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+    .field { display: grid; gap: 0; margin-top: var(--field-gap); }
     .section-head + .field,
     .section-head + .calendar-picker > .field:first-child { margin-top: 0; }
-    .field > span { color: var(--ink); font-size: 11px; font-weight: 640; line-height: 16px; }
+    .field > span { margin-bottom: var(--field-label-gap); color: var(--ink); font-size: 11px; font-weight: 640; line-height: 16px; }
+    .field > .field-hint { margin-top: var(--field-hint-gap); }
     input[type="text"], input[type="email"], input[type="search"], select {
       width: 100%;
       min-height: 44px;
@@ -296,11 +301,12 @@
     .pending-actions .keep { background: var(--ink); color: var(--paper-bright); }
     .pending-actions .remove { border-color: var(--shift); background: var(--paper-bright); color: var(--error); }
 
-    .calendar-picker { display: grid; gap: var(--space-3); }
+    .calendar-picker { display: grid; gap: var(--field-gap); }
     .calendar-create {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: var(--space-2);
+      column-gap: var(--space-2);
+      row-gap: var(--field-hint-gap);
       align-items: end;
       padding: var(--space-3);
       border: 1px solid var(--line);
@@ -309,6 +315,7 @@
       background: var(--surface-green);
     }
     .calendar-create .field { margin-top: 0; }
+    .calendar-create > .field-hint { grid-column: 1 / -1; }
     .calendar-create .small-button { min-width: 76px; padding-inline: var(--space-3); }
 
     .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
@@ -539,11 +546,11 @@
         <div class="calendar-picker">
           <label class="field"><span>同步目標日曆</span><select id="calendar"></select></label>
           <div class="calendar-create" id="calendar-create">
-            <label class="field"><span>新日曆名稱</span><input type="text" id="calendar-name" maxlength="100" autocomplete="off"></label>
+            <label class="field"><span>新日曆名稱</span><input type="text" id="calendar-name" maxlength="100" autocomplete="off" aria-describedby="calendar-create-hint"></label>
             <button type="button" class="small-button" id="create-calendar">建立日曆</button>
+            <p class="hint field-hint" id="calendar-create-hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆。</p>
           </div>
         </div>
-        <p class="hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆。</p>
         <label class="field"><span>行程提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
         <label class="field" id="reminder-wrap" hidden><span>提前時間</span><select id="reminder-minutes"><option value="10">10 分鐘</option><option value="30">30 分鐘</option><option value="60">1 小時</option><option value="1440">1 天</option></select></label>
       </section>
@@ -570,7 +577,7 @@
       <section class="section" id="course-section">
         <div class="section-head"><h2>課程與活動</h2><span id="course-count">已選 0 項</span></div>
         <div class="course-toolbar">
-          <input type="search" id="course-search" placeholder="輸入課程或活動名稱、班別等" aria-label="搜尋課程與活動">
+          <input type="search" id="course-search" placeholder="輸入課程、活動名稱或班別等" aria-label="搜尋課程與活動">
           <button type="button" class="icon-button" id="course-search-action" aria-label="搜尋課程與活動">⌕</button>
         </div>
         <div class="course-list-shell" id="course-list-shell" data-can-scroll-up="false" data-can-scroll-down="false">
@@ -588,9 +595,9 @@
         <div class="field notification-time-field" id="notification-time-field">
           <span>通知時間</span>
           <div class="notification-time-list" id="notify-hours-list" aria-label="通知時間"></div>
-          <p class="hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動～</p>
+          <p class="hint field-hint" id="notification-time-hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動～</p>
         </div>
-        <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email"><small class="hint">為了讓程式能存取課綱，請輸入校內 Email</small></label>
+        <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email" aria-describedby="email-hint"><small class="hint field-hint" id="email-hint">為了讓程式能存取課綱，請輸入校內 Email</small></label>
         <button type="button" class="reimport-setup" id="reimport-setup">重新匯入網站設定碼</button>
       </section>
 
@@ -631,16 +638,21 @@
       var initialLoadRetryTimer = null;
       var INITIAL_LOAD_RETRY_DELAY_MS = 1500;
       var NATURAL_ADVANCED_BASE_TITLE = '自然進階(二)';
+      var SCHEDULE_NOTE_TITLE_PREFIX = '備註｜';
 
       function byId(id) { return document.getElementById(id); }
       function escapeHtml(value) { return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
       function normalize(value) { return String(value || '').replace(/\s+/g, '').toLowerCase(); }
       function isCourseSelectionHidden(value) {
-        return normalize(value) === normalize(NATURAL_ADVANCED_BASE_TITLE);
+        var title = normalize(value);
+        return title === normalize(NATURAL_ADVANCED_BASE_TITLE) ||
+          title.indexOf(normalize(SCHEDULE_NOTE_TITLE_PREFIX)) === 0;
       }
       function defaultCalendarName(gradeName) { return (gradeName || '高一') + '行程｜T-SCHOOL Schedule Sync'; }
       function isDefaultSelectedTitle(value) {
-        return /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(normalize(value));
+        var title = normalize(value);
+        return title.indexOf(normalize(SCHEDULE_NOTE_TITLE_PREFIX)) === 0 ||
+          /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|開學|始業式|結業式|休業式|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
       }
       function seedDefaultSelections(source) {
         var catalog = source && source.catalog || {};
@@ -915,15 +927,12 @@
           ? source.gradeName + '課表來源暫時無法連線'
           : source.gradeName + '課表可用';
         var dateRange = source.firstDate
-          ? source.firstDate + (source.lastDate ? '–' + source.lastDate : '') + ' · '
+          ? source.firstDate + (source.lastDate ? '–' + source.lastDate : '')
           : '';
-        var catalog = source.catalog || {};
-        var itemCount = (catalog.termItems || []).length + (catalog.vacationItems || []).length;
-        var summary = dateRange + itemCount + ' 項行程';
         byId('source-detail').textContent = source.unavailable
           ? (source.unavailableMessage || '目前顯示上次可用摘要，恢復連線後才能儲存或同步。') +
-            (summary ? ' ' + summary : '')
-          : summary;
+            (dateRange ? ' ' + dateRange : '')
+          : dateRange;
       }
 
       function normalizeNotifyHours(hours) {
@@ -958,7 +967,7 @@
         byId('notify-hours-list').insertAdjacentHTML('beforeend',
           '<div class="notification-time-row">' +
             '<label><span class="visually-hidden">通知時間 ' + (index + 1) + '</span>' +
-              '<select data-notify-hour>' + options + '</select></label>' +
+              '<select data-notify-hour aria-describedby="notification-time-hint">' + options + '</select></label>' +
             '<button type="button" class="icon-button notification-time-action ' +
               (index === 0 ? 'is-add' : 'is-remove') + '" ' +
               (index === 0 ? 'data-add-notify-hour' : 'data-remove-notify-hour') +

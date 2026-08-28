@@ -81,6 +81,15 @@ Google Docs 上方的「T-SCHOOL Schedule Sync」選單提供：
 
 ## 開發者：產生母版 Apps Script
 
+本機開發網站時，先安裝開發依賴，再啟動即時預覽：
+
+```bash
+npm install
+npm run dev
+```
+
+預設開啟 `http://127.0.0.1:5173/`；修改 HTML、CSS 或 JavaScript 後，瀏覽器會自動更新。本機開發伺服器會加入 Vite HMR 所需的 WebSocket 權限，但不會改寫原始 `index.html` 的正式 CSP。Vite 只是本機開發依賴，正式網站仍直接使用根目錄的靜態檔案，不需要 `npm run build` 才能發布。
+
 通用母版程式由無外部依賴的 Node 工具產生。Email manifest 必須使用已發布且固定到 40 字元 commit 的 raw GitHub URL；未提供時 production artifact 不會產生。
 
 ```bash

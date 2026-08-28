@@ -16,7 +16,7 @@
   </style>
   <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
   <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
-  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260824-01">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260828-01">
   <script>
     (function () {
       var stylesheet = document.getElementById('app-stylesheet');
@@ -170,7 +170,7 @@
 
             <div class="search-control" role="search">
               <label class="visually-hidden" for="course-search">搜尋課程與活動</label>
-              <input id="course-search" type="search" placeholder="輸入課程或活動名稱、班別等">
+              <input id="course-search" type="search" placeholder="輸入課程、活動名稱或班別等">
               <button type="button" class="icon-button search-submit" id="course-search-submit" aria-label="搜尋課程與活動" data-cursor-label="搜尋">
                 <img src="assets/icon-search.svg" alt="" id="course-search-icon">
               </button>
@@ -266,9 +266,9 @@
             <section class="next-steps" aria-labelledby="steps-title">
               <h3 id="steps-title">接下來怎麼做</h3>
               <ol class="desktop-next-steps">
-                <li><button type="button" class="desktop-step-copy-button" id="copy-setup-code-step" data-cursor-label="複製設定碼" aria-live="polite">複製設定碼</button></li>
+                <li><a class="desktop-step-link is-disabled" id="copy-setup-code-step" href="#code-window" aria-disabled="true" data-cursor-label="複製設定碼" aria-live="polite">複製設定碼</a></li>
                 <li>登入 <span class="output-email" id="output-email">---@---.---</span></li>
-                <li>開啟<a class="docs-template-link is-disabled" id="docs-template-link" href="#" aria-disabled="true" data-cursor-label="Google Docs 母版準備中">行程同步控制臺母版</a>，並建立副本</li>
+                <li>開啟<a class="desktop-step-link docs-template-link is-disabled" id="docs-template-link" href="#" aria-disabled="true" data-cursor-label="Google Docs 母版準備中">行程同步控制臺母版</a>，並建立副本</li>
                 <li>依母版畫面指引完成設定！</li>
               </ol>
               <p class="mobile-next-steps">在電腦上收信，依照信中指引完成後續操作</p>

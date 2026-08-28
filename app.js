@@ -150,8 +150,6 @@ const elements = {
   stageMenuTrigger: document.querySelector('#stage-menu-trigger'),
   stageMenuPanel: document.querySelector('#stage-menu-panel'),
   stageMenuItems: Array.from(document.querySelectorAll('#stage-menu-panel [data-step-target]')),
-  codeWindow: document.querySelector('#code-window'),
-  fullCodeToggle: document.querySelector('#full-code-toggle'),
   docsTemplateLink: document.querySelector('#docs-template-link')
 };
 
@@ -280,12 +278,32 @@ function configureDocsTemplateLink() {
   elements.docsTemplateLink.dataset.cursorLabel = '開啟控制臺母版';
 }
 
+function shouldOfferEmailSetupTransferForCapabilities(capabilities = {}) {
+  const {
+    userAgentDataMobile = false,
+    userAgent = '',
+    platform = '',
+    maxTouchPoints = 0,
+    primaryPointerCoarse = false,
+    anyPointerFine = false
+  } = capabilities;
+  const mobileUserAgent = /Android|iPhone|iPad|iPod/i.test(userAgent);
+  const iPadDesktopBrowser = maxTouchPoints > 1 &&
+    (/Macintosh/i.test(userAgent) || /MacIntel/i.test(platform));
+  const coarseOnlyPointer = primaryPointerCoarse && !anyPointerFine;
+
+  return userAgentDataMobile || mobileUserAgent || iPadDesktopBrowser || coarseOnlyPointer;
+}
+
 function shouldOfferEmailSetupTransfer() {
-  const userAgentDataMobile = navigator.userAgentData?.mobile === true;
-  const mobileUserAgent = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-  const coarseOnlyPointer = window.matchMedia('(pointer: coarse)').matches &&
-    !window.matchMedia('(any-pointer: fine)').matches;
-  return userAgentDataMobile || mobileUserAgent || coarseOnlyPointer;
+  return shouldOfferEmailSetupTransferForCapabilities({
+    userAgentDataMobile: navigator.userAgentData?.mobile === true,
+    userAgent: navigator.userAgent || '',
+    platform: navigator.platform || '',
+    maxTouchPoints: navigator.maxTouchPoints || 0,
+    primaryPointerCoarse: window.matchMedia('(pointer: coarse)').matches,
+    anyPointerFine: window.matchMedia('(any-pointer: fine)').matches
+  });
 }
 
 function configureSetupCodeTransfer() {
@@ -383,7 +401,11 @@ function bindEvents() {
     elements.copyCode.dataset.cursorLabel || '複製設定碼';
 
   elements.copyCode.addEventListener('click', handlePrimarySetupCodeAction);
-  elements.copyCodeStep?.addEventListener('click', copyGeneratedCode);
+  elements.copyCodeStep?.addEventListener('click', event => {
+    event.preventDefault();
+    if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
+    copyGeneratedCode(event);
+  });
 
   elements.sourceRefresh.addEventListener('click', () => {
     const grade = getCurrentGrade();
@@ -506,30 +528,6 @@ function renderSourceStatus() {
   elements.sourceStatus.dataset.state = 'success';
   elements.sourceStatusTitle.textContent = `${getCurrentGrade()}課表可用`;
   elements.sourceStatusDetail.textContent = '系統將整理出對應的課程與活動給你選擇';
-}
-
-function initMobileOutput() {
-  const button = document.getElementById('mobile-output-toggle');
-
-  if (button) {
-    button.setAttribute('aria-expanded', 'true');
-    button.setAttribute('aria-label', '收合設定碼');
-  }
-}
-
-function bindMobileOutputToggle() {
-  const button = document.getElementById('mobile-output-toggle');
-
-  if (!button) {
-    return;
-  }
-
-  button.addEventListener('click', () => {
-    const pane = document.querySelector('.output-pane');
-    const collapsed = pane.classList.toggle('mobile-collapsed');
-    button.setAttribute('aria-expanded', String(!collapsed));
-    button.setAttribute('aria-label', collapsed ? '展開設定碼' : '收合設定碼');
-  });
 }
 
 function setupValidation() {
@@ -1037,7 +1035,12 @@ function updateGeneratedCodeAvailability(sourceReady) {
   const enabled = Boolean(sourceReady && state.generatedCodeReady);
   elements.copyCode.disabled = !enabled;
   if (elements.copyCodeStep) {
-    elements.copyCodeStep.disabled = !enabled;
+    elements.copyCodeStep.classList.toggle('is-disabled', !enabled);
+    if (enabled) {
+      elements.copyCodeStep.removeAttribute('aria-disabled');
+    } else {
+      elements.copyCodeStep.setAttribute('aria-disabled', 'true');
+    }
   }
 }
 
@@ -1259,7 +1262,6 @@ function initVisualExperience() {
   initHeroDepthInteraction();
   initProgressiveBlurLayers();
   initStepJourney();
-  initCodeDisclosure();
   initKineticCursor();
 }
 
@@ -2142,9 +2144,9 @@ function initStepJourney() {
       confirmed: '再檢查一遍確認沒問題 ↵'
     },
     3: {
-      initial: 'Email 和通知時間都沒錯 ↵',
+      initial: 'Email 和通知偏好都沒錯 ↵',
       correction: '修正 Email ↵',
-      confirmed: 'Email 和通知時間都沒錯 ↵'
+      confirmed: 'Email 和通知偏好都沒錯 ↵'
     },
     4: {
       initial: '產生安裝設定碼 ↵',
@@ -3476,24 +3478,6 @@ function initStepJourney() {
 
   setActiveStep(1);
   updateFromScroll();
-}
-
-function initCodeDisclosure() {
-  if (!elements.fullCodeToggle || !elements.codeWindow) {
-    return;
-  }
-
-  elements.fullCodeToggle.addEventListener('click', () => {
-    const expanded = elements.codeWindow.classList.toggle('is-expanded');
-    const label = expanded ? '收合完整設定碼' : '查看完整設定碼';
-    elements.fullCodeToggle.textContent = label;
-    elements.fullCodeToggle.dataset.cursorLabel = label;
-    elements.fullCodeToggle.setAttribute('aria-expanded', String(expanded));
-
-    if (!expanded) {
-      elements.generatedCode.scrollTop = 0;
-    }
-  });
 }
 
 function renderSettingsSummary() {
