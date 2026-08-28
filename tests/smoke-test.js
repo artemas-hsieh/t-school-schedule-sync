@@ -236,6 +236,55 @@ assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
 assert.equal(sidebarHtml.includes('function pollSyncProgress(generation)'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress-warning"'), true);
 assert.equal(sidebarHtml.includes('請勿現在關閉控制臺！'), true);
+assert.equal(sidebarHtml.includes('id="stop-sync" role="menuitem">停止同步</button>'), true);
+assert.equal(
+  sidebarHtml.includes('id="remove-managed-events" role="menuitem">移除受管理事件</button>'),
+  true
+);
+assert.equal(sidebarHtml.includes("runAction('stopAutoSyncFromUi'"), true);
+assert.equal(sidebarHtml.includes("runAction('removeManagedEventsFromUi'"), true);
+assert.equal(
+  sidebarHtml.includes('已開始的背景同步仍會完成。既有事件會保留。是否繼續？'),
+  true
+);
+assert.equal(
+  sidebarHtml.includes('若自動同步仍開啟，後續可能重新建立這些事件。是否繼續？'),
+  true
+);
+assert.equal(sidebarHtml.includes('現在可以關閉控制臺'), true);
+assert.match(
+  sidebarHtml,
+  /if \(result\.pending\)[\s\S]*?setBusy\(true, '同步已在背景分批執行；現在可以關閉控制臺', true, false\);/,
+  '只有後端回報 pending 後才能把當前同步標示為可關閉'
+);
+assert.match(
+  sidebarHtml,
+  /\['running', 'queued', 'retry_pending'\][\s\S]*?setBusy\(true, '背景同步仍在執行；現在可以關閉控制臺', true, false\);/,
+  '重新開啟控制臺時，已持久化的背景工作應標示為可關閉'
+);
+assert.match(
+  sidebarHtml,
+  /\.sync-progress-warning\[data-safe-to-close="true"\] \{ color: var\(--sync-dark\); \}/,
+  '可安全關閉時應使用既有深綠色票'
+);
+assert.equal(sidebarHtml.includes('id="toast-close" aria-label="關閉通知"'), true);
+assert.equal(sidebarHtml.includes('class="toast" id="toast" hidden'), true);
+assert.equal(sidebarHtml.includes('showToast.timer'), false, '彈出式通知不得自動消失');
+assert.equal(
+  sidebarHtml.includes("byId('toast-close').addEventListener('click', dismissToast)"),
+  true,
+  '彈出式通知必須由使用者手動關閉'
+);
+assert.match(
+  sidebarHtml,
+  /byId\('toast-close'\)\.addEventListener\('keydown',[\s\S]*?event\.key !== 'Enter'[\s\S]*?event\.key !== ' '/,
+  '彈出式通知必須可用 Enter 或空白鍵關閉'
+);
+assert.equal(
+  sidebarHtml.includes("document.querySelectorAll('button:not(#toast-close)')"),
+  true,
+  '同步期間仍必須可關閉彈出式通知'
+);
 assert.equal(sidebarHtml.includes('側欄'), false, '控制臺內的使用者提示不應再稱為側欄');
 assert.equal(sidebarHtml.includes('overscroll-behavior-y: auto'), true);
 assert.equal(sidebarHtml.includes('overscroll-behavior: contain'), false);
@@ -1734,8 +1783,30 @@ assert.match(
 );
 assert.match(
   generatedCode,
-  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?findRecoverableDedicatedCalendars_\(calendarName\)[\s\S]*?setDescription\(MANAGED_CALENDAR_DESCRIPTION\)/,
+  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?findRecoverableDedicatedCalendars_\(calendarName\)[\s\S]*?settings\.calendarId = recoverableCalendars\[0\]\.getId\(\)[\s\S]*?return recoverableCalendars\[0\]/,
   '日曆已建立但 Calendar ID 尚未保存時，下次必須接回同一個受管理日曆'
+);
+assert.equal(
+  generatedCode.includes("const MANAGED_CALENDAR_COLOR = '#05a576';"),
+  true
+);
+assert.match(
+  generatedCode,
+  /function applyNewManagedCalendarPresentation_\(calendar\)[\s\S]*?calendar\.setColor\(MANAGED_CALENDAR_COLOR\)/,
+  '新建立的受管理行事曆應套用指定主題色'
+);
+assert.match(
+  generatedCode,
+  /function createDedicatedCalendarForUi\(input\)[\s\S]*?CalendarApp\.createCalendar[\s\S]*?applyNewManagedCalendarPresentation_\(calendar\)/,
+  '控制臺建立的新行事曆應套用受管理行事曆外觀'
+);
+assert.doesNotMatch(
+  generatedCode.slice(
+    generatedCode.indexOf('function listOwnedCalendars_('),
+    generatedCode.indexOf('function buildDedicatedCalendarName_(')
+  ),
+  /setColor\(/,
+  '列出或選取使用者既有行事曆時不得改色'
 );
 assert.equal(generatedCode.includes('function previewSettingsImpactFromUi('), true);
 assert.equal(generatedCode.includes('function showSettingsSidebar('), true);
@@ -1800,6 +1871,16 @@ assert.doesNotMatch(
 const quickDeleteFunctionSource = generatedCode.slice(
   generatedCode.indexOf('function quickDeleteSyncedCalendarEvents()'),
   generatedCode.indexOf('function removeManagedEventsFromCalendar_(')
+);
+assert.match(
+  generatedCode,
+  /function stopAutoSyncFromUi\(\)[\s\S]*?LockService\.getScriptLock\(\)[\s\S]*?settings\.autoSyncEnabled = false[\s\S]*?refreshAutoSyncTriggers_\(settings\)/,
+  '控制臺停止同步必須在鎖內保存停用狀態並移除後續排程'
+);
+assert.match(
+  generatedCode,
+  /function removeManagedEventsFromUi\(\)[\s\S]*?quickDeleteSyncedCalendarEvents\(\)[\s\S]*?eventCount: 0/,
+  '控制臺移除功能必須沿用受管理事件安全刪除並更新摘要'
 );
 assert.match(quickDeleteFunctionSource, /LockService\.getScriptLock\(\)/);
 assert.match(quickDeleteFunctionSource, /tryLock\(15000\)/);
@@ -1958,6 +2039,11 @@ assert.equal(
   true,
   '同步進度應分開準備、Calendar 操作與收尾區間，並限制進度寫入頻率'
 );
+assert.equal(
+  generatedCode.includes('本次同步已達安全執行時長上限，後續將自動從批次存檔點繼續'),
+  true
+);
+assert.equal(generatedCode.includes('本批已達安全時間上限'), false);
 const finalizeSyncJobSource = generatedCode.slice(
   generatedCode.indexOf('function finalizeSyncJob_('),
   generatedCode.indexOf('function handleSyncJobFailure_(')
@@ -3162,15 +3248,75 @@ assert.equal(
   '垂直合併的單元主題應向下套用到合併範圍內每一筆課程'
 );
 
-assert.throws(
-  () => context.parseCourseOutlineSheetValues_(
-    [['日期', '節次', '課程內容'], ['7/27', '1', '內容']],
-    '缺欄位課程',
-    [],
-    { sourceSetKey: 'test', spreadsheetId: 'test', spreadsheetName: 'test' }
-  ),
-  /找不到必要欄位/
+const parsedPartialOutline = context.parseCourseOutlineSheetValues_(
+  [['日期', '節次', '課程內容'], ['7/27', '1', '只有內容']],
+  '部分欄位課程',
+  [{ originalTitle: '部分欄位課程', dateKey: '2026-07-27', periodStart: 1, periodEnd: 1 }],
+  { sourceSetKey: 'test', spreadsheetId: 'test', spreadsheetName: 'test' }
 );
+assert.equal(parsedPartialOutline.records.length, 1);
+assert.equal(parsedPartialOutline.records[0].classroom, '');
+assert.equal(parsedPartialOutline.records[0].topic, '');
+assert.equal(parsedPartialOutline.records[0].content, '只有內容');
+assert.equal(parsedPartialOutline.issue, '');
+
+const unmappableOutline = context.parseCourseOutlineSheetValues_(
+  [['課程內容'], ['無日期與節次']],
+  '無法定位課程',
+  [{ originalTitle: '無法定位課程', dateKey: '2026-07-27', periodStart: 1, periodEnd: 1 }],
+  { sourceSetKey: 'test', spreadsheetId: 'test', spreadsheetName: 'test' }
+);
+assert.equal(unmappableOutline.records.length, 0);
+assert.match(unmappableOutline.issue, /日期或節次/);
+
+const readMetadataBeforeIsolationTest = context.readSheetsWorkbookMetadata_;
+const readValuesBeforeIsolationTest = context.readSheetsDisplayValues_;
+context.readSheetsWorkbookMetadata_ = function () {
+  return {
+    properties: { title: '容錯課綱' },
+    sheets: [
+      { properties: { title: '可讀課程' }, merges: [] },
+      { properties: { title: '缺欄課程' }, merges: [] }
+    ]
+  };
+};
+context.readSheetsDisplayValues_ = function () {
+  return {
+    '可讀課程': [
+      ['日期', '節次', '單元主題'],
+      ['7/27', '1', '正常主題']
+    ],
+    '缺欄課程': [
+      ['課程內容'],
+      ['無法定位']
+    ]
+  };
+};
+const isolatedOutlineSnapshot = context.collectCourseOutlineSnapshot_(
+  { gradeName: '高二' },
+  { termKey: '二年級|2026-2' },
+  [
+    { originalTitle: '可讀課程', dateKey: '2026-07-27', periodStart: 1, periodEnd: 1, isAllDay: false },
+    { originalTitle: '缺欄課程', dateKey: '2026-07-27', periodStart: 2, periodEnd: 2, isAllDay: false }
+  ],
+  [{
+    key: 'test-set',
+    label: '測試來源',
+    validFrom: '2026-07-01',
+    validUntil: '2026-07-31',
+    spreadsheetIds: ['test-sheet']
+  }]
+);
+assert.equal(Object.keys(isolatedOutlineSnapshot.lookup).length, 1);
+assert.equal(isolatedOutlineSnapshot.diagnostics.matchedRecordCount, 1);
+assert.equal(isolatedOutlineSnapshot.diagnostics.unavailableItemCount, 1);
+assert.deepEqual(
+  Array.from(isolatedOutlineSnapshot.diagnostics.unavailableItemNames),
+  ['缺欄課程'],
+  '單一分頁無法定位時，其他課程的正確課綱仍應發布'
+);
+context.readSheetsWorkbookMetadata_ = readMetadataBeforeIsolationTest;
+context.readSheetsDisplayValues_ = readValuesBeforeIsolationTest;
 
 const outlineSettings = {
   descriptionPreset: 'standard',
@@ -6831,19 +6977,27 @@ assert.equal(
   '混合式主題',
   '自然進階分科事件必須取得共同分頁課綱，且快照保留分科事件原名'
 );
+const conflictingOutlineValues = outlineValues.map(row => row.slice());
+conflictingOutlineValues[3][6] = '互相衝突的主題';
 outlineWorkbookSheets = Object.assign({}, outlineWorkbookSheets, {
   [configuredHigh2OutlineSet.spreadsheetIds[0]]: [makeOutlineSheet('測試課程', outlineValues)],
-  [configuredHigh2OutlineSet.spreadsheetIds[1]]: [makeOutlineSheet('測 試 課 程', outlineValues)]
+  [configuredHigh2OutlineSet.spreadsheetIds[1]]: [makeOutlineSheet('測 試 課 程', conflictingOutlineValues)]
 });
-assert.throws(
-  () => context.collectCourseOutlineSnapshot_(
-    { gradeName: '高二' },
-    { termKey: '二年級|2026-02-23' },
-    [Object.assign({}, outlineBaseItem)],
-    [configuredHigh2OutlineSet]
-  ),
-  /課綱資料重複/,
-  '正規化後相同的分頁、日期與節次在兩個來源同時命中時不得任選'
+const conflictingOutlineSnapshot = context.collectCourseOutlineSnapshot_(
+  { gradeName: '高二' },
+  { termKey: '二年級|2026-02-23' },
+  [Object.assign({}, outlineBaseItem)],
+  [configuredHigh2OutlineSet]
+);
+assert.equal(
+  Object.keys(conflictingOutlineSnapshot.lookup).length,
+  0,
+  '正規化後相同的分頁、日期與節次出現衝突時，該筆不得任選'
+);
+assert.equal(
+  conflictingOutlineSnapshot.diagnostics.unavailableItemCount,
+  1,
+  '重複衝突只應隔離受影響課程，不得讓整批課綱失敗'
 );
 
 const high2OutlineSets = context.getRelevantCourseOutlineSourceSets_('高二', [{
@@ -7218,8 +7372,16 @@ const firstFailureRun = {
   lastError: '',
   lastSuccessAt: ''
 };
+function makeOutlineFailureError(message, unavailableItemCount) {
+  const error = new Error(message);
+  error.courseOutlineUnavailableItemCount = unavailableItemCount;
+  return error;
+}
 context.saveCourseOutlineState_(firstFailureRun);
-context.handleCourseOutlineRefreshFailure_(firstFailureRun, new Error('第一次失敗'));
+context.handleCourseOutlineRefreshFailure_(
+  firstFailureRun,
+  makeOutlineFailureError('第一次失敗', 4)
+);
 let outlineFailureState = context.loadCourseOutlineState_();
 assert.equal(outlineFailureState.status, 'retry_pending');
 assert.equal(sentOutlineFailureEmails, 0, '第一次課綱失敗不得寄信');
@@ -7237,12 +7399,15 @@ const secondFailureRun = Object.assign({}, outlineFailureState, {
   retryTriggerId: ''
 });
 context.saveCourseOutlineState_(secondFailureRun);
-context.handleCourseOutlineRefreshFailure_(secondFailureRun, new Error('第二次失敗'));
+context.handleCourseOutlineRefreshFailure_(
+  secondFailureRun,
+  makeOutlineFailureError('第二次失敗', 4)
+);
 outlineFailureState = context.loadCourseOutlineState_();
 assert.equal(outlineFailureState.status, 'failed');
-assert.equal(sentOutlineFailureEmails, 1, '第二次課綱失敗應寄信一次');
-assert.match(sentEmailMessages.at(-1).body, /課綱已嘗試兩次仍無法更新/);
-assert.match(sentEmailMessages.at(-1).subject, /課綱更新失敗/);
+assert.equal(sentOutlineFailureEmails, 1, '超過三項的課綱在第二次失敗後應寄信一次');
+assert.match(sentEmailMessages.at(-1).body, /有 4 項課程或活動/);
+assert.match(sentEmailMessages.at(-1).subject, /部分課綱無法更新/);
 assert.match(sentEmailMessages.at(-1).htmlBody, /課綱更新失敗/);
 assert.notEqual(outlineFailureState.failureNotifiedAt, '');
 
@@ -7253,8 +7418,43 @@ const repeatedFailureRun = Object.assign({}, outlineFailureState, {
   startedAt: new Date().toISOString()
 });
 context.saveCourseOutlineState_(repeatedFailureRun);
-context.handleCourseOutlineRefreshFailure_(repeatedFailureRun, new Error('相同事故再次失敗'));
+context.handleCourseOutlineRefreshFailure_(
+  repeatedFailureRun,
+  makeOutlineFailureError('相同事故再次失敗', 4)
+);
 assert.equal(sentOutlineFailureEmails, 1, '相同課綱事故不得重複寄信');
+
+projectTriggers = projectTriggers.filter(trigger =>
+  trigger.getHandlerFunction() !== 'retryCourseOutlineRefresh'
+);
+const smallFailureRun = Object.assign({}, firstFailureRun, {
+  incidentId: 'small-outline-incident',
+  runId: 'small-outline-run-1'
+});
+context.saveCourseOutlineState_(smallFailureRun);
+context.handleCourseOutlineRefreshFailure_(
+  smallFailureRun,
+  makeOutlineFailureError('少量課綱第一次失敗', 3)
+);
+const smallRetryState = context.loadCourseOutlineState_();
+const smallSecondFailureRun = Object.assign({}, smallRetryState, {
+  status: 'running',
+  attempt: 2,
+  runId: 'small-outline-run-2',
+  startedAt: new Date().toISOString(),
+  retryTriggerId: ''
+});
+context.saveCourseOutlineState_(smallSecondFailureRun);
+context.handleCourseOutlineRefreshFailure_(
+  smallSecondFailureRun,
+  makeOutlineFailureError('少量課綱第二次失敗', 3)
+);
+assert.equal(
+  sentOutlineFailureEmails,
+  1,
+  '無法讀取的課程或活動不超過三項時不得寄送課綱錯誤提醒'
+);
+assert.equal(context.loadCourseOutlineState_().notificationPending, false);
 
 const fixtures = [
   { grade: '高一', file: '/tmp/tschool-requirements-grade1.json' },

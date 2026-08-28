@@ -103,7 +103,7 @@ node scripts/generate-google-docs-control-panel.js \
 - 第一次暫時失敗或硬逾時只重試；連續第二次才停止並寄信。
 - Active job 期間來源、設定、Calendar 或課綱版本改變時，會由已提交狀態重新規劃。
 - 不會寫入主要 Calendar。
-- 控制臺手動建立與首次同步自動建立的專用 Calendar 都使用 `selected: true`，使其預設顯示在 Google Calendar 介面中。
+- 控制臺手動建立與首次同步自動建立的專用 Calendar 都使用 `selected: true` 並在建立當下套用 `#05a576`；選取使用者既有 Calendar 的路徑不得呼叫 `setColor()`。
 - 一般同步不會無故覆蓋來源未變時的使用者手動修改。
 - 可疑大量刪除會停止自動執行。
 - 刪除工具只處理受管理事件。
@@ -126,7 +126,8 @@ node scripts/generate-google-docs-control-panel.js \
 - Email manifest 的 100 KiB 上限依 UTF-8 位元組而非 JavaScript 字元數計算；同一次 Apps Script 執行中，成功載入後不得再次讀取 CacheService、下載或解析相同固定版型。
 - 同一次 Apps Script 執行中，同一年級的課表只能下載、解析一次；不同年級各自快取，下一次執行則必須重新取得。正式 fetch 測試另需覆蓋精確 URL／年級 query、非 200、無效 JSON 與錯誤年級。
 - 完成首次同步後，控制臺遇到課表 API 失敗仍須以最後成功摘要或既有設定開啟，標示來源離線並停用所有依賴即時來源的寫入；正式同步函式仍須直接失敗，不能使用此 UI 摘要更新 Calendar 或判定新學期。
-- 課綱索引與分頁只能使用 Sheets v4 的 `Spreadsheets.get` metadata 與 `Values.batchGet` 唯讀方法；每份試算表只取一次 metadata，並批次讀取實際命中的分頁。空表仍保留原錯誤，API 的零起算合併範圍仍能向下展開；每張課綱分頁的日期候選只去重一次。
+- 課綱索引與分頁只能使用 Sheets v4 的 `Spreadsheets.get` metadata 與 `Values.batchGet` 唯讀方法；每份試算表只取一次 metadata，並批次讀取實際命中的分頁。空表、缺少定位欄位或單一試算表讀取失敗只記錄受影響項目，不得阻止其他分頁發布；API 的零起算合併範圍仍能向下展開，每張課綱分頁的日期候選只去重一次。
+- 課綱分頁只要有 `日期`、`節次` 就可定位行程，`實體課程教室`、`單元主題`、`課程內容` 可各自缺少並留空；無法正常讀取的課程或活動不超過 3 項時，第二次失敗後仍不得寄錯誤提醒信。
 - 既有 `retryScheduledNotificationDelivery` 在每日排程重整及關閉後續自動同步時都必須保留同一 Trigger ID；已保存的通知寄出後才清除 request、佇列與 retry。
 - 通知版型只保留標準版本，沒有句號、單側厚色框或可自訂通知格式；標籤使用直角，底部只保留指定的自動寄送說明。
 - 課表偵測與 Calendar 同步以 03:00、11:00、18:00、21:00 為四個中心；同一份 Apps Script 副本每次重建時應取得相同的中心分鐘，並預留 `nearMinute` 約 ±15 分鐘誤差，使實際執行維持在各中心前後一小時內，不得隨通知偏好改變。即時通知開啟時只另建立 06:00、`nearMinute(0)` 的每日摘要 Trigger；關閉時才依使用者選擇的每個通知時間建立同精度的獨立 Trigger。

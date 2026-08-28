@@ -458,8 +458,12 @@
     .sync-progress-track span { display: block; width: 0; height: 100%; background: var(--sync); transition: width 280ms var(--ease-out); }
     .sync-progress-detail { color: var(--ink-soft); font-family: var(--body); font-size: 10px; line-height: 16px; text-align: left; }
     .sync-progress-warning { margin: 0; color: var(--warning); font-family: var(--body); font-size: 11px; font-weight: 640; line-height: 16px; text-align: left; }
-    .toast { position: fixed; right: var(--space-3); bottom: 76px; left: var(--space-3); z-index: 60; padding: var(--space-3); border: 1px solid var(--paper-bright); border-radius: var(--radius-control); background: var(--ink); color: var(--paper-bright); font-size: 11px; line-height: 16px; opacity: 0; pointer-events: none; transform: translateY(var(--space-2)); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
-    .toast.show { opacity: 1; transform: translateY(0); }
+    .sync-progress-warning[data-safe-to-close="true"] { color: var(--sync-dark); }
+    .toast { position: fixed; right: var(--space-3); bottom: 76px; left: var(--space-3); z-index: 60; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: start; padding: var(--space-3); border: 1px solid var(--paper-bright); border-radius: var(--radius-control); background: var(--ink); color: var(--paper-bright); font-size: 11px; line-height: 16px; opacity: 0; pointer-events: none; transform: translateY(var(--space-2)); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
+    .toast.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+    .toast-message { min-width: 0; white-space: pre-line; }
+    .toast-close { display: grid; width: 28px; height: 28px; margin: -6px -6px -6px 0; padding: 0; place-items: center; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: inherit; cursor: pointer; font-size: 18px; line-height: 1; }
+    .toast-close:hover { border-color: currentColor; }
     .app.is-ready .section { animation: section-in 360ms var(--ease-out) both; }
     .app.is-ready .section:nth-child(2) { animation-delay: 35ms; }
     .app.is-ready .section:nth-child(3) { animation-delay: 70ms; }
@@ -492,7 +496,7 @@
         <div class="sync-progress-head"><span>同步進度</span><strong id="sync-progress-value">0%</strong></div>
         <div class="sync-progress-track" aria-hidden="true"><span id="sync-progress-bar"></span></div>
         <span class="sync-progress-detail" id="sync-progress-detail">正在準備同步…</span>
-        <p class="sync-progress-warning" id="sync-progress-warning" role="status" hidden>請勿現在關閉控制臺！</p>
+        <p class="sync-progress-warning" id="sync-progress-warning" data-safe-to-close="false" role="status" hidden>請勿現在關閉控制臺！</p>
       </div>
     </div>
   </div>
@@ -600,11 +604,16 @@
         <div class="sync-menu" id="sync-menu" role="menu" hidden>
           <button type="button" id="run-sync" role="menuitem">立即同步</button>
           <button type="button" id="repair-sync" role="menuitem">強制修復</button>
+          <button type="button" id="stop-sync" role="menuitem">停止同步</button>
+          <button type="button" id="remove-managed-events" role="menuitem">移除受管理事件</button>
         </div>
       </div>
     </footer>
   </div>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="toast" id="toast" hidden>
+    <span class="toast-message" id="toast-message" role="status" aria-live="polite" aria-atomic="true"></span>
+    <button type="button" class="toast-close" id="toast-close" aria-label="關閉通知">×</button>
+  </div>
 
   <script>
     (function () {
@@ -660,14 +669,28 @@
         byId('loading-label').hidden = Boolean(showProgress);
         byId('loader-track').hidden = Boolean(showProgress);
         byId('sync-progress').hidden = !showProgress;
-        byId('sync-progress-warning').hidden = !(value && showProgress && requiresSidebarOpen);
-        Array.prototype.forEach.call(document.querySelectorAll('button'), function (button) { button.disabled = value; });
+        var closeGuidance = byId('sync-progress-warning');
+        var showCloseGuidance = Boolean(value && showProgress) && typeof requiresSidebarOpen === 'boolean';
+        closeGuidance.hidden = !showCloseGuidance;
+        closeGuidance.dataset.safeToClose = String(showCloseGuidance && !requiresSidebarOpen);
+        closeGuidance.textContent = requiresSidebarOpen
+          ? '請勿現在關閉控制臺！'
+          : '現在可以關閉控制臺';
+        Array.prototype.forEach.call(document.querySelectorAll('button:not(#toast-close)'), function (button) { button.disabled = value; });
         if (!value) {
           updateActionAvailability();
           if (byId('notify-hours-list')) updateNotifyHourOptions();
         }
       }
-      function showToast(message) { var toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(function () { toast.classList.remove('show'); }, 8000); }
+      function showToast(message) {
+        byId('toast-message').textContent = message;
+        byId('toast').hidden = false;
+        byId('toast').classList.add('show');
+      }
+      function dismissToast() {
+        byId('toast').classList.remove('show');
+        byId('toast').hidden = true;
+      }
       function showResultMessage(result) {
         var messages = [
           result && result.message,
@@ -866,10 +889,12 @@
           button.disabled = requiresSelection || verifyingTerm || sourceUnavailable;
           button.dataset.validationDisabled = String(requiresSelection || verifyingTerm || sourceUnavailable);
         });
-        byId('sync-menu-toggle').disabled = requiresSelection || verifyingTerm || sourceUnavailable;
-        byId('sync-menu-toggle').dataset.validationDisabled = String(
-          requiresSelection || verifyingTerm || sourceUnavailable
-        );
+        ['stop-sync', 'remove-managed-events'].forEach(function (id) {
+          byId(id).disabled = false;
+          byId(id).dataset.validationDisabled = 'false';
+        });
+        byId('sync-menu-toggle').disabled = false;
+        byId('sync-menu-toggle').dataset.validationDisabled = 'false';
         byId('create-calendar').disabled = sourceUnavailable;
         byId('create-calendar').dataset.validationDisabled = String(sourceUnavailable);
         Array.prototype.forEach.call(
@@ -1286,6 +1311,12 @@
       });
       byId('save').addEventListener('click', function () { save(false); });
       byId('save-sync').addEventListener('click', function () { save(true); });
+      byId('toast-close').addEventListener('click', dismissToast);
+      byId('toast-close').addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        dismissToast();
+      });
       byId('reimport-setup').addEventListener('click', function () {
         if (busy) return;
         server('showSetupImportDialog', null).then(function () {
@@ -1333,6 +1364,20 @@
           '正在讀取課表並準備修復（可能需等待 0–10 分鐘）',
           true
         );
+      });
+      byId('stop-sync').addEventListener('click', function () {
+        setSyncMenuOpen(false);
+        if (!window.confirm(
+          '停止後不會再自動讀取課表或更新行事曆；已開始的背景同步仍會完成。既有事件會保留。是否繼續？'
+        )) return;
+        runAction('stopAutoSyncFromUi', '正在停止後續自動同步…', false);
+      });
+      byId('remove-managed-events').addEventListener('click', function () {
+        setSyncMenuOpen(false);
+        if (!window.confirm(
+          '這會永久刪除本工具建立且仍可辨識的事件，私人事件不會受影響。若自動同步仍開啟，後續可能重新建立這些事件。是否繼續？'
+        )) return;
+        runAction('removeManagedEventsFromUi', '正在移除受管理事件…', false);
       });
       byId('create-calendar').addEventListener('click', async function () {
         var calendarName = byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade());

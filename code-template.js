@@ -1007,6 +1007,7 @@ const COURSE_OUTLINE_FIRST_SETUP_MAX_MS = 60 * 1000;
 const COURSE_OUTLINE_RETRY_DELAY_MS = 30 * 60 * 1000;
 const COURSE_OUTLINE_WATCHDOG_DELAY_MS = 8 * 60 * 1000;
 const COURSE_OUTLINE_RUNNING_STALE_MS = 7 * 60 * 1000;
+const COURSE_OUTLINE_FAILURE_NOTIFICATION_ITEM_THRESHOLD = 3;
 const COURSE_OUTLINE_DAILY_HANDLER = 'refreshCourseOutlinesDaily';
 const COURSE_OUTLINE_ONCE_HANDLER = 'refreshCourseOutlinesOnce';
 const COURSE_OUTLINE_MANUAL_ONCE_HANDLER = 'refreshCourseOutlinesManualOnce';
@@ -1039,6 +1040,7 @@ const VISIBLE_DESCRIPTION_FOOTER = '[T-SCHOOL Schedule Sync]';
 const COURSE_OUTLINE_DISCLAIMER = '＊部分資訊來自課綱，請以教師最新說明為主';
 const DEFAULT_CONTROL_PANEL_NAME = '行程同步控制臺｜T-SCHOOL Schedule Sync';
 const MANAGED_CALENDAR_DESCRIPTION = 'T-SCHOOL Schedule Sync managed calendar';
+const MANAGED_CALENDAR_COLOR = '#05a576';
 // 只供辨識既有事件；新版不再把技術標記寫入使用者可見的說明欄。
 const MANAGED_MARKER = '[T-SCHOOL-SCHEDULE-SYNC]';
 const DESCRIPTION_MARKER = '[T-SCHOOL 行程同步]';
@@ -2409,6 +2411,7 @@ function prepareFirstSyncCourseOutlinesFromUi(input) {
           retryTriggerId: '',
           failureNotifiedAt: '',
           notificationPending: false,
+          unavailableItemCount: 0,
           lastError: '',
           lastSuccessAt: new Date().toISOString(),
           activeVersion: published.version
@@ -2423,7 +2426,13 @@ function prepareFirstSyncCourseOutlinesFromUi(input) {
         elapsedMs,
         matchedRecordCount: snapshot.diagnostics.matchedRecordCount,
         missingSheetNames: snapshot.diagnostics.missingSheetNames,
-        message: '未來 30 天的課綱資料已準備完成，第一批行程會直接帶入。' +
+        unavailableItemCount: snapshot.diagnostics.unavailableItemCount,
+        unavailableItemNames: snapshot.diagnostics.unavailableItemNames,
+        message: '未來 30 天可讀取的課綱資料已準備完成，第一批行程會直接帶入。' +
+          (snapshot.diagnostics.unavailableItemCount
+            ? '\\n另有 ' + snapshot.diagnostics.unavailableItemCount +
+              ' 項課程或活動沒有可讀取的課綱資料，對應欄位會留空。'
+            : '') +
           (stateWarning ? '\\n' + stateWarning : '')
       };
     } catch (error) {
@@ -2490,6 +2499,53 @@ function forceRepairFromUi() {
   return buildSyncUiResponse_(result, '修復完成：' + formatSyncResultMessage_(result));
 }
 
+function stopAutoSyncFromUi() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) throw new Error('背景同步正在保存行程，請稍後再停止同步。');
+  let settings;
+  let automationWarning = '';
+  try {
+    settings = loadSettings_();
+    assertSetupImported_(settings);
+    settings.autoSyncEnabled = false;
+    settings.pausedReason = '由使用者停止。';
+    saveSettings_(settings);
+    try {
+      refreshAutoSyncTriggers_(settings);
+    } catch (triggerError) {
+      automationWarning = '設定已儲存，但部分自動執行排程暫時無法移除。';
+      Logger.log('停止同步後無法完整移除觸發器：' + userFacingError_(triggerError));
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  return attachUiDataSafely_({
+    message: '已停止後續自動同步',
+    operationWarning: automationWarning
+  }, getSettingsUiData);
+}
+
+function removeManagedEventsFromUi() {
+  const count = quickDeleteSyncedCalendarEvents();
+  try {
+    writeChunkedJson_(STATUS_STORE, Object.assign({}, loadStatus_(), {
+      ok: true,
+      message: '已移除受管理事件。',
+      eventCount: 0,
+      created: 0,
+      updated: 0,
+      outlineUpdated: 0,
+      deleted: count,
+      unchanged: 0
+    }));
+  } catch (statusError) {
+    Logger.log('受管理事件已移除，但狀態摘要無法更新：' + userFacingError_(statusError));
+  }
+  return attachUiDataSafely_({
+    message: '已移除 ' + count + ' 筆受管理事件'
+  }, getSettingsUiData);
+}
+
 function attachUiDataSafely_(response, loadUiData) {
   const result = Object.assign({}, response || {});
   try {
@@ -2531,13 +2587,7 @@ function createDedicatedCalendarForUi(input) {
   const gradeName = sanitizeGrade_(input && input.gradeName || settings.gradeName);
   const calendarName = sanitizeCalendarName_(input && input.calendarName, gradeName);
   const calendar = CalendarApp.createCalendar(calendarName, { selected: true });
-  try {
-    if (typeof calendar.setDescription === 'function') {
-      calendar.setDescription(MANAGED_CALENDAR_DESCRIPTION);
-    }
-  } catch (descriptionError) {
-    Logger.log('專用日曆已建立，但無法寫入復原標記：' + userFacingError_(descriptionError));
-  }
+  applyNewManagedCalendarPresentation_(calendar);
   const result = {
     message: '已建立專用日曆',
     calendarId: calendar.getId(),
@@ -2944,6 +2994,13 @@ function ensureDedicatedCalendar_(settings) {
   const calendar = CalendarApp.createCalendar(calendarName, {
     selected: true
   });
+  applyNewManagedCalendarPresentation_(calendar);
+  settings.calendarId = calendar.getId();
+  saveSettings_(settings);
+  return calendar;
+}
+
+function applyNewManagedCalendarPresentation_(calendar) {
   try {
     if (typeof calendar.setDescription === 'function') {
       calendar.setDescription(MANAGED_CALENDAR_DESCRIPTION);
@@ -2951,9 +3008,13 @@ function ensureDedicatedCalendar_(settings) {
   } catch (descriptionError) {
     Logger.log('專用日曆已建立，但無法寫入復原標記：' + userFacingError_(descriptionError));
   }
-  settings.calendarId = calendar.getId();
-  saveSettings_(settings);
-  return calendar;
+  try {
+    if (typeof calendar.setColor === 'function') {
+      calendar.setColor(MANAGED_CALENDAR_COLOR);
+    }
+  } catch (colorError) {
+    Logger.log('專用日曆已建立，但無法設定主題色：' + userFacingError_(colorError));
+  }
 }
 
 function findRecoverableDedicatedCalendars_(calendarName) {
@@ -3487,7 +3548,7 @@ function runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, toda
     remainingOperations: remainingInFlight.length + nextPrepared.operations.length +
       Math.max(0, job.migrationEntries.length - job.migrationCursor),
     message: remainingInFlight.length
-      ? '本批已達安全時間上限，將從批次存檔點繼續。'
+      ? '本次同步已達安全執行時長上限，後續將自動從批次存檔點繼續'
       : (mainPending
         ? '本批已安全保存，等待下一批建立或更新行程。'
         : '新日曆已完成，正在分批清理舊日曆的受管理事件。')
@@ -6168,22 +6229,23 @@ function attachCourseOutlineLookup_(events, lookup) {
 }
 
 function findCourseOutlineColumns_(values) {
-  const required = ['日期', '節次', '實體課程教室', '單元主題', '課程內容'];
-  const optional = ['實體', '線上', '非同步'];
+  const known = ['日期', '節次', '實體課程教室', '單元主題', '課程內容', '實體', '線上', '非同步'];
   const limit = Math.min(COURSE_OUTLINE_HEADER_SCAN_LIMIT, (values || []).length);
+  let best = null;
 
   for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
     const columns = {};
     (values[rowIndex] || []).forEach((value, columnIndex) => {
       const name = normalizeCourseOutlineHeader_(value);
-      if (required.indexOf(name) !== -1 || optional.indexOf(name) !== -1) columns[name] = columnIndex;
+      if (known.indexOf(name) !== -1) columns[name] = columnIndex;
     });
-    if (required.every(name => Object.prototype.hasOwnProperty.call(columns, name))) {
-      return { headerRowIndex: rowIndex, columns };
+    const score = Object.keys(columns).length;
+    if (score && (!best || score > best.score)) {
+      best = { headerRowIndex: rowIndex, columns, score };
     }
   }
 
-  return null;
+  return best;
 }
 
 function normalizeCourseOutlineHeader_(value) {
@@ -6284,7 +6346,19 @@ function expandVerticalMergedCourseOutlineValues_(values, mergedRanges) {
 
 function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, sourceInfo) {
   const header = findCourseOutlineColumns_(values);
-  if (!header) throw new Error('課綱分頁「' + sheetName + '」找不到必要欄位。');
+  const readableFields = header ? Object.keys(header.columns) : [];
+  if (!header ||
+      !Object.prototype.hasOwnProperty.call(header.columns, '日期') ||
+      !Object.prototype.hasOwnProperty.call(header.columns, '節次')) {
+    return {
+      headerRow: header ? header.headerRowIndex + 1 : 0,
+      records: [],
+      readableFields,
+      issue: !header
+        ? '找不到可辨識的課綱欄位'
+        : '缺少用來對應行程的日期或節次欄位'
+    };
+  }
   const candidates = uniqueExactStrings_((desiredEvents || []).map(event => event.dateKey));
   const desiredCourseNamesByTime = {};
   (desiredEvents || []).forEach(event => {
@@ -6307,9 +6381,15 @@ function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, source
     const timeKey = JSON.stringify([dateKey, period.periodStart, period.periodEnd]);
     const desiredCourseNames = desiredCourseNamesByTime[timeKey] || [];
     if (!desiredCourseNames.length) continue;
-    const classroom = normalizeText_(row[header.columns['實體課程教室']]);
-    const topic = normalizeText_(row[header.columns['單元主題']]);
-    const content = normalizeText_(row[header.columns['課程內容']]);
+    const classroom = Object.prototype.hasOwnProperty.call(header.columns, '實體課程教室')
+      ? normalizeText_(row[header.columns['實體課程教室']])
+      : '';
+    const topic = Object.prototype.hasOwnProperty.call(header.columns, '單元主題')
+      ? normalizeText_(row[header.columns['單元主題']])
+      : '';
+    const content = Object.prototype.hasOwnProperty.call(header.columns, '課程內容')
+      ? normalizeText_(row[header.columns['課程內容']])
+      : '';
     if (!classroom && !topic && !content) continue;
     desiredCourseNames.forEach(courseName => {
       records.push({
@@ -6333,13 +6413,37 @@ function parseCourseOutlineSheetValues_(values, sheetName, desiredEvents, source
 
   return {
     headerRow: header.headerRowIndex + 1,
-    records
+    records,
+    readableFields,
+    issue: ''
   };
+}
+
+function recordCourseOutlineIssue_(diagnostics, sourceSummary, courseNames, detail) {
+  const names = uniqueExactStrings_(courseNames || []);
+  names.forEach(courseName => {
+    if (diagnostics.unavailableItemNames.indexOf(courseName) === -1) {
+      diagnostics.unavailableItemNames.push(courseName);
+    }
+  });
+  const issue = {
+    spreadsheetId: sourceSummary && sourceSummary.spreadsheetId || '',
+    spreadsheetName: sourceSummary && sourceSummary.spreadsheetName || '',
+    sheetName: detail && detail.sheetName || '',
+    courseNames: names,
+    message: detail && detail.message || '課綱資料無法讀取'
+  };
+  diagnostics.issues.push(issue);
+  if (sourceSummary) {
+    if (!Array.isArray(sourceSummary.issues)) sourceSummary.issues = [];
+    sourceSummary.issues.push(issue);
+  }
 }
 
 function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSets) {
   const lookup = {};
   const origins = {};
+  const conflictedKeys = {};
   const diagnostics = {
     sourceSetCount: sourceSets.length,
     spreadsheetCount: 0,
@@ -6348,6 +6452,9 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
     missingSheetNames: [],
     ignoredCrossSchoolSheetNames: [],
     nearMatchSheetNames: [],
+    unavailableItemCount: 0,
+    unavailableItemNames: [],
+    issues: [],
     sources: []
   };
 
@@ -6366,57 +6473,112 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
     });
 
     sourceSet.spreadsheetIds.forEach(spreadsheetId => {
-      const spreadsheet = readSheetsWorkbookMetadata_(spreadsheetId);
-      const spreadsheetName = String(spreadsheet.properties.title || '未命名課綱');
       const sourceSummary = {
         sourceSetKey: sourceSet.key,
         spreadsheetId,
-        spreadsheetName,
+        spreadsheetName: '未命名課綱',
         scannedSheets: 0,
-        matchedRecords: 0
+        matchedRecords: 0,
+        issues: []
       };
       diagnostics.spreadsheetCount += 1;
+      let spreadsheet;
+      try {
+        spreadsheet = readSheetsWorkbookMetadata_(spreadsheetId);
+        sourceSummary.spreadsheetName = String(
+          spreadsheet && spreadsheet.properties && spreadsheet.properties.title || '未命名課綱'
+        );
+      } catch (error) {
+        recordCourseOutlineIssue_(diagnostics, sourceSummary, setCourseNames, {
+          message: '無法開啟課綱試算表：' + userFacingError_(error)
+        });
+        diagnostics.sources.push(sourceSummary);
+        return;
+      }
+      const spreadsheetName = sourceSummary.spreadsheetName;
 
       const relevantSheets = [];
-      spreadsheet.sheets.forEach(sheet => {
+      (spreadsheet.sheets || []).forEach(sheet => {
         const sheetName = String(sheet && sheet.properties && sheet.properties.title || '');
         if (!sheetName) return;
         const matchedCourseNames = courseNamesByMatchKey[makeCourseOutlineSheetMatchKey_(sheetName)] || [];
         if (!matchedCourseNames.length) return;
         relevantSheets.push({ sheet, matchedCourseNames });
       });
-      const valuesBySheet = readSheetsDisplayValues_(
-        spreadsheetId,
-        relevantSheets.map(item => item.sheet.properties.title)
-      );
+      let valuesBySheet = {};
+      try {
+        valuesBySheet = readSheetsDisplayValues_(
+          spreadsheetId,
+          relevantSheets.map(item => item.sheet.properties.title)
+        );
+      } catch (error) {
+        recordCourseOutlineIssue_(
+          diagnostics,
+          sourceSummary,
+          relevantSheets.reduce((names, item) => names.concat(item.matchedCourseNames), []),
+          { message: '無法讀取課綱分頁：' + userFacingError_(error) }
+        );
+        diagnostics.sources.push(sourceSummary);
+        return;
+      }
 
       relevantSheets.forEach(item => {
         const sheet = item.sheet;
         const sheetName = sheet.properties.title;
         const sheetValues = valuesBySheet[sheetName] || [];
-        if (!sheetValues.length) throw new Error('課綱分頁「' + sheetName + '」沒有可讀取的資料。');
-        const values = expandVerticalMergedCourseOutlineValues_(
-          sheetValues,
-          Array.isArray(sheet.merges) ? sheet.merges : []
-        );
-        const sheetEvents = setEvents.filter(event => item.matchedCourseNames.indexOf(event.originalTitle) !== -1);
-        const parsed = parseCourseOutlineSheetValues_(values, sheetName, sheetEvents, {
-          sourceSetKey: sourceSet.key,
-          spreadsheetId,
-          spreadsheetName
-        });
-        sourceSummary.scannedSheets += 1;
-        sourceSummary.matchedRecords += parsed.records.length;
-        diagnostics.scannedSheetCount += 1;
+        if (!sheetValues.length) {
+          recordCourseOutlineIssue_(diagnostics, sourceSummary, item.matchedCourseNames, {
+            sheetName,
+            message: '分頁沒有可讀取的資料'
+          });
+          return;
+        }
+        let parsed;
+        try {
+          const values = expandVerticalMergedCourseOutlineValues_(
+            sheetValues,
+            Array.isArray(sheet.merges) ? sheet.merges : []
+          );
+          const sheetEvents = setEvents.filter(event =>
+            item.matchedCourseNames.indexOf(event.originalTitle) !== -1
+          );
+          parsed = parseCourseOutlineSheetValues_(values, sheetName, sheetEvents, {
+            sourceSetKey: sourceSet.key,
+            spreadsheetId,
+            spreadsheetName
+          });
+          sourceSummary.scannedSheets += 1;
+          sourceSummary.matchedRecords += parsed.records.length;
+          diagnostics.scannedSheetCount += 1;
+          if (parsed.issue) {
+            recordCourseOutlineIssue_(diagnostics, sourceSummary, item.matchedCourseNames, {
+              sheetName,
+              message: parsed.issue
+            });
+          }
+        } catch (error) {
+          recordCourseOutlineIssue_(diagnostics, sourceSummary, item.matchedCourseNames, {
+            sheetName,
+            message: '分頁解析失敗：' + userFacingError_(error)
+          });
+          return;
+        }
 
         parsed.records.forEach(record => {
+          if (conflictedKeys[record.key]) return;
           if (lookup[record.key]) {
             const previous = origins[record.key];
-            throw new Error(
-              '課綱資料重複：' + record.sheetName + ' ' + record.dateKey +
-              ' 第 ' + record.periodStart + '–' + record.periodEnd + ' 節（' +
-              previous.spreadsheetName + '、' + record.spreadsheetName + '）。'
-            );
+            if (lookup[record.key].hash === record.hash) return;
+            delete lookup[record.key];
+            delete origins[record.key];
+            conflictedKeys[record.key] = true;
+            diagnostics.matchedRecordCount = Math.max(0, diagnostics.matchedRecordCount - 1);
+            recordCourseOutlineIssue_(diagnostics, sourceSummary, [record.courseName], {
+              sheetName: record.sheetName,
+              message: '同一行程出現互相衝突的課綱資料（' +
+                previous.spreadsheetName + '、' + record.spreadsheetName + '）'
+            });
+            return;
           }
           lookup[record.key] = {
             classroom: record.classroom,
@@ -6432,6 +6594,8 @@ function collectCourseOutlineSnapshot_(settings, source, desiredEvents, sourceSe
       diagnostics.sources.push(sourceSummary);
     });
   });
+  diagnostics.unavailableItemNames = uniqueExactStrings_(diagnostics.unavailableItemNames);
+  diagnostics.unavailableItemCount = diagnostics.unavailableItemNames.length;
 
   const now = new Date();
   return {
@@ -6504,6 +6668,7 @@ function loadCourseOutlineState_() {
     retryTriggerId: '',
     failureNotifiedAt: '',
     notificationPending: false,
+    unavailableItemCount: 0,
     lastError: '',
     lastSuccessAt: ''
   });
@@ -6560,6 +6725,12 @@ function buildCourseOutlineUiStatus_(settings, source, sourceIndexOverride) {
     matchedRecordCount: visibleSnapshot && visibleSnapshot.diagnostics
       ? Number(visibleSnapshot.diagnostics.matchedRecordCount) || 0
       : 0,
+    unavailableItemCount: visibleSnapshot && visibleSnapshot.diagnostics
+      ? Number(visibleSnapshot.diagnostics.unavailableItemCount) || 0
+      : 0,
+    unavailableItemNames: visibleSnapshot && visibleSnapshot.diagnostics
+      ? visibleSnapshot.diagnostics.unavailableItemNames || []
+      : [],
     missingSheetNames: visibleSnapshot && visibleSnapshot.diagnostics
       ? visibleSnapshot.diagnostics.missingSheetNames || []
       : [],
@@ -6606,6 +6777,8 @@ function hasFreshCourseOutlineSnapshot_(settings, source) {
     termKeysMatch_(snapshot.termKey, source.termKey) &&
     snapshot.contextFingerprint ===
       makeCourseOutlineContextFingerprint_(settings, source, desiredEvents, sourceSets) &&
+    Number(snapshot.diagnostics && snapshot.diagnostics.unavailableItemCount || 0) <=
+      COURSE_OUTLINE_FAILURE_NOTIFICATION_ITEM_THRESHOLD &&
     Number.isFinite(refreshedAtMs) &&
     Date.now() - refreshedAtMs <= 15 * 60 * 1000
   );
@@ -6735,12 +6908,23 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
       return { ok: true, skipped: true, message: '課綱更新已由較新的設定取消。' };
     }
     const published = publishCourseOutlineSnapshot_(snapshot);
-    finishCourseOutlineRefreshRun_(run, published.version);
     if (published.changed) ensureOneTimeTrigger_(COURSE_OUTLINE_APPLY_HANDLER, 60 * 1000);
+    if (snapshot.diagnostics.unavailableItemCount >
+        COURSE_OUTLINE_FAILURE_NOTIFICATION_ITEM_THRESHOLD) {
+      const partialError = new Error(
+        '有 ' + snapshot.diagnostics.unavailableItemCount +
+        ' 項課程或活動的課綱無法正常讀取；其餘可用課綱已更新。'
+      );
+      partialError.courseOutlineUnavailableItemCount = snapshot.diagnostics.unavailableItemCount;
+      throw partialError;
+    }
+    finishCourseOutlineRefreshRun_(run, published.version);
     return {
       ok: true,
       skipped: false,
       matchedRecordCount: snapshot.diagnostics.matchedRecordCount,
+      unavailableItemCount: snapshot.diagnostics.unavailableItemCount,
+      unavailableItemNames: snapshot.diagnostics.unavailableItemNames,
       missingSheetNames: snapshot.diagnostics.missingSheetNames,
       nearMatchSheetNames: snapshot.diagnostics.nearMatchSheetNames
     };
@@ -6768,7 +6952,9 @@ function handleCourseOutlineRefreshStartupFailure_(settings, attempt, reason, er
       scheduledAt: '',
       startedAt: new Date().toISOString(),
       watchdogTriggerId: '',
-      lastError: ''
+      lastError: '',
+      unavailableItemCount: Number(error && error.courseOutlineUnavailableItemCount) ||
+        uniqueExactStrings_(settings && settings.selectedTitles || []).length
     });
     saveCourseOutlineState_(run);
     handleCourseOutlineRefreshFailure_(run, error);
@@ -6812,7 +6998,9 @@ function beginCourseOutlineRefreshRun_(settings, attempt, reason) {
       startedAt: new Date().toISOString(),
       watchdogTriggerId: watchdog.getUniqueId(),
       retryTriggerId: reason === 'retry' ? '' : state.retryTriggerId || '',
-      lastError: ''
+      lastError: '',
+      unavailableItemCount: Number(state.unavailableItemCount) ||
+        uniqueExactStrings_(settings.selectedTitles || []).length
     });
     saveCourseOutlineState_(next);
     return next;
@@ -6842,6 +7030,7 @@ function finishCourseOutlineRefreshRun_(run, activeVersion) {
       retryTriggerId: '',
       failureNotifiedAt: '',
       notificationPending: false,
+      unavailableItemCount: 0,
       lastError: '',
       lastSuccessAt: new Date().toISOString(),
       activeVersion: activeVersion || state.activeVersion || ''
@@ -6864,6 +7053,11 @@ function handleCourseOutlineRefreshFailure_(run, error) {
     if (state.runId !== run.runId) return;
     if (state.watchdogTriggerId) deleteProjectTriggerById_(state.watchdogTriggerId);
     const lastError = userFacingError_(error);
+    const unavailableItemCount = Number(
+      error && error.courseOutlineUnavailableItemCount ||
+      state.unavailableItemCount ||
+      run.unavailableItemCount
+    ) || 0;
 
     if (Number(run.attempt) < 2) {
       try {
@@ -6879,7 +7073,8 @@ function handleCourseOutlineRefreshFailure_(run, error) {
           startedAt: '',
           watchdogTriggerId: '',
           retryTriggerId: retry.getUniqueId(),
-          lastError
+          lastError,
+          unavailableItemCount
         }));
         return;
       } catch (retryError) {
@@ -6887,7 +7082,8 @@ function handleCourseOutlineRefreshFailure_(run, error) {
       }
     }
 
-    shouldNotify = !state.failureNotifiedAt;
+    shouldNotify = unavailableItemCount > COURSE_OUTLINE_FAILURE_NOTIFICATION_ITEM_THRESHOLD &&
+      !state.failureNotifiedAt;
     saveCourseOutlineState_(Object.assign({}, state, {
       status: 'failed',
       runId: '',
@@ -6896,6 +7092,7 @@ function handleCourseOutlineRefreshFailure_(run, error) {
       watchdogTriggerId: '',
       retryTriggerId: '',
       lastError: userFacingError_(error),
+      unavailableItemCount,
       notificationPending: shouldNotify || Boolean(state.notificationPending)
     }));
   } finally {
@@ -6926,10 +7123,12 @@ function sendCourseOutlineFailureNotification_(incidentId) {
     sendEmail_(
       loadSettings_(),
       'course_outline_failure',
-      '課綱更新失敗',
-      '課綱已嘗試兩次仍無法更新。\\n\\n錯誤：' + (state.lastError || '未知錯誤') +
+      '部分課綱無法更新',
+      '有 ' + Number(state.unavailableItemCount || 0) +
+      ' 項課程或活動的課綱已嘗試兩次仍無法正常讀取。\\n\\n錯誤：' +
+      (state.lastError || '未知錯誤') +
       '\\n最後成功課綱：' + lastSuccess +
-      '\\n\\n基本行程與行事曆同步仍會使用最後成功快照；若沒有快照，則只同步基本行程。',
+      '\\n\\n其他可讀取的課綱仍會正常同步；沒有資料的欄位會留空。',
       {
         message: state.lastError || '未知錯誤',
         lastSuccess
@@ -7815,6 +8014,10 @@ function showSyncStatus() {
   const outlineMessage = outline.enabled
     ? '\\n\\n課綱資料：' + describeCourseOutlineStatusForUser_(outline) +
       '\\n最近完成課綱更新：' + (outline.lastSuccessLabel || '尚未完成第一次更新') +
+      (outline.unavailableItemCount
+        ? '\\n課綱留空（' + outline.unavailableItemCount + ' 項）：' +
+          outline.unavailableItemNames.join('、')
+        : '') +
       (outline.missingSheetNames.length
         ? '\\n找不到可匹配名稱的課綱分頁：' + outline.missingSheetNames.join('、')
         : '') +
