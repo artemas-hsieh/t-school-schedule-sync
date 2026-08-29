@@ -1209,7 +1209,7 @@
         try {
           if (runSync) {
             var preview = await server('previewSettingsImpactFromUi', settings);
-            var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、更新 ' + preview.updated + '、移除 ' + preview.deleted + '、不變 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
+            var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、調整 ' + preview.updated + '、取消 ' + preview.deleted + '、未變更 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
             if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
             startSyncProgress(
               model && model.settings && !model.settings.setupComplete

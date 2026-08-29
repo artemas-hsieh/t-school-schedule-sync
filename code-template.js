@@ -4419,7 +4419,7 @@ function buildTermTransitionNotice_(settings, source) {
       '系統偵測到 ' + dateRange + ' 的新學期行程\\n\\n' +
       '已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程與活動\\n' +
       '完成新學期同步前，系統不會改動現有日曆事件\\n' +
-      '請在控制臺確認新學期就讀年級、重新選擇課程與活動，並在同步前檢查新增與移除預覽'
+      '請在控制臺確認新學期就讀年級、重新選擇課程與活動，並在同步前檢查新增、調整、取消與未變更的預覽結果'
   };
 }
 
@@ -4940,6 +4940,7 @@ function createCalendarEvent_(calendar, item, stateKey, settings) {
     ? calendar.createAllDayEvent(buildEventTitle_(item, settings), item.start, options)
     : calendar.createEvent(buildEventTitle_(item, settings), item.start, item.end, options);
   setManagedEventTags_(event, stateKey);
+  applyEventAvailability_(event, item);
   applyEventReminders_(event, settings);
   return event;
 }
@@ -4961,6 +4962,7 @@ function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
     if (event.getTitle() !== title) event.setTitle(title);
     if ((event.getLocation() || '') !== location) event.setLocation(location);
     if ((event.getDescription() || '') !== description) event.setDescription(description);
+    applyEventAvailability_(event, item);
     applyEventReminders_(event, settings);
     return event;
   }
@@ -5132,6 +5134,13 @@ function applyEventReminders_(event, settings) {
     if (settings.reminderMode === 'popup') event.addPopupReminder(minutes);
     if (settings.reminderMode === 'email') event.addEmailReminder(minutes);
   });
+}
+
+function applyEventAvailability_(event, item) {
+  const transparency = isNonBlockingScheduleTitle_(item && item.originalTitle)
+    ? CalendarApp.EventTransparency.TRANSPARENT
+    : CalendarApp.EventTransparency.OPAQUE;
+  event.setTransparency(transparency);
 }
 
 function buildEventLocation_(item) {
@@ -8974,6 +8983,12 @@ function isCourseSelectionHidden_(value) {
 
 function isScheduleNoteTitle_(value) {
   return normalizeTitle_(value).indexOf(normalizeTitle_(SCHEDULE_NOTE_TITLE_PREFIX)) === 0;
+}
+
+function isNonBlockingScheduleTitle_(value) {
+  const title = normalizeTitle_(value);
+  return isScheduleNoteTitle_(title) ||
+    /補假|放假|節假日|國定假日|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
 }
 
 function makeScheduleNoteTitle_(value) {

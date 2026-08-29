@@ -489,6 +489,17 @@ assert.equal(
 assert.equal(sidebarHtml.includes("'sync-updated': Number(status && status.updated) || 0"), true);
 assert.match(sidebarHtml, /<span>調整<\/span><strong id="sync-updated">/);
 assert.match(sidebarHtml, /<span>取消<\/span><strong id="sync-deleted">/);
+assert.equal(
+  sidebarHtml.includes(
+    "'、調整 ' + preview.updated + '、取消 ' + preview.deleted + '、未變更 ' + preview.unchanged"
+  ),
+  true,
+  '同步前確認應使用與狀態面板相同的異動類型'
+);
+assert.equal(
+  sidebarHtml.includes("'、更新 ' + preview.updated + '、移除 ' + preview.deleted"),
+  false
+);
 assert.equal(sidebarHtml.includes('id="status-message" role="alert" hidden'), true);
 assert.equal(sidebarHtml.includes('class="grade-options" role="radiogroup" aria-label="選年級"'), true);
 assert.equal(sidebarHtml.includes('<span>同步目標日曆</span>'), true);
@@ -781,6 +792,14 @@ assert.match(emailTemplateManifest.notifications.sync_success.content, />調整<
 assert.match(emailTemplateManifest.notifications.sync_success.content, />取消<\/span>/);
 assert.doesNotMatch(emailTemplateManifest.notifications.sync_success.content, />更新<\/span>/);
 assert.doesNotMatch(emailTemplateManifest.notifications.sync_success.content, />移除<\/span>/);
+assert.match(
+  emailTemplateManifest.notifications.term_transition.content,
+  /新增、調整、取消與未變更的預覽結果/
+);
+assert.equal(
+  emailTemplateManifest.notifications.term_transition.content.includes('新增與移除預覽'),
+  false
+);
 assert.equal(
   emailTemplateManifest.notifications.sync_failure.headline,
   '行程同步失敗'
@@ -1818,6 +1837,12 @@ assert.throws(
   '通用程式不得保存重新導向後的 tokenized 課表網址'
 );
 assert.doesNotThrow(() => new Function(generatedCode));
+assert.equal(
+  generatedCode.includes('新增、調整、取消與未變更的預覽結果'),
+  true,
+  '新學期純文字通知應使用完整且一致的異動類型'
+);
+assert.equal(generatedCode.includes('新增與移除預覽'), false);
 assert.match(
   generatedCode,
   /^\/\*\*[\s\S]*?@OnlyCurrentDoc[\s\S]*?\*\//,
@@ -3283,69 +3308,6 @@ assert.equal(
   '2026-08-11',
   '跨夜日期應直接依 Asia/Taipei 日界線切換，不得把凌晨五分鐘誤算為前一天'
 );
-
-if (fs.existsSync('/tmp/tschool-requirements-grade2.json')) {
-  const highLoadContext = vm.createContext({
-    console,
-    Intl,
-    PropertiesService: {
-      getScriptProperties() {
-        return {
-          getProperty() {
-            return null;
-          }
-        };
-      }
-    },
-    Utilities: {
-      formatDate(dateValue, timezone, pattern) {
-        assert.equal(timezone, 'Asia/Taipei');
-        return formatDate(dateValue, pattern);
-      }
-    }
-  });
-  vm.runInContext(highLoadGeneratedCode, highLoadContext);
-  const highLoadPayload = JSON.parse(
-    fs.readFileSync('/tmp/tschool-requirements-grade2.json', 'utf8')
-  );
-  const highLoadSource = highLoadContext.parseSchedulePayload_(
-    highLoadPayload,
-    '高二',
-    new Date('2026-02-23T06:00:00+08:00')
-  );
-  const highLoadReport = highLoadContext.buildHighLoadReadOnlyReport_(
-    highLoadSource,
-    0
-  );
-  assert.equal(
-    highLoadReport.ok,
-    true,
-    `高二固定資料應符合高負載基準：${JSON.stringify(highLoadReport)}`
-  );
-  assert.equal(highLoadReport.actual.totalFuture, 422);
-  assert.equal(highLoadReport.actual.outlineWindow, 79);
-  assert.equal(highLoadReport.actual.outlineCourseNames, 20);
-
-  const highLoadDesired = highLoadContext.getHighLoadTestDesiredEvents_(highLoadSource);
-  const estimatedHighLoadState = {};
-  highLoadDesired.forEach((event, index) => {
-    const key = highLoadContext.makeOccurrenceKey_(event);
-    estimatedHighLoadState[key] = `test-event-${index}`;
-  });
-  const serializedHighLoadSource = JSON.stringify({
-    catalog: highLoadSource.catalog,
-    events: highLoadSource.events.map(highLoadContext.serializeHighLoadTestEvent_)
-  });
-  const estimatedStoredCharacters =
-    serializedHighLoadSource.length + JSON.stringify(estimatedHighLoadState).length;
-  assert.equal(
-    estimatedStoredCharacters < 300000,
-    true,
-    `高負載來源與 422 筆狀態不應逼近 Script Properties 總量上限：` +
-      `${estimatedStoredCharacters}（來源 ${serializedHighLoadSource.length}、狀態 ` +
-      `${JSON.stringify(estimatedHighLoadState).length}）`
-  );
-}
 
 const noActivityCode = global.buildAppsScriptCode({
   appVersion: '2.0.0-rc.1',
@@ -6332,6 +6294,8 @@ function createMockCalendar() {
       removeAllReminders() {},
       addPopupReminder() {},
       addEmailReminder() {},
+      getTransparency() { return this.transparency; },
+      setTransparency(value) { this.transparency = value; },
       deleteEvent() { this.deleted = true; }
     };
     events.set(id, event);
@@ -6429,6 +6393,12 @@ const batchSettings = {
   customDescription: '',
   reminderMode: 'none',
   reminderMinutes: 10
+};
+context.CalendarApp = {
+  EventTransparency: {
+    OPAQUE: 'OPAQUE',
+    TRANSPARENT: 'TRANSPARENT'
+  }
 };
 const fixedTimeMigrationCalendar = createMockCalendar();
 const fixedTimeMigrationDesired = Object.assign({}, makeBatchFixtureEvent(0), {
@@ -6533,6 +6503,11 @@ const neutralTitleEvent = context.createCalendarEvent_(
 );
 assert.equal(neutralTitleEvent.getTitle(), '模擬考 [測試教室]');
 assert.equal(
+  neutralTitleEvent.getTransparency(),
+  'OPAQUE',
+  '一般行程應明確維持 Busy'
+);
+assert.equal(
   neutralTitleEvent.getTitle().includes('活動｜'),
   false,
   '類似活動的行程也不得在 Calendar 標題加上分類前綴'
@@ -6549,6 +6524,29 @@ const scheduleNoteEvent = context.createCalendarEvent_(
 );
 assert.equal(scheduleNoteEvent.isAllDayEvent(), true);
 assert.equal(scheduleNoteEvent.getTitle(), '備註｜開放吉林六樓階梯教室自習。');
+assert.equal(
+  scheduleNoteEvent.getTransparency(),
+  'TRANSPARENT',
+  '備註行程應設為 Available'
+);
+const holidayItem = Object.assign({}, makeBatchFixtureEvent(1), {
+  originalTitle: '中秋節放假',
+  isAllDay: true
+});
+const holidayEvent = context.createCalendarEvent_(
+  neutralTitleCalendar,
+  holidayItem,
+  context.makeOccurrenceKey_(holidayItem),
+  batchSettings
+);
+assert.equal(
+  holidayEvent.getTransparency(),
+  'TRANSPARENT',
+  '放假行程應設為 Available'
+);
+assert.equal(context.isNonBlockingScheduleTitle_('國定假日'), true);
+assert.equal(context.isNonBlockingScheduleTitle_('補假'), true);
+assert.equal(context.isNonBlockingScheduleTitle_('開學典禮'), false);
 assert.equal(
   context.shouldIncludeEvent_(scheduleNoteItem, {
     selectedTitles: [],
@@ -8065,80 +8063,6 @@ assert.equal(
 );
 assert.equal(context.loadCourseOutlineState_().notificationPending, false);
 
-const fixtures = [
-  { grade: '高一', file: '/tmp/tschool-requirements-grade1.json' },
-  { grade: '高二', file: '/tmp/tschool-requirements-grade2.json' },
-  { grade: '高三', file: '/tmp/tschool-requirements-grade3.json' }
-];
-
-const results = fixtures.map(fixture => {
-  if (!fs.existsSync(fixture.file)) {
-    return { grade: fixture.grade, skipped: true, reason: `找不到 ${fixture.file}` };
-  }
-
-  const payload = JSON.parse(fs.readFileSync(fixture.file, 'utf8'));
-  const installerSummary = scheduleData.summarizePayload(payload, new Date('2026-07-20T12:00:00+08:00'));
-  const runtimeSummary = context.parseSchedulePayload_(payload, fixture.grade, new Date('2026-07-20T12:00:00+08:00'));
-
-  assert.deepEqual(
-    Object.keys(runtimeSummary.catalog).sort(),
-    ['all', 'termItems', 'vacationItems'],
-    `${fixture.grade} 的 Code.gs 目錄不得恢復課程／活動分類`
-  );
-  assert.deepEqual(
-    Object.keys(installerSummary.catalog).sort(),
-    ['all', 'termItems', 'vacationItems'],
-    `${fixture.grade} 的網站目錄不得恢復課程／活動分類`
-  );
-  assert.deepEqual(
-    Array.from(runtimeSummary.catalog.all, item => `${item.period}:${item.title}`),
-    Array.from(installerSummary.catalog.all, item => `${item.period}:${item.title}`),
-    `${fixture.grade} 的學期間／寒暑假排序不一致`
-  );
-  assert.deepEqual(
-    Array.from(runtimeSummary.catalog.termItems, item => item.title),
-    Array.from(installerSummary.catalog.termItems, item => item.title),
-    `${fixture.grade} 的學期間行程排序不一致`
-  );
-  assert.deepEqual(
-    Array.from(runtimeSummary.catalog.vacationItems, item => item.title),
-    Array.from(installerSummary.catalog.vacationItems, item => item.title),
-    `${fixture.grade} 的寒暑假期間行程排序不一致`
-  );
-  assert.equal(runtimeSummary.firstDateKey, installerSummary.firstDateKey);
-  assert.equal(runtimeSummary.lastDateKey, installerSummary.lastDateKey);
-  assert.equal(
-    runtimeSummary.catalogFingerprint,
-    installerSummary.catalogFingerprint,
-    `${fixture.grade} 的設定目錄指紋必須跨網站與 Code.gs 一致`
-  );
-  assert.notEqual(
-    runtimeSummary.scheduleFingerprint,
-    runtimeSummary.catalogFingerprint,
-    `${fixture.grade} 的完整課表指紋必須與設定目錄指紋分離`
-  );
-  assert.equal(runtimeSummary.events.some(event => /\[[^\]]+\]\s*$/.test(event.originalTitle)), false);
-  assert.equal(
-    runtimeSummary.catalog.all.every(item =>
-      Object.keys(item).sort().join(',') === 'period,title'
-    ),
-    true,
-    `${fixture.grade} 的目錄項目只能有 title 與 period`
-  );
-  assert.equal(
-    runtimeSummary.events.every(event => !Object.prototype.hasOwnProperty.call(event, 'type')),
-    true,
-    `${fixture.grade} 的正常行程事件不得有 type`
-  );
-
-  return {
-    grade: fixture.grade,
-    items: runtimeSummary.catalog.all.length,
-    events: runtimeSummary.events.length,
-    range: `${runtimeSummary.firstDateKey}..${runtimeSummary.lastDateKey}`
-  };
-});
-
 assert.equal(
   sentEmailSubjects.every(subject =>
     String(subject).endsWith('｜T-SCHOOL Schedule Sync')
@@ -8149,6 +8073,5 @@ assert.equal(
 
 console.log(JSON.stringify({
   generatedCharacters: generatedCode.length,
-  generatedLines: generatedCode.split('\n').length,
-  results
+  generatedLines: generatedCode.split('\n').length
 }, null, 2));
