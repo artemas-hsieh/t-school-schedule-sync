@@ -318,6 +318,14 @@
     .calendar-create > .field-hint { grid-column: 1 / -1; }
     .calendar-create .small-button { min-width: 76px; padding-inline: var(--space-3); }
 
+    .reminder-minutes-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-2);
+    }
+    .reminder-minute-choice > span { min-height: 44px; }
+    .reminder-minute-choice .choice-copy { min-width: 0; }
+
     .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
     .metric { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper-bright); }
     .metric span, .metric strong { display: block; }
@@ -529,8 +537,8 @@
         <div class="status-grid"><div class="metric"><span>上次同步</span><strong id="last-sync">尚未同步</strong></div><div class="metric"><span>受管理事件</span><strong id="event-count">0</strong></div></div>
         <div class="sync-stat-grid" aria-label="上次同步事件統計">
           <div class="sync-stat"><span>新增</span><strong id="sync-created">0</strong></div>
-          <div class="sync-stat"><span>更新</span><strong id="sync-updated">0</strong></div>
-          <div class="sync-stat"><span>移除</span><strong id="sync-deleted">0</strong></div>
+          <div class="sync-stat"><span>調整</span><strong id="sync-updated">0</strong></div>
+          <div class="sync-stat"><span>取消</span><strong id="sync-deleted">0</strong></div>
           <div class="sync-stat"><span>未變更</span><strong id="sync-unchanged">0</strong></div>
         </div>
         <p class="message error" id="status-message" role="alert" hidden></p>
@@ -552,7 +560,16 @@
           </div>
         </div>
         <label class="field"><span>行程提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
-        <label class="field" id="reminder-wrap" hidden><span>提前時間</span><select id="reminder-minutes"><option value="10">10 分鐘</option><option value="30">30 分鐘</option><option value="60">1 小時</option><option value="1440">1 天</option></select></label>
+        <div class="field" id="reminder-wrap" hidden>
+          <span id="reminder-minutes-label">提前時間</span>
+          <div class="reminder-minutes-options" role="group" aria-labelledby="reminder-minutes-label" aria-describedby="reminder-minutes-hint">
+            <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="10"><span><span class="choice-copy"><strong>10 分鐘</strong></span></span></label>
+            <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="30"><span><span class="choice-copy"><strong>30 分鐘</strong></span></span></label>
+            <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="60"><span><span class="choice-copy"><strong>1 小時</strong></span></span></label>
+            <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="1440"><span><span class="choice-copy"><strong>1 天</strong></span></span></label>
+          </div>
+          <small class="hint field-hint" id="reminder-minutes-hint">可複選；每個時間都會建立一次提醒。</small>
+        </div>
       </section>
 
       <section class="section">
@@ -798,7 +815,12 @@
           ? data.termTransition.resumeAutoSync
           : settings.autoSyncEnabled;
         byId('reminder-mode').value = settings.reminderMode;
-        byId('reminder-minutes').value = String(settings.reminderMinutes || 10);
+        var reminderMinutesList = normalizeReminderMinutesList(
+          settings.reminderMinutesList || [settings.reminderMinutes]
+        );
+        document.querySelectorAll('[data-reminder-minute]').forEach(function (input) {
+          input.checked = reminderMinutesList.indexOf(Number(input.value)) !== -1;
+        });
         customNotificationHours = normalizeNotifyHours(
           settings.notificationHours || settings.autoSyncHours || [settings.notifySyncHour]
         );
@@ -944,6 +966,23 @@
           .sort(function (left, right) { return left - right; })
           .slice(0, MAX_NOTIFY_HOURS);
         return normalizedHours.length ? normalizedHours : [6];
+      }
+
+      function normalizeReminderMinutesList(values) {
+        var allowedMinutes = [10, 30, 60, 1440];
+        var normalizedMinutes = Array.from(new Set((values || [])
+          .map(Number)
+          .filter(function (minutes) {
+            return allowedMinutes.indexOf(minutes) !== -1;
+          })))
+          .sort(function (left, right) { return left - right; });
+        return normalizedMinutes.length ? normalizedMinutes : [10];
+      }
+
+      function getSelectedReminderMinutes() {
+        return Array.prototype.slice.call(
+          document.querySelectorAll('[data-reminder-minute]:checked')
+        ).map(function (input) { return Number(input.value); });
       }
 
       function renderNotifyHours(hours) {
@@ -1116,7 +1155,7 @@
         byId('event-count').textContent = status && status.eventCount != null ? String(status.eventCount) : '0';
         var syncCounts = {
           'sync-created': Number(status && status.created) || 0,
-          'sync-updated': (Number(status && status.updated) || 0) + (Number(status && status.outlineUpdated) || 0),
+          'sync-updated': Number(status && status.updated) || 0,
           'sync-deleted': Number(status && status.deleted) || 0,
           'sync-unchanged': Number(status && status.unchanged) || 0
         };
@@ -1140,6 +1179,7 @@
         var notificationHours = instantNotificationsEnabled
           ? customNotificationHours.slice()
           : getSelectedNotifyHours();
+        var reminderMinutesList = getSelectedReminderMinutes();
         return {
           gradeName: getCheckedGrade(),
           selectedTitles: Array.from(selectedTitles).filter(function (title) {
@@ -1153,7 +1193,8 @@
           notificationHours: notificationHours,
           notifySyncHour: Math.max.apply(null, notificationHours),
           reminderMode: byId('reminder-mode').value,
-          reminderMinutes: Number(byId('reminder-minutes').value),
+          reminderMinutesList: reminderMinutesList,
+          reminderMinutes: reminderMinutesList[0] || 10,
           termGradeConfirmed: byId('term-grade-confirmed').checked
         };
       }
@@ -1274,6 +1315,10 @@
           });
         }
         if (event.target.id === 'reminder-mode') updateConditionalFields();
+        if (event.target.matches('[data-reminder-minute]') && !getSelectedReminderMinutes().length) {
+          event.target.checked = true;
+          showToast('請至少保留一個提前時間');
+        }
       });
       byId('course-search').addEventListener('input', renderCourses);
       byId('course-list').addEventListener('scroll', updateCourseScrollShadows, { passive: true });

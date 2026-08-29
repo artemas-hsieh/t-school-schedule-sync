@@ -484,8 +484,11 @@ assert.equal(
   sidebarHtml.includes(
     "(Number(status && status.updated) || 0) + (Number(status && status.outlineUpdated) || 0)"
   ),
-  true
+  false
 );
+assert.equal(sidebarHtml.includes("'sync-updated': Number(status && status.updated) || 0"), true);
+assert.match(sidebarHtml, /<span>調整<\/span><strong id="sync-updated">/);
+assert.match(sidebarHtml, /<span>取消<\/span><strong id="sync-deleted">/);
 assert.equal(sidebarHtml.includes('id="status-message" role="alert" hidden'), true);
 assert.equal(sidebarHtml.includes('class="grade-options" role="radiogroup" aria-label="選年級"'), true);
 assert.equal(sidebarHtml.includes('<span>同步目標日曆</span>'), true);
@@ -496,6 +499,11 @@ assert.equal(
     sidebarHtml.indexOf('<span>行程提醒</span>') < gradeHeadingIndex,
   true
 );
+assert.equal((sidebarHtml.match(/data-reminder-minute value=/g) || []).length, 4);
+assert.equal(sidebarHtml.includes('id="reminder-minutes"'), false);
+assert.equal(sidebarHtml.includes('可複選；每個時間都會建立一次提醒。'), true);
+assert.equal(sidebarHtml.includes('reminderMinutesList: reminderMinutesList'), true);
+assert.equal(sidebarHtml.includes('請至少保留一個提前時間'), true);
 assert.match(
   sidebarHtml,
   /\.switch-track \{[^}]*border-radius: var\(--radius-control\);/
@@ -769,6 +777,10 @@ assert.equal(
   '行程同步狀態正常'
 );
 assert.equal(emailTemplateManifest.notifications.sync_success.lede, '');
+assert.match(emailTemplateManifest.notifications.sync_success.content, />調整<\/span>/);
+assert.match(emailTemplateManifest.notifications.sync_success.content, />取消<\/span>/);
+assert.doesNotMatch(emailTemplateManifest.notifications.sync_success.content, />更新<\/span>/);
+assert.doesNotMatch(emailTemplateManifest.notifications.sync_success.content, />移除<\/span>/);
 assert.equal(
   emailTemplateManifest.notifications.sync_failure.headline,
   '行程同步失敗'
@@ -1474,19 +1486,23 @@ function makeCatalogPayload(weekNumbers, entriesByWeek, rowSpan = 6) {
   const rows = weekNumbers.map((weekNumber, index) => ({
     isHeader: false,
     weekNum: String(weekNumber),
-    cells: [{
-      value: entriesByWeek[index] || '',
-      day: 1,
-      period: 1,
-      rowSpan
-    }]
+    cells: [
+      { value: '來源左欄鐘點' },
+      { value: '1' },
+      {
+        value: entriesByWeek[index] || '',
+        day: 1,
+        period: 1,
+        rowSpan
+      }
+    ]
   }));
 
   while (rows.length < 10) {
     rows.push({
       isHeader: false,
       weekNum: String(weekNumbers[0]),
-      cells: [{ value: '' }]
+      cells: [{ value: '' }, { value: '' }, { value: '' }]
     });
   }
 
@@ -1918,7 +1934,7 @@ assert.equal(generatedCode.includes('const SETTINGS_SCHEMA_VERSION = 9;'), true)
 assert.equal(generatedCode.includes('const SETUP_CODE_SCHEMA_VERSION = 2;'), true);
 assert.equal(generatedCode.includes('const SETUP_CATALOG_FINGERPRINT_VERSION = 3;'), true);
 assert.equal(generatedCode.includes('const SETUP_CONTEXT_FINGERPRINT_VERSION = 3;'), true);
-assert.equal(generatedCode.includes('const SCHEDULE_FINGERPRINT_VERSION = 3;'), true);
+assert.equal(generatedCode.includes('const SCHEDULE_FINGERPRINT_VERSION = 4;'), true);
 assert.equal(
   generatedCode.includes('source.fingerprint === settings.sourceFingerprint'),
   false,
@@ -2887,13 +2903,13 @@ assert.equal(typeof context.classifyScheduleTitle_, 'undefined');
 assert.equal(typeof context.countScheduledPeriodsByTitle_, 'undefined');
 
 const neutralRuntimeTimes = [
-  '08:10~09:00',
-  '09:10~10:00',
-  '10:10~11:00',
+  '來源時間一',
+  '',
+  '不是時間',
   '11:10~12:00',
-  '13:10~14:00',
+  '任意內容',
   '14:10~15:00',
-  '15:10~16:00',
+  '第七節',
   '16:10~17:00'
 ];
 const neutralRuntimePayload = {
@@ -2919,7 +2935,7 @@ const neutralRuntimePayload = {
     cells: [
       { value: time },
       { value: String(index + 1) },
-      { value: index === 0 ? '國語文（三）海風班 [教室]' : '', rowSpan: 1 },
+      { value: index === 0 ? '國語文（三）海風班 [吉林基地]' : '', rowSpan: 1 },
       { value: '' },
       { value: '' },
       { value: '' },
@@ -2970,6 +2986,119 @@ assert.equal(
   neutralInstallerSummary.catalogFingerprint
 );
 assert.equal(neutralRuntimeSummary.events.length, 2);
+const neutralTimedEvent = neutralRuntimeSummary.events.find(event => !event.isAllDay);
+assert.equal(neutralTimedEvent.startTime, '08:25');
+assert.equal(neutralTimedEvent.endTime, '09:15');
+assert.equal(neutralTimedEvent.start.toISOString(), '2026-08-03T00:25:00.000Z');
+assert.equal(neutralTimedEvent.end.toISOString(), '2026-08-03T01:15:00.000Z');
+assert.equal(neutralTimedEvent.location, '吉林基地');
+const allFixedPeriodsPayload = JSON.parse(JSON.stringify(neutralRuntimePayload));
+allFixedPeriodsPayload.tableData.slice(1, 9).forEach((row, index) => {
+  row.cells[2].value = '固定鐘點測試 ' + (index + 1) + ' [吉林基地]';
+  row.cells[2].rowSpan = 1;
+});
+const allFixedPeriodsSummary = context.parseSchedulePayload_(
+  allFixedPeriodsPayload,
+  '高一',
+  new Date('2026-08-01T12:00:00+08:00')
+);
+assert.deepEqual(
+  Array.from(allFixedPeriodsSummary.events)
+    .filter(event => !event.isAllDay)
+    .sort((left, right) => left.periodStart - right.periodStart)
+    .map(event => [event.periodStart, event.startTime, event.endTime]),
+  [
+    [1, '08:25', '09:15'],
+    [2, '09:15', '10:05'],
+    [3, '10:15', '11:05'],
+    [4, '11:05', '11:55'],
+    [5, '13:25', '14:15'],
+    [6, '14:15', '15:05'],
+    [7, '15:15', '16:05'],
+    [8, '16:05', '16:55']
+  ],
+  '第 1–8 節都必須精確使用固定鐘點'
+);
+const changedSourceTimesPayload = JSON.parse(JSON.stringify(neutralRuntimePayload));
+changedSourceTimesPayload.tableData.slice(1, 9).forEach((row, index) => {
+  row.cells[0].value = '修改後左欄 ' + index;
+});
+const changedSourceTimesSummary = context.parseSchedulePayload_(
+  changedSourceTimesPayload,
+  '高一',
+  new Date('2026-08-01T12:00:00+08:00')
+);
+assert.equal(
+  changedSourceTimesSummary.scheduleFingerprint,
+  neutralRuntimeSummary.scheduleFingerprint,
+  '來源左欄鐘點不得影響節次時間或課表指紋'
+);
+const fullDayRangePayload = JSON.parse(JSON.stringify(neutralRuntimePayload));
+fullDayRangePayload.tableData[1].cells[2].rowSpan = 8;
+const fullDayRangeSummary = context.parseSchedulePayload_(
+  fullDayRangePayload,
+  '高一',
+  new Date('2026-08-01T12:00:00+08:00')
+);
+const fullDayRangeEvent = fullDayRangeSummary.events.find(event => !event.isAllDay);
+assert.equal(fullDayRangeSummary.events.filter(event => !event.isAllDay).length, 1);
+assert.equal(fullDayRangeEvent.periodStart, 1);
+assert.equal(fullDayRangeEvent.periodEnd, 8);
+assert.equal(fullDayRangeEvent.startTime, '08:25');
+assert.equal(fullDayRangeEvent.endTime, '16:55');
+assert.equal(
+  fullDayRangeEvent.end.getTime() - fullDayRangeEvent.start.getTime(),
+  8 * 60 * 60 * 1000 + 30 * 60 * 1000,
+  '第 1–8 節必須建立為包含下課與午休的單一連續時段'
+);
+
+function makeAdjacentMergeFixture(periodStart, periodEnd, location) {
+  return {
+    originalTitle: '跨節測試課程',
+    isAllDay: false,
+    weekNum: 1,
+    weekday: '一',
+    dateKey: '2026-08-03',
+    periodStart,
+    periodEnd,
+    startTime: '',
+    endTime: '',
+    start: new Date('2026-08-03T00:00:00+08:00'),
+    end: new Date('2026-08-03T00:00:00+08:00'),
+    location,
+    sourceUpdatedLabel: '08010000'
+  };
+}
+
+const adjacentMergedEvents = context.mergeAdjacentScheduleEvents_([
+  makeAdjacentMergeFixture(1, 4, '吉林基地'),
+  makeAdjacentMergeFixture(5, 8, '吉林基地'),
+  makeAdjacentMergeFixture(1, 1, '弘道基地')
+]);
+assert.equal(adjacentMergedEvents.length, 2);
+const adjacentMergedJilin = adjacentMergedEvents.find(event => event.location === '吉林基地');
+assert.equal(adjacentMergedJilin.periodStart, 1);
+assert.equal(adjacentMergedJilin.periodEnd, 8);
+assert.equal(adjacentMergedJilin.startTime, '08:25');
+assert.equal(adjacentMergedJilin.endTime, '16:55');
+assert.equal(
+  adjacentMergedEvents.find(event => event.location === '弘道基地').periodEnd,
+  1,
+  '同標題但不同基地的相鄰節次不得合併'
+);
+const lunchSpanningEvent = context.mergeAdjacentScheduleEvents_([
+  makeAdjacentMergeFixture(4, 4, '線上教室'),
+  makeAdjacentMergeFixture(5, 5, '線上教室')
+])[0];
+assert.equal(lunchSpanningEvent.periodStart, 4);
+assert.equal(lunchSpanningEvent.periodEnd, 5);
+assert.equal(lunchSpanningEvent.startTime, '11:05');
+assert.equal(lunchSpanningEvent.endTime, '14:15');
+const ordinarySpanningEvent = context.mergeAdjacentScheduleEvents_([
+  makeAdjacentMergeFixture(3, 6, '吉林基地')
+])[0];
+assert.equal(ordinarySpanningEvent.startTime, '10:15');
+assert.equal(ordinarySpanningEvent.endTime, '15:05');
 assert.equal(
   Array.from(neutralRuntimeSummary.catalog.all).every(item =>
     Object.keys(item).sort().join(',') === 'period,title'
@@ -3508,10 +3637,10 @@ const outlineBaseItem = {
   weekNum: 2,
   periodStart: 5,
   periodEnd: 6,
-  startTime: '13:10',
-  endTime: '15:00',
-  start: new Date('2026-07-27T13:10:00+08:00'),
-  end: new Date('2026-07-27T15:00:00+08:00'),
+  startTime: '13:25',
+  endTime: '15:05',
+  start: new Date('2026-07-27T13:25:00+08:00'),
+  end: new Date('2026-07-27T15:05:00+08:00'),
   location: '吉林基地',
   sourceUpdatedLabel: '0724'
 };
@@ -3569,6 +3698,7 @@ const neutralSerializedStateItem = context.serializeStateItem_(
   'outline-identity-signature',
   outlineSettings
 );
+assert.equal(neutralSerializedStateItem.signatureVersion, 4);
 assert.equal(
   neutralSerializedStateItem.outlineIdentityHash,
   outlineIdentityHash,
@@ -3579,6 +3709,29 @@ assert.equal(
   false,
   '新寫入的同步狀態不得保留課程／活動 type'
 );
+const normalizedLegacyTimeState = context.normalizeStoredState_({
+  legacyFixedPeriod: {
+    signatureVersion: 3,
+    metadataVersion: 2,
+    originalTitle: '舊狀態時間測試',
+    dateKey: '2026-08-03',
+    periodStart: 4,
+    periodEnd: 5,
+    isAllDay: false,
+    startTime: '11:10',
+    endTime: '14:00',
+    start: '2026-08-03T03:10:00.000Z',
+    end: '2026-08-03T06:00:00.000Z',
+    location: '吉林基地',
+    calendarEventId: 'legacy-fixed-period-event'
+  }
+});
+const normalizedLegacyTimeItem = Object.values(normalizedLegacyTimeState)[0];
+assert.equal(normalizedLegacyTimeItem.signatureVersion, 3);
+assert.equal(normalizedLegacyTimeItem.startTime, '11:05');
+assert.equal(normalizedLegacyTimeItem.endTime, '14:15');
+assert.equal(normalizedLegacyTimeItem.start, '2026-08-03T03:05:00.000Z');
+assert.equal(normalizedLegacyTimeItem.end, '2026-08-03T06:15:00.000Z');
 const legacyPastStatePlan = context.buildSyncPlan_(
   {
     legacyPast: {
@@ -3650,6 +3803,8 @@ function buildSyncPlanReference(oldState, desiredEvents, todayKey) {
         !usedOld[oldItem.stateKey] &&
         context.normalizeTitle_(oldItem.originalTitle) ===
           context.normalizeTitle_(newItem.originalTitle) &&
+        context.normalizeTitle_(oldItem.location) ===
+          context.normalizeTitle_(newItem.location) &&
         haveCompatibleMoveShapeReference(oldItem, newItem)
       )
       .map(oldItem => ({
@@ -3758,14 +3913,14 @@ const planTieCenter = new Date('2026-08-15T09:00:00.000Z');
 const planTieOldBefore = makePlanTestItem(
   '同名課程',
   new Date(planTieCenter.getTime() - 24 * 60 * 60 * 1000),
-  'A',
+  '吉林基地',
   1,
   'old-before'
 );
 const planTieOldAfter = makePlanTestItem(
   '同名課程',
   new Date(planTieCenter.getTime() + 24 * 60 * 60 * 1000),
-  'B',
+  '吉林基地',
   1,
   'old-after'
 );
@@ -3779,7 +3934,7 @@ const planTieState = {
 };
 const tiedMovePlan = context.buildSyncPlan_(
   planTieState,
-  [makePlanTestItem('同名課程', planTieCenter, 'C', 1, 'new-tied')],
+  [makePlanTestItem('同名課程', planTieCenter, '吉林基地', 1, 'new-tied')],
   '2026-08-01'
 );
 assert.equal(tiedMovePlan.moved.length, 0);
@@ -3789,7 +3944,7 @@ assert.equal(tiedMovePlan.deletions.length, 2);
 const moveBoundaryOld = makePlanTestItem(
   '__proto__',
   new Date('2026-08-02T09:00:00.000Z'),
-  '舊地點',
+  '吉林基地',
   1,
   'boundary-old'
 );
@@ -3804,7 +3959,7 @@ assert.equal(
     [makePlanTestItem(
       '__proto__',
       new Date(moveBoundaryOld.start.getTime() + 21 * 24 * 60 * 60 * 1000),
-      '新地點',
+      '吉林基地',
       2,
       'boundary-new'
     )],
@@ -3819,7 +3974,7 @@ assert.equal(
     [makePlanTestItem(
       '__proto__',
       new Date(moveBoundaryOld.start.getTime() + 21 * 24 * 60 * 60 * 1000 + 1),
-      '新地點',
+      '吉林基地',
       2,
       'outside-boundary-new'
     )],
@@ -3832,7 +3987,7 @@ assert.equal(
 const changedPeriodCountOld = makePlanRangeTestItem(
   '節數測試課程',
   new Date('2026-08-05T09:00:00.000Z'),
-  '原教室',
+  '吉林基地',
   1,
   1,
   'shape-old'
@@ -3840,7 +3995,7 @@ const changedPeriodCountOld = makePlanRangeTestItem(
 const changedPeriodCountNew = makePlanRangeTestItem(
   '節數測試課程',
   new Date('2026-08-06T09:00:00.000Z'),
-  '新教室',
+  '吉林基地',
   1,
   2,
   'shape-new'
@@ -3857,7 +4012,7 @@ assert.equal(changedPeriodCountPlan.deletions.length, 1);
 const allDayShapeOld = makePlanRangeTestItem(
   '全天與節次測試',
   new Date('2026-08-05T00:00:00.000Z'),
-  '',
+  '吉林基地',
   1,
   1,
   'all-day-shape-old'
@@ -3866,7 +4021,7 @@ allDayShapeOld.isAllDay = true;
 const timedShapeNew = makePlanRangeTestItem(
   '全天與節次測試',
   new Date('2026-08-06T09:00:00.000Z'),
-  '新教室',
+  '吉林基地',
   1,
   1,
   'timed-shape-new'
@@ -3887,7 +4042,7 @@ const differentOutlineIdentityHash = context.makeCourseOutlineIdentityHash_({
 const outlineNearOld = makePlanRangeTestItem(
   '課綱身分課程',
   new Date('2026-08-14T09:00:00.000Z'),
-  '近教室',
+  '吉林基地',
   1,
   1,
   'outline-near-old',
@@ -3896,7 +4051,7 @@ const outlineNearOld = makePlanRangeTestItem(
 const outlineFarOld = makePlanRangeTestItem(
   '課綱身分課程',
   new Date('2026-08-10T09:00:00.000Z'),
-  '遠教室',
+  '吉林基地',
   1,
   1,
   'outline-far-old',
@@ -3905,7 +4060,7 @@ const outlineFarOld = makePlanRangeTestItem(
 const outlineIdentityNew = makePlanRangeTestItem(
   '課綱身分課程',
   new Date('2026-08-15T09:00:00.000Z'),
-  '調整後教室',
+  '吉林基地',
   5,
   5,
   'outline-new',
@@ -3945,12 +4100,10 @@ assert.equal(
 
 const firstAdjustmentOldItems = [
   makePlanRangeTestItem('化學', new Date('2026-08-05T14:15:00.000Z'), '吉林基地', 6, 6, 'chem-old-single'),
-  makePlanRangeTestItem('化學', new Date('2026-08-05T15:15:00.000Z'), '測驗時間', 7, 7, 'chem-old-test'),
   makePlanRangeTestItem('化學', new Date('2026-08-13T13:25:00.000Z'), '吉林基地', 5, 6, 'chem-old-double')
 ];
 const firstAdjustmentNewItems = [
   makePlanRangeTestItem('化學', new Date('2026-08-05T14:15:00.000Z'), '吉林基地', 6, 7, 'chem-new-double'),
-  makePlanRangeTestItem('化學', new Date('2026-08-13T13:25:00.000Z'), '測驗時間', 5, 5, 'chem-new-test'),
   makePlanRangeTestItem('化學', new Date('2026-08-13T14:15:00.000Z'), '吉林基地', 6, 6, 'chem-new-single')
 ];
 const firstAdjustmentPlan = context.buildSyncPlan_(
@@ -3964,18 +4117,15 @@ assert.deepEqual(
   )),
   [
     ['chem-old-double', 'chem-new-double'],
-    ['chem-old-test', 'chem-new-test'],
     ['chem-old-single', 'chem-new-single']
   ],
   '化學調課應保持單節／雙節事件形狀，不得判成擴張、縮短或拆併'
 );
-const firstDetectedChanges = context.normalizeDetectedScheduleChanges_(
-  firstAdjustmentPlan.moved.map(pair => ({
-    type: '調整',
-    oldItem: pair.oldItem,
-    newItem: pair.newItem
-  }))
-);
+const firstDetectedChanges = firstAdjustmentPlan.moved.map(pair => ({
+  type: '調整',
+  oldItem: pair.oldItem,
+  newItem: pair.newItem
+}));
 assert.deepEqual(
   JSON.parse(JSON.stringify(firstDetectedChanges.map(change => [
     change.type,
@@ -3988,15 +4138,16 @@ assert.deepEqual(
     change.newItem && change.newItem.location
   ]))),
   [
-    ['調整', '2026-08-13', 5, 5, '2026-08-05', 7, 7, '吉林基地'],
-    ['調整', '2026-08-05', 7, 7, '2026-08-13', 5, 5, '測驗時間']
+    ['調整', '2026-08-13', 5, 6, '2026-08-05', 6, 7, '吉林基地'],
+    ['調整', '2026-08-05', 6, 6, '2026-08-13', 6, 6, '吉林基地']
   ],
-  '化學判定結果應消去相同時段只因連續區間邊界改變所造成的假調整'
+  '成功配對的單節與雙節行程必須保持完整，不得拆成單節後跨配對抵銷'
 );
 const firstDetectedJobResult = context.buildSyncJobResult_({
   jobId: 'first-detected-result',
   created: 0,
   updated: 3,
+  adjusted: 2,
   outlineUpdated: 0,
   deleted: 0,
   omittedChangeCount: 0,
@@ -4008,16 +4159,46 @@ const firstDetectedJobResult = context.buildSyncJobResult_({
 }, false);
 assert.equal(firstDetectedJobResult.updated, 2);
 assert.equal(firstDetectedJobResult.changes.length, 2);
+const omittedAdjustmentResult = context.buildSyncJobResult_({
+  jobId: 'omitted-adjustment-result',
+  created: 0,
+  updated: 5,
+  adjusted: 2,
+  outlineUpdated: 0,
+  deleted: 0,
+  omittedChangeCount: 1,
+  changes: [context.serializeSyncChange_(firstDetectedChanges[0])]
+}, false);
+assert.equal(
+  omittedAdjustmentResult.updated,
+  2,
+  '異動明細超過上限時，updated 仍只能計算完整行程的調整，不得混入內容更新'
+);
+const legacyExactUpdateResult = context.buildSyncJobResult_({
+  jobId: 'legacy-exact-update-result',
+  created: 0,
+  updated: 1,
+  outlineUpdated: 0,
+  deleted: 0,
+  omittedChangeCount: 0,
+  changes: [{
+    type: '更新',
+    oldItem: firstAdjustmentOldItems[0],
+    newItem: firstAdjustmentOldItems[0]
+  }]
+}, false);
+assert.equal(legacyExactUpdateResult.updated, 0);
+assert.equal(legacyExactUpdateResult.changes.length, 0);
 
 const secondAdjustmentOldItems = [
-  makePlanRangeTestItem('國語文', new Date('2026-08-07T08:25:00.000Z'), '測驗時間', 1, 1, 'chinese-old-test'),
+  makePlanRangeTestItem('國語文', new Date('2026-08-07T08:25:00.000Z'), '吉林基地', 1, 1, 'chinese-old-single'),
   makePlanRangeTestItem('國語文', new Date('2026-08-10T13:25:00.000Z'), '吉林基地', 5, 6, 'chinese-old-double'),
-  makePlanRangeTestItem('英語文', new Date('2026-08-07T09:15:00.000Z'), '測驗時間', 2, 2, 'english-old-test')
+  makePlanRangeTestItem('英語文', new Date('2026-08-07T09:15:00.000Z'), '線上教室', 2, 2, 'english-old-single')
 ];
 const secondAdjustmentNewItems = [
   makePlanRangeTestItem('國語文', new Date('2026-08-07T08:25:00.000Z'), '吉林基地', 1, 2, 'chinese-new-double'),
-  makePlanRangeTestItem('國語文', new Date('2026-08-10T13:25:00.000Z'), '測驗時間', 5, 5, 'chinese-new-test'),
-  makePlanRangeTestItem('英語文', new Date('2026-08-10T14:15:00.000Z'), '測驗時間', 6, 6, 'english-new-test')
+  makePlanRangeTestItem('國語文', new Date('2026-08-10T13:25:00.000Z'), '吉林基地', 5, 5, 'chinese-new-single'),
+  makePlanRangeTestItem('英語文', new Date('2026-08-10T14:15:00.000Z'), '線上教室', 6, 6, 'english-new-single')
 ];
 const secondAdjustmentPlan = context.buildSyncPlan_(
   makePlanState(secondAdjustmentOldItems),
@@ -4030,31 +4211,106 @@ assert.deepEqual(
   )),
   [
     ['chinese-old-double', 'chinese-new-double'],
-    ['chinese-old-test', 'chinese-new-test'],
-    ['english-old-test', 'english-new-test']
+    ['chinese-old-single', 'chinese-new-single'],
+    ['english-old-single', 'english-new-single']
   ],
   '國語文與英語文調課應依節數形狀辨識真正的跨日期移動'
 );
-const secondDetectedChanges = context.normalizeDetectedScheduleChanges_(
-  secondAdjustmentPlan.moved.map(pair => ({
-    type: '調整',
-    oldItem: pair.oldItem,
-    newItem: pair.newItem
-  }))
-);
+const secondDetectedChanges = secondAdjustmentPlan.moved.map(pair => ({
+  type: '調整',
+  oldItem: pair.oldItem,
+  newItem: pair.newItem
+}));
 assert.deepEqual(
   JSON.parse(JSON.stringify(secondDetectedChanges.map(change => [
     change.oldItem.testId,
-    change.newItem.testId
+    change.oldItem.periodStart,
+    change.oldItem.periodEnd,
+    change.newItem.testId,
+    change.newItem.periodStart,
+    change.newItem.periodEnd
   ]))),
   [
-    ['chinese-old-double', 'chinese-new-double'],
-    ['chinese-old-test', 'chinese-new-test'],
-    ['english-old-test', 'english-new-test']
+    ['chinese-old-double', 5, 6, 'chinese-new-double', 1, 2],
+    ['chinese-old-single', 1, 1, 'chinese-new-single', 5, 5],
+    ['english-old-single', 2, 2, 'english-new-single', 6, 6]
   ],
-  '區間邊界沒有產生假調整時，不得改寫原本正確的三筆判定'
+  '國語文與英語文的每筆完整行程都必須保留原配對範圍'
 );
-const identityConflictNormalization = context.normalizeDetectedScheduleChanges_([
+
+const crossLocationSwapOldItems = [
+  makePlanRangeTestItem('化學', new Date('2026-08-29T14:15:00.000Z'), '吉林基地', 6, 6, 'swap-old-jilin'),
+  makePlanRangeTestItem('化學', new Date('2026-09-02T10:15:00.000Z'), '弘道基地', 3, 3, 'swap-old-hongdao')
+];
+const crossLocationSwapNewItems = [
+  makePlanRangeTestItem('化學', new Date('2026-08-29T14:15:00.000Z'), '弘道基地', 6, 6, 'swap-new-hongdao'),
+  makePlanRangeTestItem('化學', new Date('2026-09-02T10:15:00.000Z'), '吉林基地', 3, 3, 'swap-new-jilin')
+];
+const crossLocationSwapPlan = context.buildSyncPlan_(
+  makePlanState(crossLocationSwapOldItems),
+  crossLocationSwapNewItems,
+  '2026-08-01'
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(crossLocationSwapPlan.moved.map(pair => [
+    pair.oldItem.testId,
+    pair.newItem.testId,
+    pair.oldItem.location,
+    pair.newItem.location
+  ]))),
+  [
+    ['swap-old-hongdao', 'swap-new-hongdao', '弘道基地', '弘道基地'],
+    ['swap-old-jilin', 'swap-new-jilin', '吉林基地', '吉林基地']
+  ],
+  '同標題跨基地交換時必須各自尋找同基地舊事件'
+);
+
+const fartherSameLocationOld = makePlanRangeTestItem(
+  '同基地優先課程',
+  new Date('2026-08-01T08:25:00.000Z'),
+  '吉林基地',
+  1,
+  1,
+  'farther-same-location'
+);
+const nearerOtherLocationOld = makePlanRangeTestItem(
+  '同基地優先課程',
+  new Date('2026-08-09T08:25:00.000Z'),
+  '弘道基地',
+  1,
+  1,
+  'nearer-other-location'
+);
+const sameLocationCandidateNew = makePlanRangeTestItem(
+  '同基地優先課程',
+  new Date('2026-08-10T09:15:00.000Z'),
+  '吉林基地',
+  2,
+  2,
+  'same-location-new'
+);
+const sameLocationPriorityPlan = context.buildSyncPlan_(
+  makePlanState([fartherSameLocationOld, nearerOtherLocationOld]),
+  [sameLocationCandidateNew],
+  '2026-08-01'
+);
+assert.equal(sameLocationPriorityPlan.moved.length, 1);
+assert.equal(
+  sameLocationPriorityPlan.moved[0].oldItem.testId,
+  'farther-same-location',
+  '較近的跨基地候選不得勝過 21 日內的同基地候選'
+);
+
+const noSameLocationPlan = context.buildSyncPlan_(
+  makePlanState([fartherSameLocationOld]),
+  [Object.assign({}, sameLocationCandidateNew, { location: '弘道基地' })],
+  '2026-08-01'
+);
+assert.equal(noSameLocationPlan.moved.length, 0);
+assert.equal(noSameLocationPlan.additions.length, 1);
+assert.equal(noSameLocationPlan.deletions.length, 1);
+
+const identityConflictChanges = [
   {
     type: '調整',
     oldItem: makePlanRangeTestItem(
@@ -4097,11 +4353,21 @@ const identityConflictNormalization = context.normalizeDetectedScheduleChanges_(
       differentOutlineIdentityHash
     )
   }
-]);
+];
+const identityConflictResult = context.buildSyncJobResult_({
+  jobId: 'identity-conflict-result',
+  created: 0,
+  updated: 2,
+  adjusted: 2,
+  outlineUpdated: 0,
+  deleted: 0,
+  omittedChangeCount: 0,
+  changes: identityConflictChanges.map(context.serializeSyncChange_)
+}, false);
 assert.equal(
-  identityConflictNormalization.length,
+  identityConflictResult.changes.length,
   2,
-  '已知的課綱身分衝突時，不得因日期、節次與地點重疊而消去異動'
+  '完成配對後不得再依日期、節次或課綱身分跨配對消去完整行程'
 );
 
 let planRandomState = 0x6d2b79f5;
@@ -4497,6 +4763,21 @@ assert.equal(
   '通用程式在匯入前不得注入網站使用者的通知時段'
 );
 assert.equal(initialGeneratedSettings.instantNotificationsEnabled, true);
+assert.deepEqual(
+  Array.from(initialGeneratedSettings.reminderMinutesList),
+  [10],
+  '通用程式應預設在行程前 10 分鐘提醒'
+);
+assert.deepEqual(
+  Array.from(context.normalizeReminderMinutesList_([1440, 10, 10, 999], 30)),
+  [10, 1440],
+  '提前時間應去除重複與不支援的值'
+);
+assert.deepEqual(
+  Array.from(context.normalizeReminderMinutesList_(null, 30)),
+  [30],
+  '舊版單一提前時間應可繼續使用'
+);
 assert.deepEqual(
   Array.from(context.getEffectiveNotificationHours_(initialGeneratedSettings)),
   [6],
@@ -5115,7 +5396,7 @@ const sampleEmailData = {
   controlUrl: 'https://docs.google.com/document/d/test/edit',
   controlPanelName: activeControlPanelName,
   calendarUrl: 'https://calendar.google.com/calendar/u/0/r',
-  summary: '新增 1、更新 2、移除 0、未變更 8',
+  summary: '新增 1、調整 2、取消 0、未變更 8',
   message: '測試訊息',
   created: 1,
   updated: 2,
@@ -5155,12 +5436,12 @@ const sampleEmailData = {
     ]
   }],
   changes: [{
-    type: '時間變更',
+    type: '調整',
     course: '測試課程',
     sourceName: '高二｜115-1-high2',
-    oldStandard: '2026/07/27 第 5 節 舊教室',
-    newStandard: '2026/07/28 第 6 節 新教室',
-    displayText: '時間變更｜測試課程'
+    oldStandard: '2026/07/27 第 5 節 吉林基地',
+    newStandard: '2026/07/28 第 6 節 吉林基地',
+    displayText: '調整｜測試課程'
   }]
 };
 Object.keys(emailTemplateManifest.notifications).forEach(templateKind => {
@@ -5188,7 +5469,7 @@ assert.match(
 );
 assert.doesNotMatch(
   renderedScheduleChanges,
-  />時間變更<\/span>/,
+  />調整<\/span>/,
   '行程調整 HTML 不應渲染右側類型標籤'
 );
 const renderedIndexReview = context.buildEmailHtmlSafe_(
@@ -5326,6 +5607,38 @@ const notificationTimingSettings = {
   notificationHours: [(Number(formatDate(new Date(), 'H')) + 1) % 24],
   notifySyncHour: (Number(formatDate(new Date(), 'H')) + 1) % 24
 };
+context.saveNotificationQueueState_({
+  pending: [],
+  pendingChangeData: {
+    created: 0,
+    updated: 1,
+    outlineUpdated: 0,
+    deleted: 0,
+    unchanged: 0,
+    omittedCount: 0,
+    changes: [{
+      type: '更新',
+      course: '舊版格式測試課程',
+      oldStandard: '舊內容',
+      newStandard: '新內容',
+      displayText: '舊版更新'
+    }]
+  },
+  lastChangeDate: '',
+  lastSuccessSummaryDate: ''
+});
+const emailsBeforeLegacyQueueCleanup = sentEmailMessages.length;
+assert.equal(
+  context.deliverScheduleChangeNotification_(notificationTimingSettings, null),
+  false,
+  '舊版「更新」型別不得被寄成行程調整'
+);
+assert.equal(sentEmailMessages.length, emailsBeforeLegacyQueueCleanup);
+assert.equal(
+  context.loadNotificationQueueState_().pendingChangeData,
+  null,
+  '只含舊版「更新」型別的待寄資料應在升級後清除'
+);
 const scheduledChangeResult = {
   created: 0,
   updated: 1,
@@ -5334,15 +5647,15 @@ const scheduledChangeResult = {
   unchanged: 8,
   omittedChangeCount: 0,
   changes: [{
-    type: '時間變更',
+    type: '調整',
     oldItem: {
       originalTitle: '測試課程',
       dateKey: '2026-07-27',
       periodStart: 5,
       periodEnd: 6,
-      startTime: '13:10',
-      endTime: '15:00',
-      location: '舊教室',
+      startTime: '13:25',
+      endTime: '15:05',
+      location: '吉林基地',
       isAllDay: false
     },
     newItem: {
@@ -5350,9 +5663,9 @@ const scheduledChangeResult = {
       dateKey: '2026-07-28',
       periodStart: 3,
       periodEnd: 4,
-      startTime: '10:10',
-      endTime: '12:00',
-      location: '新教室',
+      startTime: '10:15',
+      endTime: '11:55',
+      location: '吉林基地',
       isAllDay: false
     }
   }]
@@ -6058,7 +6371,7 @@ function createMockCalendar() {
 }
 
 function makeBatchFixtureEvent(index) {
-  const start = new Date('2026-08-01T08:10:00+08:00');
+  const start = new Date('2026-08-01T08:25:00+08:00');
   start.setDate(start.getDate() + index);
   const end = new Date(start.getTime() + 50 * 60 * 1000);
   return {
@@ -6069,8 +6382,8 @@ function makeBatchFixtureEvent(index) {
     weekNum: Math.floor(index / 7) + 1,
     periodStart: 1,
     periodEnd: 1,
-    startTime: '08:10',
-    endTime: '09:00',
+    startTime: '08:25',
+    endTime: '09:15',
     start,
     end,
     location: '測試教室',
@@ -6097,6 +6410,7 @@ function makeSyncJobForTest(desiredCount, forceCalendarCheck) {
     processedOperations: 0,
     created: 0,
     updated: 0,
+    adjusted: 0,
     outlineUpdated: 0,
     deleted: 0,
     migrationDeleted: 0,
@@ -6116,6 +6430,97 @@ const batchSettings = {
   reminderMode: 'none',
   reminderMinutes: 10
 };
+const fixedTimeMigrationCalendar = createMockCalendar();
+const fixedTimeMigrationDesired = Object.assign({}, makeBatchFixtureEvent(0), {
+  originalTitle: '固定鐘點升級測試',
+  location: '吉林基地'
+});
+const fixedTimeMigrationKey = context.makeOccurrenceKey_(fixedTimeMigrationDesired);
+const legacyTimeStart = new Date('2026-08-01T08:10:00+08:00');
+const legacyTimeEnd = new Date('2026-08-01T09:00:00+08:00');
+const fixedTimeMigrationEvent = fixedTimeMigrationCalendar.createEvent(
+  '固定鐘點升級測試 [吉林基地]',
+  legacyTimeStart,
+  legacyTimeEnd,
+  { location: '吉林基地', description: '' }
+);
+context.setManagedEventTags_(fixedTimeMigrationEvent, fixedTimeMigrationKey);
+const fixedTimeMigrationState = context.normalizeStoredState_({
+  legacyFixedTime: {
+    signatureVersion: 3,
+    metadataVersion: 2,
+    originalTitle: fixedTimeMigrationDesired.originalTitle,
+    isAllDay: false,
+    dateKey: fixedTimeMigrationDesired.dateKey,
+    weekday: fixedTimeMigrationDesired.weekday,
+    weekNum: fixedTimeMigrationDesired.weekNum,
+    periodStart: 1,
+    periodEnd: 1,
+    startTime: '08:10',
+    endTime: '09:00',
+    start: legacyTimeStart.toISOString(),
+    end: legacyTimeEnd.toISOString(),
+    location: fixedTimeMigrationDesired.location,
+    calendarEventId: fixedTimeMigrationEvent.getId(),
+    syncSignature: 'legacy-time-signature',
+    baseSyncSignature: 'legacy-time-base-signature'
+  }
+});
+const fixedTimeMigrationPlan = context.buildSyncPlan_(
+  fixedTimeMigrationState,
+  [fixedTimeMigrationDesired],
+  '2026-08-01'
+);
+const fixedTimeMigrationResult = context.applySyncPlan_(
+  fixedTimeMigrationCalendar,
+  fixedTimeMigrationState,
+  fixedTimeMigrationPlan,
+  batchSettings,
+  { forceCalendarCheck: false, trackProgress: false }
+);
+assert.equal(fixedTimeMigrationResult.updated, 1);
+assert.equal(
+  fixedTimeMigrationResult.changes.length,
+  0,
+  '舊狀態第一次套用固定鐘點時可校正 Calendar，但不得產生假異動'
+);
+assert.equal(
+  fixedTimeMigrationCalendar.getEventById(fixedTimeMigrationEvent.getId())
+    .getStartTime().toISOString(),
+  fixedTimeMigrationDesired.start.toISOString()
+);
+assert.equal(
+  fixedTimeMigrationCalendar.getEventById(fixedTimeMigrationEvent.getId())
+    .getEndTime().toISOString(),
+  fixedTimeMigrationDesired.end.toISOString()
+);
+const popupReminderCalls = [];
+const emailReminderCalls = [];
+let reminderClearCalls = 0;
+context.applyEventReminders_({
+  removeAllReminders() { reminderClearCalls += 1; },
+  addPopupReminder(minutes) { popupReminderCalls.push(minutes); },
+  addEmailReminder(minutes) { emailReminderCalls.push(minutes); }
+}, {
+  reminderMode: 'popup',
+  reminderMinutesList: [10, 60, 1440],
+  reminderMinutes: 10
+});
+assert.equal(reminderClearCalls, 1);
+assert.deepEqual(popupReminderCalls, [10, 60, 1440]);
+assert.deepEqual(emailReminderCalls, [], '複選時間不得改變單選的提醒方式');
+context.applyEventReminders_({
+  removeAllReminders() { reminderClearCalls += 1; },
+  addPopupReminder(minutes) { popupReminderCalls.push(minutes); },
+  addEmailReminder(minutes) { emailReminderCalls.push(minutes); }
+}, {
+  reminderMode: 'email',
+  reminderMinutesList: [30, 1440],
+  reminderMinutes: 30
+});
+assert.equal(reminderClearCalls, 2);
+assert.deepEqual(popupReminderCalls, [10, 60, 1440]);
+assert.deepEqual(emailReminderCalls, [30, 1440]);
 const neutralTitleCalendar = createMockCalendar();
 const neutralTitleItem = Object.assign({}, makeBatchFixtureEvent(0), {
   originalTitle: '模擬考'
@@ -6180,7 +6585,7 @@ assert.equal(Object.keys(batchState).length, 422);
 assert.equal(batchCalendar.activeEvents().length, 422);
 assert.equal(
   Object.values(batchState).every(item =>
-    item.signatureVersion === 3 && !Object.prototype.hasOwnProperty.call(item, 'type')
+    item.signatureVersion === 4 && !Object.prototype.hasOwnProperty.call(item, 'type')
   ),
   true,
   '新狀態應使用中性短雜湊簽章版本，且不得保存 type'
@@ -6993,7 +7398,14 @@ assert.doesNotThrow(
 const finalizerRetryJob = makeSyncJobForTest(0, false);
 finalizerRetryJob.retryCount = 1;
 context.applySyncBatchResultToJob_(finalizerRetryJob, {
-  stats: { created: 0, updated: 0, outlineUpdated: 0, deleted: 0, migrationDeleted: 0 },
+  stats: {
+    created: 0,
+    updated: 0,
+    adjusted: 0,
+    outlineUpdated: 0,
+    deleted: 0,
+    migrationDeleted: 0
+  },
   completedOperations: 0,
   changes: []
 });

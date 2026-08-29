@@ -3,7 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "vite --host 127.0.0.1"
+    "dev": "vite --host 127.0.0.1",
+    "test:schedule-adjustment:plan": "node tests/schedule-adjustment-fixture-test.js --plan",
+    "test:schedule-adjustment": "node tests/schedule-adjustment-fixture-test.js --verify",
+    "preview:schedule-adjustment-email": "node tests/schedule-adjustment-fixture-test.js --verify --write-preview"
   },
   "devDependencies": {
     "vite": "^6.0.0"

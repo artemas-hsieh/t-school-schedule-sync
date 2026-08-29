@@ -174,6 +174,7 @@ function runHighLoadFirstSyncTest() {
       descriptionPreset: 'standard',
       customDescription: '',
       reminderMode: 'none',
+      reminderMinutesList: [10],
       reminderMinutes: 10
     });
   } finally {
@@ -858,6 +859,7 @@ function buildHighLoadTestSettings_(source) {
     descriptionPreset: 'standard',
     customDescription: '',
     reminderMode: 'none',
+    reminderMinutesList: [10],
     reminderMinutes: 10
   };
 }
@@ -898,6 +900,7 @@ function buildHighLoadTestSettings_(source) {
       descriptionPreset: 'standard',
       customDescription: STANDARD_CUSTOM_DESCRIPTION_TEMPLATE,
       reminderMode: 'none',
+      reminderMinutesList: [10],
       reminderMinutes: 10,
       knownTitles: [],
       pendingTitles: [],
@@ -1055,9 +1058,19 @@ const SETUP_CODE_SCHEMA_VERSION = 2;
 const SETUP_CODE_MAX_LENGTH = 32 * 1024;
 const SETUP_CATALOG_FINGERPRINT_VERSION = 3;
 const SETUP_CONTEXT_FINGERPRINT_VERSION = 3;
-const SCHEDULE_FINGERPRINT_VERSION = 3;
+const SCHEDULE_FINGERPRINT_VERSION = 4;
 const GRADE_API_NAMES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+const PERIOD_TIME_RANGES = [
+  { start: '08:25', end: '09:15' },
+  { start: '09:15', end: '10:05' },
+  { start: '10:15', end: '11:05' },
+  { start: '11:05', end: '11:55' },
+  { start: '13:25', end: '14:15' },
+  { start: '14:15', end: '15:05' },
+  { start: '15:15', end: '16:05' },
+  { start: '16:05', end: '16:55' }
+];
 const MANUAL_MERGE_EXCEPTIONS = {};
 const TITLE_SIMILARITY_CLUSTER_THRESHOLD = 0.34;
 const TITLE_SIMILARITY_EPSILON = 1e-12;
@@ -2779,6 +2792,10 @@ function sanitizeSettingsInput_(input, previous, source) {
   const reminderMode = ['none', 'popup', 'email'].indexOf(value.reminderMode) !== -1
     ? value.reminderMode
     : 'none';
+  const reminderMinutesList = normalizeReminderMinutesList_(
+    value.reminderMinutesList,
+    value.reminderMinutes
+  );
   const descriptionPreset = Object.prototype.hasOwnProperty.call(value, 'descriptionPreset')
     ? (value.descriptionPreset === 'custom' ? 'custom' : 'standard')
     : (previous.descriptionPreset === 'custom' ? 'custom' : 'standard');
@@ -2816,7 +2833,8 @@ function sanitizeSettingsInput_(input, previous, source) {
     descriptionPreset,
     customDescription,
     reminderMode,
-    reminderMinutes: sanitizeReminderMinutes_(value.reminderMinutes),
+    reminderMinutesList,
+    reminderMinutes: reminderMinutesList[0],
     knownTitles: sourceTitles,
     pendingTitles: gradeChanged ? [] : previous.pendingTitles.filter(title =>
       !isCourseSelectionHidden_(title) && sourceKeys.indexOf(normalizeTitle_(title)) !== -1
@@ -3360,7 +3378,7 @@ function buildSyncJobInput_(settings, source, desiredEvents, calendar) {
     settings.descriptionPreset,
     settings.customDescription,
     settings.reminderMode,
-    settings.reminderMinutes
+    reminderMinutesSignatureValue_(settings)
   ];
   return {
     gradeName: settings.gradeName,
@@ -3453,6 +3471,7 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
     processedOperations: 0,
     created: 0,
     updated: 0,
+    adjusted: 0,
     outlineUpdated: 0,
     deleted: 0,
     migrationDeleted: 0,
@@ -3507,7 +3526,14 @@ function runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, toda
 
   const completed = [];
   const changes = [];
-  const stats = { created: 0, updated: 0, outlineUpdated: 0, deleted: 0, migrationDeleted: 0 };
+  const stats = {
+    created: 0,
+    updated: 0,
+    adjusted: 0,
+    outlineUpdated: 0,
+    deleted: 0,
+    migrationDeleted: 0
+  };
 
   for (let index = 0; index < operations.length; index += 1) {
     if (index > 0 && Date.now() - startedAt >= SYNC_BATCH_SOFT_LIMIT_MS) break;
@@ -3731,17 +3757,21 @@ function applySyncOperation_(operation, state, calendar, settings, recovering, s
     stats.outlineUpdated += 1;
   } else {
     stats.updated += 1;
-    changes.push({
-      type: operation.oldKey === operation.newKey ? '更新' : '調整',
-      oldItem: operation.oldItem,
-      newItem: operation.newItem
-    });
+    if (operation.oldKey !== operation.newKey) {
+      stats.adjusted += 1;
+      changes.push({
+        type: '調整',
+        oldItem: operation.oldItem,
+        newItem: operation.newItem
+      });
+    }
   }
 }
 
 function applySyncBatchResultToJob_(job, batchResult) {
   job.created += batchResult.stats.created;
   job.updated += batchResult.stats.updated;
+  job.adjusted += batchResult.stats.adjusted;
   job.outlineUpdated += batchResult.stats.outlineUpdated;
   job.deleted += batchResult.stats.deleted;
   job.migrationDeleted += batchResult.stats.migrationDeleted;
@@ -3959,21 +3989,24 @@ function writeFailedSyncStatus_(message) {
 
 function buildSyncJobResult_(job, pending) {
   const omittedChangeCount = Number(job.omittedChangeCount) || 0;
-  const rawChanges = (job.changes || []).map(hydrateSyncChange_);
-  const canNormalizeDetectedChanges = !pending && omittedChangeCount === 0;
-  const changes = canNormalizeDetectedChanges
-    ? normalizeDetectedScheduleChanges_(rawChanges)
-    : rawChanges;
-  const detectedCounts = canNormalizeDetectedChanges
-    ? countDetectedScheduleChanges_(changes)
-    : null;
+  const changes = (job.changes || [])
+    .map(hydrateSyncChange_)
+    .filter(change => isDetectedScheduleChangeType_(change && change.type));
+  const detectedCounts = countDetectedScheduleChanges_(changes);
+  const hasCompleteChangeDetails = omittedChangeCount === 0;
   return {
     pending: Boolean(pending),
     jobId: job.jobId,
-    created: detectedCounts ? detectedCounts.created : Number(job.created) || 0,
-    updated: detectedCounts ? detectedCounts.updated : Number(job.updated) || 0,
+    created: hasCompleteChangeDetails
+      ? detectedCounts.created
+      : Number(job.created) || 0,
+    updated: hasCompleteChangeDetails
+      ? detectedCounts.updated
+      : Number(job.adjusted) || 0,
     outlineUpdated: Number(job.outlineUpdated) || 0,
-    deleted: detectedCounts ? detectedCounts.deleted : Number(job.deleted) || 0,
+    deleted: hasCompleteChangeDetails
+      ? detectedCounts.deleted
+      : Number(job.deleted) || 0,
     unchanged: 0,
     changes,
     omittedChangeCount
@@ -3988,6 +4021,13 @@ function loadSyncJob_() {
     job.input = job.input || {};
     job.input.desiredScheduleFingerprint = String(job.input.scheduleFingerprint || '');
     delete job.input.scheduleFingerprint;
+  }
+  if (job && !Number.isFinite(Number(job.adjusted))) {
+    job.adjusted = countDetectedScheduleChanges_(
+      (job.changes || []).filter(change =>
+        isDetectedScheduleChangeType_(change && change.type)
+      )
+    ).updated;
   }
   return job.schemaVersion === SYNC_JOB_SCHEMA_VERSION ? job : null;
 }
@@ -4118,150 +4158,17 @@ function compactSyncChangeItem_(item) {
   };
 }
 
-function normalizeDetectedScheduleChanges_(changes) {
-  const entries = [];
-  const atomizableTypes = ['調整', '新增', '取消'];
-  (changes || []).forEach((change, index) => {
-    const oldAtoms = makeScheduleChangeAtoms_(change.oldItem, index, 'old');
-    const newAtoms = makeScheduleChangeAtoms_(change.newItem, index, 'new');
-    entries.push({
-      index,
-      change,
-      atomizable: atomizableTypes.indexOf(change.type) !== -1 &&
-        (!change.oldItem || oldAtoms.length > 0) &&
-        (!change.newItem || newAtoms.length > 0),
-      oldAtoms,
-      newAtoms
-    });
-  });
-
-  const oldAtomsByKey = Object.create(null);
-  entries.filter(entry => entry.atomizable).forEach(entry => {
-    entry.oldAtoms.forEach(atom => {
-      const key = makeScheduleChangeAtomKey_(atom);
-      if (!oldAtomsByKey[key]) oldAtomsByKey[key] = [];
-      oldAtomsByKey[key].push(atom);
-    });
-  });
-
-  let cancelledAtomCount = 0;
-  entries.filter(entry => entry.atomizable).forEach(entry => {
-    entry.newAtoms.forEach(newAtom => {
-      const candidates = (oldAtomsByKey[makeScheduleChangeAtomKey_(newAtom)] || [])
-        .filter(oldAtom =>
-          !oldAtom.cancelled &&
-          oldAtom.entryIndex !== newAtom.entryIndex &&
-          haveCompatibleOutlineIdentities_(oldAtom.item, newAtom.item)
-        );
-      const exactIdentityCandidates = candidates.filter(oldAtom =>
-        newAtom.item.outlineIdentityHash &&
-        oldAtom.item.outlineIdentityHash === newAtom.item.outlineIdentityHash
-      );
-      const eligible = exactIdentityCandidates.length ? exactIdentityCandidates : candidates;
-      if (eligible.length !== 1) return;
-      eligible[0].cancelled = true;
-      newAtom.cancelled = true;
-      cancelledAtomCount += 1;
-    });
-  });
-
-  if (!cancelledAtomCount) return changes || [];
-
-  const normalized = [];
-  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
-    const entry = entries[entryIndex];
-    if (!entry.atomizable) {
-      normalized.push(entry.change);
-      continue;
-    }
-    const oldGroups = coalesceScheduleChangeAtoms_(
-      entry.oldAtoms.filter(atom => !atom.cancelled)
-    );
-    const newGroups = coalesceScheduleChangeAtoms_(
-      entry.newAtoms.filter(atom => !atom.cancelled)
-    );
-    if (oldGroups.length > 1 || newGroups.length > 1) {
-      return changes || [];
-    }
-    const oldItem = oldGroups[0] || null;
-    const newItem = newGroups[0] || null;
-    if (!oldItem && !newItem) continue;
-    normalized.push({
-      type: oldItem && newItem ? '調整' : (newItem ? '新增' : '取消'),
-      oldItem,
-      newItem
-    });
-  }
-  return normalized;
-}
-
-function makeScheduleChangeAtoms_(item, entryIndex, side) {
-  if (!item || item.isAllDay) return [];
-  const periodStart = Number(item.periodStart);
-  const periodEnd = Number(item.periodEnd) || periodStart;
-  if (!Number.isInteger(periodStart) || !Number.isInteger(periodEnd) ||
-      periodStart < 1 || periodEnd < periodStart) {
-    return [];
-  }
-  const atoms = [];
-  for (let period = periodStart; period <= periodEnd; period += 1) {
-    atoms.push({ item, entryIndex, side, period, cancelled: false });
-  }
-  return atoms;
-}
-
-function makeScheduleChangeAtomKey_(atom) {
-  return JSON.stringify([
-    normalizeTitle_(atom.item.originalTitle),
-    atom.item.dateKey,
-    atom.period,
-    normalizeTitle_(atom.item.location)
-  ]);
-}
-
-function haveCompatibleOutlineIdentities_(left, right) {
-  const leftIdentity = String(left && left.outlineIdentityHash || '');
-  const rightIdentity = String(right && right.outlineIdentityHash || '');
-  return !leftIdentity || !rightIdentity || leftIdentity === rightIdentity;
-}
-
-function coalesceScheduleChangeAtoms_(atoms) {
-  if (!atoms.length) return [];
-  const sorted = atoms.slice().sort((left, right) => left.period - right.period);
-  const groups = [];
-  let group = [sorted[0]];
-  for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index].period === group[group.length - 1].period + 1) {
-      group.push(sorted[index]);
-    } else {
-      groups.push(group);
-      group = [sorted[index]];
-    }
-  }
-  groups.push(group);
-  return groups.map(makeScheduleChangeFragment_);
-}
-
-function makeScheduleChangeFragment_(atoms) {
-  const item = Object.assign({}, atoms[0].item, {
-    periodStart: atoms[0].period,
-    periodEnd: atoms[atoms.length - 1].period
-  });
-  if (item.periodStart !== Number(atoms[0].item.periodStart) ||
-      item.periodEnd !== Number(atoms[0].item.periodEnd)) {
-    item.startTime = '';
-    item.endTime = '';
-  }
-  return item;
-}
-
 function countDetectedScheduleChanges_(changes) {
   return (changes || []).reduce((counts, change) => {
     if (change.type === '新增') counts.created += 1;
     else if (change.type === '取消') counts.deleted += 1;
-    else if (change.type === '調整' || change.type === '更新') counts.updated += 1;
+    else if (change.type === '調整') counts.updated += 1;
     return counts;
   }, { created: 0, updated: 0, deleted: 0 });
+}
+
+function isDetectedScheduleChangeType_(type) {
+  return ['調整', '新增', '取消'].indexOf(type) !== -1;
 }
 
 function dedupeAndValidateDesiredEvents_(events) {
@@ -4824,11 +4731,13 @@ function buildSyncPlan_(oldState, desiredEvents, todayKey) {
   });
 
   const unmatchedOld = oldFuture.filter(item => !matchedOld[item.stateKey]);
-  const unmatchedOldByTitle = Object.create(null);
+  const unmatchedOldByTitleAndLocation = Object.create(null);
   unmatchedOld.forEach(oldItem => {
-    const titleKey = normalizeTitle_(oldItem.originalTitle);
-    if (!unmatchedOldByTitle[titleKey]) unmatchedOldByTitle[titleKey] = [];
-    unmatchedOldByTitle[titleKey].push(oldItem);
+    const bucketKey = makeMoveBucketKey_(oldItem);
+    if (!unmatchedOldByTitleAndLocation[bucketKey]) {
+      unmatchedOldByTitleAndLocation[bucketKey] = [];
+    }
+    unmatchedOldByTitleAndLocation[bucketKey].push(oldItem);
   });
   const moved = [];
   const usedOld = {};
@@ -4836,7 +4745,7 @@ function buildSyncPlan_(oldState, desiredEvents, todayKey) {
   const moveWindowMs = 21 * 24 * 60 * 60 * 1000;
 
   unmatchedNew.forEach(newItem => {
-    const candidates = (unmatchedOldByTitle[normalizeTitle_(newItem.originalTitle)] || [])
+    const candidates = (unmatchedOldByTitleAndLocation[makeMoveBucketKey_(newItem)] || [])
       .filter(oldItem =>
         !usedOld[oldItem.stateKey] &&
         haveCompatibleMoveShape_(oldItem, newItem)
@@ -4889,6 +4798,13 @@ function buildSyncPlan_(oldState, desiredEvents, todayKey) {
     additions: stillNew,
     deletions: unmatchedOld.filter(item => !usedOld[item.stateKey])
   };
+}
+
+function makeMoveBucketKey_(item) {
+  return JSON.stringify([
+    normalizeTitle_(item && item.originalTitle),
+    normalizeTitle_(item && item.location)
+  ]);
 }
 
 function haveCompatibleMoveShape_(oldItem, newItem) {
@@ -4985,7 +4901,9 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
     } else {
       calendarEventId = updateCalendarEvent_(calendar, calendarEventId, pair.newItem, pair.newKey, settings);
       updated += 1;
-      changes.push({ type: pair.oldItem.stateKey === pair.newKey ? '更新' : '調整', oldItem: pair.oldItem, newItem: pair.newItem });
+      if (pair.oldItem.stateKey !== pair.newKey) {
+        changes.push({ type: '調整', oldItem: pair.oldItem, newItem: pair.newItem });
+      }
     }
 
     newState[pair.newKey] = serializeStateItem_(pair.newItem, calendarEventId, signature, settings);
@@ -5206,8 +5124,14 @@ function calendarEventMatchesExpectedContent_(event, item, stateKey, settings) {
 
 function applyEventReminders_(event, settings) {
   event.removeAllReminders();
-  if (settings.reminderMode === 'popup') event.addPopupReminder(settings.reminderMinutes);
-  if (settings.reminderMode === 'email') event.addEmailReminder(settings.reminderMinutes);
+  const reminderMinutesList = normalizeReminderMinutesList_(
+    settings.reminderMinutesList,
+    settings.reminderMinutes
+  );
+  reminderMinutesList.forEach(minutes => {
+    if (settings.reminderMode === 'popup') event.addPopupReminder(minutes);
+    if (settings.reminderMode === 'email') event.addEmailReminder(minutes);
+  });
 }
 
 function buildEventLocation_(item) {
@@ -5329,7 +5253,7 @@ function makeBaseEventSignaturePayload_(item, settings) {
     item.originalTitle, item.isAllDay, item.dateKey, item.periodStart, item.periodEnd,
     eventDateIso_(item.start), eventDateIso_(item.end), item.location,
     settings.descriptionPreset, settings.customDescription,
-    settings.reminderMode, settings.reminderMinutes
+    settings.reminderMode, reminderMinutesSignatureValue_(settings)
   ]);
 }
 
@@ -5338,7 +5262,7 @@ function makeLegacyClassifiedBaseEventSignaturePayload_(item, settings, type) {
     item.originalTitle, type, item.isAllDay, item.dateKey, item.periodStart, item.periodEnd,
     eventDateIso_(item.start), eventDateIso_(item.end), item.location,
     settings.descriptionPreset, settings.customDescription,
-    settings.reminderMode, settings.reminderMinutes
+    settings.reminderMode, reminderMinutesSignatureValue_(settings)
   ]);
 }
 
@@ -5401,7 +5325,7 @@ function storedEventSignatureMatches_(oldItem, newItem, settings) {
 
 function serializeStateItem_(item, calendarEventId, signature, settings) {
   return {
-    signatureVersion: 3,
+    signatureVersion: 4,
     metadataVersion: EVENT_METADATA_VERSION,
     originalTitle: item.originalTitle,
     isAllDay: Boolean(item.isAllDay),
@@ -7235,8 +7159,6 @@ function parseSchedulePayload_(payload, gradeName, now) {
     const weekNum = Number(header.weekNum) || headerIndexes.indexOf(headerIndex) + 1;
     const bodyRows = payload.tableData.slice(headerIndex + 1, headerIndex + 9);
     if (bodyRows.length < 8) throw new Error('第 ' + weekNum + ' 週缺少節次資料。');
-    const times = bodyRows.map(row => parsePeriodTime_(row.cells && row.cells[0] && row.cells[0].value));
-    if (times.some(item => !item)) throw new Error('第 ' + weekNum + ' 週包含無法辨識的節次時間。');
     const noteRow = payload.tableData[headerIndex + 9];
     const sourceUpdatedLabel = extractUpdateLabel_(noteRow);
     const occupiedUntil = {};
@@ -7265,10 +7187,10 @@ function parseSchedulePayload_(payload, gradeName, now) {
             dateKey,
             periodStart: periodIndex + 1,
             periodEnd,
-            startTime: times[periodIndex].start,
-            endTime: times[periodEnd - 1].end,
-            start: makeTaipeiDate_(dateKey, times[periodIndex].start),
-            end: makeTaipeiDate_(dateKey, times[periodEnd - 1].end),
+            startTime: PERIOD_TIME_RANGES[periodIndex].start,
+            endTime: PERIOD_TIME_RANGES[periodEnd - 1].end,
+            start: makeTaipeiDate_(dateKey, PERIOD_TIME_RANGES[periodIndex].start),
+            end: makeTaipeiDate_(dateKey, PERIOD_TIME_RANGES[periodEnd - 1].end),
             location: parsed.location,
             sourceUpdatedLabel
           });
@@ -7308,19 +7230,19 @@ function parseSchedulePayload_(payload, gradeName, now) {
     });
   });
 
+  const normalizedEvents = mergeAdjacentScheduleEvents_(events);
+
   const catalogAll = extractCatalogFromPayload_(payload);
   const firstDateKey = datedHeaders[0].dateKey;
   const lastDateKey = datedHeaders[datedHeaders.length - 1].dateKey;
   const termKey = makeAcademicTermKey_(GRADE_API_NAMES[gradeName], firstDateKey);
-  const sourceUpdatedLabel = latestUpdateLabel_(events.map(event => event.sourceUpdatedLabel));
-  const sourceEventRows = sortCanonicalRows_(events.map(event => [
+  const sourceUpdatedLabel = latestUpdateLabel_(normalizedEvents.map(event => event.sourceUpdatedLabel));
+  const sourceEventRows = sortCanonicalRows_(normalizedEvents.map(event => [
     event.originalTitle,
     Boolean(event.isAllDay),
     event.dateKey,
     event.periodStart,
     event.periodEnd,
-    eventDateIso_(event.start),
-    eventDateIso_(event.end),
     event.location || ''
   ]));
   const catalogFingerprint = makeSetupCatalogFingerprint_(termKey, lastDateKey, catalogAll);
@@ -7348,7 +7270,7 @@ function parseSchedulePayload_(payload, gradeName, now) {
       termItems: catalogAll.filter(item => item.period === 'term'),
       vacationItems: catalogAll.filter(item => item.period === 'vacation')
     },
-    events
+    events: normalizedEvents
   };
 }
 
@@ -7376,8 +7298,7 @@ function extractCatalogFromPayload_(payload) {
   (payload.tableData || []).forEach(row => {
     if (!row || row.isHeader || !Array.isArray(row.cells)) return;
     const isNoteRow = normalizeTitle_(row.cells[1] && row.cells[1].value) === '備註';
-    row.cells.forEach((cell, cellIndex) => {
-      if (isNoteRow && cellIndex < 2) return;
+    row.cells.slice(2).forEach(cell => {
       splitCellEntries_(cell && cell.value).forEach(rawEntry => {
         if (isStructuralValue_(rawEntry)) return;
         const parsed = parseEntry_(rawEntry);
@@ -7439,15 +7360,75 @@ function parseMonthDay_(value) {
   return month >= 1 && month <= 12 && day >= 1 && day <= 31 ? { month, day } : null;
 }
 
-function parsePeriodTime_(value) {
-  const match = normalizeText_(value).replace(/\\n/g, '').match(/(\\d{1,2}:\\d{2})\\s*[~～-]\\s*(\\d{1,2}:\\d{2})/);
-  return match ? { start: match[1], end: match[2] } : null;
-}
-
 function makeTaipeiDate_(dateKey, time) {
   const date = new Date(dateKey + 'T' + time + ':00+08:00');
   if (isNaN(date.getTime())) throw new Error('課表包含無法辨識的日期或時間。');
   return date;
+}
+
+function mergeAdjacentScheduleEvents_(events) {
+  const groups = Object.create(null);
+  const output = [];
+
+  (events || []).forEach((item, index) => {
+    if (!item || item.isAllDay) {
+      output.push({ index, item });
+      return;
+    }
+    const key = JSON.stringify([
+      item.dateKey,
+      normalizeTitle_(item.originalTitle),
+      normalizeTitle_(item.location)
+    ]);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({ index, item });
+  });
+
+  Object.keys(groups).forEach(key => {
+    const entries = groups[key].slice().sort((left, right) =>
+      Number(left.item.periodStart) - Number(right.item.periodStart) ||
+      Number(left.item.periodEnd) - Number(right.item.periodEnd) ||
+      left.index - right.index
+    );
+    let current = null;
+    entries.forEach(entry => {
+      const item = entry.item;
+      if (!current || Number(item.periodStart) > Number(current.item.periodEnd) + 1) {
+        if (current) output.push(current);
+        current = { index: entry.index, item: Object.assign({}, item) };
+        return;
+      }
+      current.index = Math.min(current.index, entry.index);
+      current.item.periodStart = Math.min(
+        Number(current.item.periodStart),
+        Number(item.periodStart)
+      );
+      current.item.periodEnd = Math.max(
+        Number(current.item.periodEnd),
+        Number(item.periodEnd)
+      );
+      current.item.sourceUpdatedLabel = latestUpdateLabel_([
+        current.item.sourceUpdatedLabel,
+        item.sourceUpdatedLabel
+      ]);
+    });
+    if (current) output.push(current);
+  });
+
+  return output.sort((left, right) => left.index - right.index).map(entry => {
+    const item = entry.item;
+    if (!item || item.isAllDay) return item;
+    const periodStart = Number(item.periodStart);
+    const periodEnd = Number(item.periodEnd);
+    const startTime = PERIOD_TIME_RANGES[periodStart - 1].start;
+    const endTime = PERIOD_TIME_RANGES[periodEnd - 1].end;
+    return Object.assign({}, item, {
+      startTime,
+      endTime,
+      start: makeTaipeiDate_(item.dateKey, startTime),
+      end: makeTaipeiDate_(item.dateKey, endTime)
+    });
+  });
 }
 
 function splitCellEntries_(value) {
@@ -7521,6 +7502,11 @@ function loadSettings_() {
   settings.notifySyncHour = Math.max.apply(null, settings.notificationHours);
   settings.instantNotificationsEnabled = settings.instantNotificationsEnabled !== false;
   settings.autoSyncHours = SCHEDULE_SYNC_HOURS.slice();
+  settings.reminderMinutesList = normalizeReminderMinutesList_(
+    stored && stored.reminderMinutesList,
+    settings.reminderMinutes
+  );
+  settings.reminderMinutes = settings.reminderMinutesList[0];
   const legacyCatalog = storedSchemaVersion < SETTINGS_SCHEMA_VERSION
     ? loadLegacyClassifiedCatalogItems_(settings)
     : { items: [], reliable: false };
@@ -7646,13 +7632,22 @@ function normalizeStoredState_(state) {
     const isAllDay = Boolean(item.isAllDay);
     if (!item.originalTitle || !dateKey || (!isAllDay && !periodStart) || !item.calendarEventId) return;
     const normalizedKey = [normalizeTitle_(item.originalTitle), dateKey, isAllDay ? 'all-day' : periodStart, isAllDay ? 'all-day' : periodEnd, normalizeTitle_(item.location)].join('|');
-    result[normalizedKey] = Object.assign({}, item, {
+    const normalizedItem = Object.assign({}, item, {
       dateKey,
       periodStart,
       periodEnd,
       isAllDay,
       stateKey: normalizedKey
     });
+    if (!isAllDay && periodStart >= 1 && periodEnd <= PERIOD_TIME_RANGES.length) {
+      const startTime = PERIOD_TIME_RANGES[periodStart - 1].start;
+      const endTime = PERIOD_TIME_RANGES[periodEnd - 1].end;
+      normalizedItem.startTime = startTime;
+      normalizedItem.endTime = endTime;
+      normalizedItem.start = makeTaipeiDate_(dateKey, startTime).toISOString();
+      normalizedItem.end = makeTaipeiDate_(dateKey, endTime).toISOString();
+    }
+    result[normalizedKey] = normalizedItem;
   });
   return result;
 }
@@ -8426,7 +8421,13 @@ function deliverScheduleChangeNotification_(settings, currentChangeData) {
     state.pendingChangeData,
     currentChangeData
   );
-  if (!changeData || !changeData.changeCount) return false;
+  if (!changeData || !changeData.changeCount) {
+    if (state.pendingChangeData) {
+      state.pendingChangeData = null;
+      saveNotificationQueueState_(state);
+    }
+    return false;
+  }
 
   try {
     sendEmail_(
@@ -8476,6 +8477,7 @@ function mergeChangeEmailData_(left, right) {
 
   const seen = {};
   merged.changes = merged.changes.filter(change => {
+    if (!isDetectedScheduleChangeType_(change && change.type)) return false;
     const key = JSON.stringify([
       change.type,
       change.course,
@@ -8486,6 +8488,11 @@ function mergeChangeEmailData_(left, right) {
     seen[key] = true;
     return true;
   }).slice(0, SYNC_CHANGE_DETAIL_LIMIT);
+  if (!merged.omittedCount) {
+    merged.created = merged.changes.filter(change => change.type === '新增').length;
+    merged.updated = merged.changes.filter(change => change.type === '調整').length;
+    merged.deleted = merged.changes.filter(change => change.type === '取消').length;
+  }
   merged.changeCount = merged.changes.length + merged.omittedCount;
   merged.omittedNote = merged.omittedCount
     ? '另有 ' + merged.omittedCount + ' 項行程調整未逐項列出'
@@ -8835,21 +8842,24 @@ function buildSyncEmailData_(result) {
 function formatSyncEmailDataSummary_(data) {
   const outlineUpdated = Number(data.outlineUpdated) || 0;
   return '新增 ' + (Number(data.created) || 0) +
-    '、更新 ' + (Number(data.updated) || 0) +
+    '、調整 ' + (Number(data.updated) || 0) +
     (outlineUpdated ? '、課綱說明更新 ' + outlineUpdated : '') +
-    '、移除 ' + (Number(data.deleted) || 0) +
+    '、取消 ' + (Number(data.deleted) || 0) +
     '、未變更 ' + (Number(data.unchanged) || 0);
 }
 
 function buildChangeEmailData_(result) {
   const omittedCount = Number(result.omittedChangeCount) || 0;
+  const detectedChanges = (result.changes || []).filter(change =>
+    isDetectedScheduleChangeType_(change && change.type)
+  );
   return Object.assign(buildSyncEmailData_(result), {
     omittedCount,
-    changeCount: result.changes.length + omittedCount,
+    changeCount: detectedChanges.length + omittedCount,
     omittedNote: omittedCount
       ? '另有 ' + omittedCount + ' 項行程調整未逐項列出'
       : '',
-    changes: result.changes.map(change => {
+    changes: detectedChanges.map(change => {
       const values = buildChangeTemplateValues_(change);
       return Object.assign({}, values, {
         oldStandard: formatChangeEmailSide_(values, 'old', false),
@@ -8937,9 +8947,9 @@ function formatEventLine_(item, includeTitle) {
 function formatSyncResultMessage_(result) {
   const outlineUpdated = Number(result.outlineUpdated) || 0;
   return '新增 ' + result.created +
-    '、更新 ' + result.updated +
+    '、調整 ' + result.updated +
     (outlineUpdated ? '、課綱說明更新 ' + outlineUpdated : '') +
-    '、移除 ' + result.deleted +
+    '、取消 ' + result.deleted +
     '、未變更 ' + result.unchanged + '。';
 }
 
@@ -9034,6 +9044,27 @@ function normalizeHourArray_(values, fallback) {
 function sanitizeReminderMinutes_(value) {
   const minutes = Number(value);
   return [10, 30, 60, 1440].indexOf(minutes) !== -1 ? minutes : 10;
+}
+
+function normalizeReminderMinutesList_(values, fallback) {
+  const allowedMinutes = [10, 30, 60, 1440];
+  const result = [];
+  (Array.isArray(values) ? values : []).forEach(value => {
+    const minutes = Number(value);
+    if (allowedMinutes.indexOf(minutes) !== -1 && result.indexOf(minutes) === -1) {
+      result.push(minutes);
+    }
+  });
+  if (!result.length) result.push(sanitizeReminderMinutes_(fallback));
+  return result.sort((left, right) => left - right);
+}
+
+function reminderMinutesSignatureValue_(settings) {
+  const values = normalizeReminderMinutesList_(
+    settings && settings.reminderMinutesList,
+    settings && settings.reminderMinutes
+  );
+  return values.length === 1 ? values[0] : values;
 }
 
 function formatDateKey_(date) {

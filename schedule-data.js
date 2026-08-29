@@ -565,8 +565,7 @@
       }
 
       const isNoteRow = normalizeTitle(row.cells[1] && row.cells[1].value) === '備註';
-      row.cells.forEach((cell, cellIndex) => {
-        if (isNoteRow && cellIndex < 2) return;
+      row.cells.slice(2).forEach(cell => {
         splitCellEntries(cell && cell.value).forEach(rawEntry => {
           if (isStructuralValue(rawEntry)) {
             return;
