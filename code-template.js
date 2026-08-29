@@ -1143,7 +1143,7 @@ function hasImportedSetup_(settings) {
 
 function assertSetupImported_(settings) {
   if (!hasImportedSetup_(settings)) {
-    throw new Error('請先開啟控制臺介面，貼上網站產生的設定碼。');
+    throw new Error('請先開啟控制臺介面，貼上設定碼。');
   }
 }
 
@@ -1190,7 +1190,7 @@ function showSettingsSidebar() {
 function showSetupImportDialog() {
   const settings = loadSettings_();
   if (settings.setupComplete) {
-    throw new Error('首次同步已完成，為了保護現有日曆與同步狀態，不能再匯入安裝設定碼。');
+    throw new Error('首次同步已完成，為了保護現有日曆與同步狀態，不能再匯入設定碼。');
   }
   const output = HtmlService.createHtmlOutput(SETUP_DIALOG_HTML)
     .setWidth(560)
@@ -1233,7 +1233,7 @@ function getSettingsUiData() {
 function previewSetupCodeForUi(code) {
   const settings = loadSettings_();
   if (settings.setupComplete) {
-    throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+    throw new Error('首次同步已完成，不能再匯入設定碼。');
   }
   return setupImportPreviewForClient_(buildSetupImportPreview_(code, settings));
 }
@@ -1241,7 +1241,7 @@ function previewSetupCodeForUi(code) {
 function importSetupCodeFromUi(code, confirmUnverifiedAccount) {
   const beforeImport = loadSettings_();
   if (beforeImport.setupComplete) {
-    throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+    throw new Error('首次同步已完成，不能再匯入設定碼。');
   }
   const decoded = decodeSetupCode_(code);
   const notificationEmail = String(decoded.payload && decoded.payload.notificationEmail || '').trim();
@@ -1270,7 +1270,7 @@ function importSetupCodeFromUi(code, confirmUnverifiedAccount) {
   try {
     const previous = loadSettings_();
     if (previous.setupComplete) {
-      throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+      throw new Error('首次同步已完成，不能再匯入設定碼。');
     }
     return Object.assign({
       applied: true,
@@ -1288,7 +1288,7 @@ function importSetupCodeFromUi(code, confirmUnverifiedAccount) {
 function applySetupCodeFromUi(code, confirmationToken) {
   const beforeImport = loadSettings_();
   if (beforeImport.setupComplete) {
-    throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+    throw new Error('首次同步已完成，不能再匯入設定碼。');
   }
   const preview = buildSetupImportPreview_(code, beforeImport);
   const lock = LockService.getScriptLock();
@@ -1296,7 +1296,7 @@ function applySetupCodeFromUi(code, confirmationToken) {
   try {
     const previous = loadSettings_();
     if (previous.setupComplete) {
-      throw new Error('首次同步已完成，不能再匯入安裝設定碼。');
+      throw new Error('首次同步已完成，不能再匯入設定碼。');
     }
     if (!confirmationToken || confirmationToken !== preview.confirmationToken) {
       throw new Error('課表在確認期間又有變動，請重新檢查設定碼。');
@@ -1355,7 +1355,7 @@ function loadSetupSourceContext_(settings) {
   if (!stored || !stored.catalog ||
       stored.gradeName !== settings.gradeName ||
       !termKeysMatch_(stored.termKey, settings.termKey)) {
-    throw new Error('請重新貼上行程同步設定碼，再開啟控制臺。');
+    throw new Error('請重新貼上設定碼，再開啟控制臺。');
   }
   const source = normalizeSetupSourceContext_(stored, settings.gradeName);
   const expectedContextFingerprint = String(settings.setupContextFingerprint || '');
@@ -1366,7 +1366,7 @@ function loadSetupSourceContext_(settings) {
       expectedContextFingerprint !== source.setupContextFingerprint &&
       expectedContextFingerprint !== storedContextFingerprint &&
       Number(settings.setupCodeVersion) !== 1) {
-    throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
+    throw new Error('設定碼課表摘要已改變，請重新貼上設定碼。');
   }
   return source;
 }
@@ -1975,7 +1975,7 @@ function normalizeSetupSourceContext_(source, gradeName) {
       ? makeSetupContextFingerprintVersion_(source, 2)
       : normalized.setupContextFingerprint;
     if (suppliedContextFingerprint !== expectedContextFingerprint) {
-      throw new Error('設定碼課表摘要已改變，請重新貼上行程同步設定碼。');
+      throw new Error('設定碼課表摘要已改變，請重新貼上設定碼。');
     }
   }
   return normalized;
@@ -2203,7 +2203,7 @@ function decodeSetupCode_(code) {
   if (normalized.length > SETUP_CODE_MAX_LENGTH) throw new Error('設定碼過長。');
   const parts = normalized.split('.');
   if (parts.length !== 3 || parts[0] !== SETUP_CODE_PREFIX) {
-    throw new Error('這不是可用的 T-SCHOOL 設定碼。');
+    throw new Error('這不是可用的設定碼。');
   }
   if (hashText_(parts[1]) !== parts[2]) {
     throw new Error('設定碼不完整，請回網站重新複製。');

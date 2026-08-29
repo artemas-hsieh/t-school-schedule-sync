@@ -2149,8 +2149,8 @@ function initStepJourney() {
       confirmed: 'Email 和通知偏好都沒錯 ↵'
     },
     4: {
-      initial: '產生安裝設定碼 ↵',
-      confirmed: '產生安裝設定碼 ↵'
+      initial: '產生設定碼 ↵',
+      confirmed: '產生設定碼 ↵'
     }
   };
 
@@ -2204,7 +2204,7 @@ function initStepJourney() {
           ? '確認行程'
           : stepNumber === 3
             ? '確認通知設定'
-            : '產生安裝設定碼';
+            : '產生設定碼';
   }
 
   async function activateCompletionButton(button) {
@@ -2253,7 +2253,7 @@ function initStepJourney() {
       }
 
       if (!generated) {
-        showToast(state.sourceError ? '請先重新讀取課表' : '安裝設定碼尚未準備完成');
+        showToast(state.sourceError ? '請先重新讀取課表' : '設定碼尚未準備完成');
         return;
       }
 

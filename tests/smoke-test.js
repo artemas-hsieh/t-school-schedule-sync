@@ -123,6 +123,10 @@ assert.equal(configuratorHtml.includes('id="copy-setup-code-fallback"'), false);
 assert.equal(configuratorHtml.includes('變出控制臺！'), false);
 assert.equal(configuratorHtml.includes('>變出控制臺<'), true);
 assert.equal(configuratorHtml.includes('設定碼包含你剛剛填寫的資訊，請勿隨意分享給他人！'), true);
+assert.equal(configuratorHtml.includes('data-cursor-label="產生設定碼"'), true);
+assert.equal(configuratorHtml.includes('產生安裝設定碼'), false);
+assert.equal(configuratorAppSource.includes('產生安裝設定碼'), false);
+assert.equal(configuratorAppSource.includes('安裝設定碼尚未準備完成'), false);
 assert.equal(configuratorHtml.includes('class="desktop-next-steps"'), true);
 assert.equal(configuratorHtml.includes('class="mobile-next-steps"'), true);
 assert.match(
@@ -151,7 +155,8 @@ assert.match(
   /function updateGeneratedCodeAvailability\(sourceReady\)[\s\S]*?elements\.copyCodeStep\.classList\.toggle\('is-disabled', !enabled\);/,
   '後續指引的複製文字連結應與主要複製按鈕共用可用狀態'
 );
-assert.equal(setupDialogHtml.includes('貼上「行程同步設定碼」'), true);
+assert.equal(setupDialogHtml.includes('貼上「設定碼」'), true);
+assert.equal(setupDialogHtml.includes('行程同步設定碼'), false);
 assert.equal(setupDialogHtml.includes('placeholder="貼在這邊"'), true);
 assert.equal(setupDialogHtml.includes('id="open-control-panel"'), true);
 assert.match(
@@ -328,6 +333,8 @@ assert.equal(sidebarHtml.includes('id="custom-description"'), false);
 assert.equal(sidebarHtml.includes('<span>說明格式</span>'), false);
 assert.equal(sidebarHtml.includes('id="hours"'), false, '控制臺不應顯示與實際設定不一致的固定同步時段');
 assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
+assert.equal(sidebarHtml.includes('id="reimport-setup">重新匯入設定碼</button>'), true);
+assert.equal(sidebarHtml.includes('網站設定碼'), false);
 assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
 assert.equal(sidebarHtml.includes('function pollSyncProgress(generation)'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress-warning"'), true);
@@ -1837,6 +1844,19 @@ assert.throws(
   '通用程式不得保存重新導向後的 tokenized 課表網址'
 );
 assert.doesNotThrow(() => new Function(generatedCode));
+[
+  '安裝設定碼',
+  '行程同步設定碼',
+  'T-SCHOOL 設定碼',
+  '網站設定碼',
+  '網站產生的設定碼'
+].forEach(obsoleteSetupCodeName => {
+  assert.equal(
+    generatedCode.includes(obsoleteSetupCodeName),
+    false,
+    `產生的 Code.gs 不得保留設定碼舊稱：${obsoleteSetupCodeName}`
+  );
+});
 assert.equal(
   generatedCode.includes('新增、調整、取消與未變更的預覽結果'),
   true,
@@ -5726,7 +5746,7 @@ context.writeChunkedJson_('TSCHOOL_SYNC_JOB', {
 });
 assert.throws(
   () => context.requestScheduledNotificationDelivery_(true),
-  /貼上網站產生的設定碼/,
+  /貼上設定碼/,
   '尚未匯入設定碼時不得啟動通知工作'
 );
 context.writeChunkedJson_('TSCHOOL_SETTINGS', {

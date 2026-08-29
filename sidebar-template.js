@@ -615,7 +615,7 @@
           <p class="hint field-hint" id="notification-time-hint">因為技術限制，通知時間可能在 ± 15 分鐘內波動～</p>
         </div>
         <label class="field"><span>收通知的 Email</span><input type="email" id="email" autocomplete="email" aria-describedby="email-hint"><small class="hint field-hint" id="email-hint">為了讓程式能存取課綱，請輸入校內 Email</small></label>
-        <button type="button" class="reimport-setup" id="reimport-setup">重新匯入網站設定碼</button>
+        <button type="button" class="reimport-setup" id="reimport-setup">重新匯入設定碼</button>
       </section>
 
     </main>

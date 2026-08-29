@@ -32,7 +32,7 @@ textarea { width:100%; min-height:300px; margin-top:var(--space-4); padding:var(
 </head>
 <body>
   <main>
-    <h1><label for="setup-code">貼上「行程同步設定碼」</label></h1>
+    <h1><label for="setup-code">貼上「設定碼」</label></h1>
     <textarea id="setup-code" maxlength="32768" spellcheck="false" autocomplete="off" placeholder="貼在這邊" autofocus></textarea>
     <div class="warning" id="account-warning" role="alert" tabindex="-1" hidden></div>
     <div class="message" id="paste-error" role="alert" aria-live="assertive" tabindex="-1" hidden></div>

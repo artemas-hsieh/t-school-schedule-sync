@@ -163,7 +163,7 @@
     if (!normalized) throw new Error('請貼上設定碼');
     if (normalized.length > MAX_CODE_LENGTH) throw new Error('設定碼過長');
     const parts = normalized.split('.');
-    if (parts.length !== 3 || parts[0] !== PREFIX) throw new Error('這不是可用的 T-SCHOOL 設定碼');
+    if (parts.length !== 3 || parts[0] !== PREFIX) throw new Error('這不是可用的設定碼');
     if (hashText(parts[1]) !== parts[2]) throw new Error('設定碼不完整，請回網站重新複製');
     let payload;
     try {
