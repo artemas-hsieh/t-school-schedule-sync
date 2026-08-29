@@ -45,11 +45,36 @@ const packageManifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json
 const packageLock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const viteConfigSource = fs.readFileSync(path.join(root, 'vite.config.mjs'), 'utf8');
 const scheduleDataSource = fs.readFileSync(path.join(root, 'schedule-data.js'), 'utf8');
+const setupCodeSource = fs.readFileSync(path.join(root, 'setup-code.js'), 'utf8');
+const codeTemplateSource = fs.readFileSync(path.join(root, 'code-template.js'), 'utf8');
 const emailTemplateManifestText = fs.readFileSync(
   path.join(root, 'notification-email-templates.json'),
   'utf8'
 );
 const emailTemplateManifest = JSON.parse(emailTemplateManifestText);
+const obsoleteSetupCodeNames = [
+  ['安裝', '設定碼'].join(''),
+  ['行程同步', '設定碼'].join(''),
+  ['T-SCHOOL ', '設定碼'].join(''),
+  ['網站', '設定碼'].join(''),
+  ['網站產生的', '設定碼'].join('')
+];
+[
+  ['設定網站 HTML', configuratorHtml],
+  ['設定網站 JavaScript', configuratorAppSource],
+  ['設定碼編解碼', setupCodeSource],
+  ['控制臺匯入頁', setupDialogHtml],
+  ['控制臺側欄', sidebarHtml],
+  ['Apps Script 模板', codeTemplateSource]
+].forEach(([sourceLabel, sourceText]) => {
+  obsoleteSetupCodeNames.forEach(obsoleteName => {
+    assert.equal(
+      sourceText.includes(obsoleteName),
+      false,
+      `${sourceLabel} 不得保留設定碼舊稱`
+    );
+  });
+});
 const sidebarIds = Array.from(sidebarHtml.matchAll(/\sid="([^"]+)"/g), match => match[1]);
 const sidebarIdSet = new Set(sidebarIds);
 const sidebarByIdReferences = Array.from(
@@ -124,9 +149,6 @@ assert.equal(configuratorHtml.includes('變出控制臺！'), false);
 assert.equal(configuratorHtml.includes('>變出控制臺<'), true);
 assert.equal(configuratorHtml.includes('設定碼包含你剛剛填寫的資訊，請勿隨意分享給他人！'), true);
 assert.equal(configuratorHtml.includes('data-cursor-label="產生設定碼"'), true);
-assert.equal(configuratorHtml.includes('產生安裝設定碼'), false);
-assert.equal(configuratorAppSource.includes('產生安裝設定碼'), false);
-assert.equal(configuratorAppSource.includes('安裝設定碼尚未準備完成'), false);
 assert.equal(configuratorHtml.includes('class="desktop-next-steps"'), true);
 assert.equal(configuratorHtml.includes('class="mobile-next-steps"'), true);
 assert.match(
@@ -156,7 +178,6 @@ assert.match(
   '後續指引的複製文字連結應與主要複製按鈕共用可用狀態'
 );
 assert.equal(setupDialogHtml.includes('貼上「設定碼」'), true);
-assert.equal(setupDialogHtml.includes('行程同步設定碼'), false);
 assert.equal(setupDialogHtml.includes('placeholder="貼在這邊"'), true);
 assert.equal(setupDialogHtml.includes('id="open-control-panel"'), true);
 assert.match(
@@ -334,7 +355,6 @@ assert.equal(sidebarHtml.includes('<span>說明格式</span>'), false);
 assert.equal(sidebarHtml.includes('id="hours"'), false, '控制臺不應顯示與實際設定不一致的固定同步時段');
 assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
 assert.equal(sidebarHtml.includes('id="reimport-setup">重新匯入設定碼</button>'), true);
-assert.equal(sidebarHtml.includes('網站設定碼'), false);
 assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
 assert.equal(sidebarHtml.includes('function pollSyncProgress(generation)'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress-warning"'), true);
@@ -1844,13 +1864,7 @@ assert.throws(
   '通用程式不得保存重新導向後的 tokenized 課表網址'
 );
 assert.doesNotThrow(() => new Function(generatedCode));
-[
-  '安裝設定碼',
-  '行程同步設定碼',
-  'T-SCHOOL 設定碼',
-  '網站設定碼',
-  '網站產生的設定碼'
-].forEach(obsoleteSetupCodeName => {
+obsoleteSetupCodeNames.forEach(obsoleteSetupCodeName => {
   assert.equal(
     generatedCode.includes(obsoleteSetupCodeName),
     false,
