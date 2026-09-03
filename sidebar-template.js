@@ -732,7 +732,11 @@
         }
       }
       function showToast(message) {
-        byId('toast-message').textContent = message;
+        var normalizedMessage = String(message == null ? '' : message)
+          .split('\n')
+          .map(function (line) { return line.replace(/。+(\s*)$/, '$1'); })
+          .join('\n');
+        byId('toast-message').textContent = normalizedMessage;
         byId('toast').hidden = false;
         byId('toast').classList.add('show');
       }

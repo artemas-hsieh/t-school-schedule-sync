@@ -533,6 +533,7 @@ assert.equal(
   true
 );
 assert.equal((sidebarHtml.match(/class="sync-stat"/g) || []).length, 4);
+assert.equal(sidebarHtml.includes(".map(function (line) { return line.replace(/。+(\\s*)$/, '$1'); })"), true);
 assert.equal(sidebarHtml.includes('margin-inline: calc(var(--space-1) * -1);'), true);
 assert.equal(
   sidebarHtml.includes('padding: var(--space-1) var(--space-2) var(--space-2) var(--space-1);'),
