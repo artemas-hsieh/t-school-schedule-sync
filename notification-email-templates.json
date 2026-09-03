@@ -104,6 +104,22 @@
       "lede": "",
       "content": "<div style=\"padding:16px 18px;border:1px solid #f05a47;background:#fff7f5;border-radius:4px;white-space:pre-line;font-size:14px;line-height:1.75;color:#14211d;\">{{message}}</div><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟行程同步控制臺</a></p>"
     },
+    "managed_event_deleted": {
+      "accent": "#f05a47",
+      "accentDark": "#a63c2f",
+      "accentSoft": "#fae3df",
+      "statusLabel": "需要處理",
+      "preheader": "偵測到行程被刪除，請開啟控制臺確認",
+      "headline": "偵測到行程被刪除",
+      "lede": "系統發現以下受管理行程遭到刪除，為避免你應到未到，已先自動補回\n如果確實想刪除行程，請打開控制臺完成確認～",
+      "content": "<div style=\"border:1px solid #bac6be;border-radius:4px;overflow:hidden;\">{{{itemsHtml}}}</div><p style=\"display:{{omittedNoteDisplay}};margin:16px 0 0;font-size:13px;line-height:1.7;color:#4f5d57;\">{{omittedNote}}</p><p style=\"margin:18px 0 0;\"><a href=\"{{controlUrl}}\" style=\"display:inline-block;padding:12px 18px;border-radius:4px;background:#a63c2f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;\">開啟行程同步控制臺</a></p>",
+      "repeaters": {
+        "itemsHtml": {
+          "source": "items",
+          "template": "<div style=\"padding:13px 16px;border-bottom:1px solid #bac6be;font-size:14px;line-height:1.6;color:#14211d;\">{{label}}</div>"
+        }
+      }
+    },
     "course_outline_index_changed": {
       "accent": "#f05a47",
       "accentDark": "#a63c2f",

@@ -809,6 +809,7 @@ assert.deepEqual(
     'action_required',
     'course_outline_failure',
     'course_outline_index_changed',
+    'managed_event_deleted',
     'new_schedule_items',
     'schedule_changes',
     'setup_complete',
@@ -874,6 +875,7 @@ assert.equal(
 [
   'course_outline_failure',
   'term_transition',
+  'managed_event_deleted',
   'new_schedule_items',
   'sync_stopped',
   'action_required'
@@ -918,8 +920,22 @@ assert.equal(
 );
 assert.equal(emailTemplateManifest.notifications.action_required.lede, '');
 assert.equal(
+  emailTemplateManifest.notifications.managed_event_deleted.headline,
+  '偵測到行程被刪除'
+);
+assert.equal(
+  emailTemplateManifest.notifications.managed_event_deleted.lede,
+  '系統發現以下受管理行程遭到刪除，為避免你應到未到，已先自動補回\n' +
+    '如果確實想刪除行程，請打開控制臺完成確認～'
+);
+assert.equal(
+  emailTemplateManifest.notifications.managed_event_deleted.repeaters.itemsHtml.template,
+  emailTemplateManifest.notifications.new_schedule_items.repeaters.itemsHtml.template,
+  '被刪除行程與新行程項目應使用相同的列表列樣式'
+);
+assert.equal(
   (emailTemplateManifestText.match(/>開啟行程同步控制臺<\/a>/g) || []).length,
-  5
+  6
 );
 assert.equal(emailTemplateManifestText.includes('>開啟控制臺試算表</a>'), false);
 assert.equal(emailTemplateManifestText.includes('>前往重新選課</a>'), false);
@@ -7017,10 +7033,21 @@ assert.equal(
   true
 );
 assert.equal(sentEmailMessages.length, emailsBeforeManagedDeletionNotice + 1);
-assert.match(sentEmailMessages.at(-1).subject, /已補回可能誤刪的行程/);
-assert.match(sentEmailMessages.at(-1).body, /為避免誤刪造成應到未到，已先自動補回/);
-assert.match(sentEmailMessages.at(-1).body, /開啟行程同步控制臺/);
-assert.match(sentEmailMessages.at(-1).body, /逐項選擇「刪除單一事件」或「刪除整門課程 \/ 活動」/);
+assert.equal(
+  sentEmailMessages.at(-1).subject,
+  '偵測到行程被刪除｜T-SCHOOL Schedule Sync'
+);
+assert.match(sentEmailMessages.at(-1).body, /系統發現以下受管理行程遭到刪除，為避免你應到未到，已先自動補回/);
+assert.match(sentEmailMessages.at(-1).body, /如果確實想刪除行程，請打開控制臺完成確認～/);
+assert.ok(
+  sentEmailMessages.at(-1).body.indexOf('如果確實想刪除行程') <
+    sentEmailMessages.at(-1).body.indexOf('誤刪測試課程'),
+  '確認操作說明必須位於行程列表上方'
+);
+assert.doesNotMatch(sentEmailMessages.at(-1).body, /逐項選擇「刪除單一事件」/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /<h1[^>]*>偵測到行程被刪除<\/h1>/);
+assert.doesNotMatch(sentEmailMessages.at(-1).htmlBody, /<h1[^>]*>[^<]*T-SCHOOL Schedule Sync/);
+assert.match(sentEmailMessages.at(-1).htmlBody, /誤刪測試課程（\d{4}\/\d{2}\/\d{2}/);
 assert.doesNotMatch(sentEmailMessages.at(-1).htmlBody, /deleteRestoredManaged/);
 const secondManagedDeletionRecovery = context.recoverDeletedManagedEvents_(
   managedDeletionCalendar,

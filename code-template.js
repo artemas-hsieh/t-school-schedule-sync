@@ -3662,19 +3662,23 @@ function sendManagedDeletionReviewNoticeSafe_(settings, reviews) {
         (Number(item.periodEnd) === Number(item.periodStart) ? '' : '–' + item.periodEnd) + '節') +
       '）'
   );
-  const omitted = reviews.length > items.length
-    ? '\\n另有 ' + (reviews.length - items.length) + ' 項待確認行程。'
+  const omittedNote = reviews.length > items.length
+    ? '另有 ' + (reviews.length - items.length) + ' 項待確認行程'
     : '';
-  const body = '系統偵測到下列受管理行程已從日曆消失，為避免誤刪造成應到未到，已先自動補回：\\n\\n' +
-    labels.join('\\n') + omitted +
-    '\\n\\n請開啟行程同步控制臺，在「同步狀態」逐項選擇「刪除單一事件」或「刪除整門課程 / 活動」。';
+  const introduction = '系統發現以下受管理行程遭到刪除，為避免你應到未到，已先自動補回\\n' +
+    '如果確實想刪除行程，請打開控制臺完成確認～';
+  const body = introduction + '\\n\\n' + labels.join('\\n') +
+    (omittedNote ? '\\n' + omittedNote : '');
   const result = sendActionRequiredSafe_(
     settings,
-    '已補回可能誤刪的行程',
+    '偵測到行程被刪除',
     body,
     'managed-deletion-review|' + reviews.map(item => item.id).sort().join('|'),
-    'action_required',
-    { message: body },
+    'managed_event_deleted',
+    {
+      items: labels.map(label => ({ label })),
+      omittedNote
+    },
     { immediate: true }
   );
   if (!result.ok) return false;
