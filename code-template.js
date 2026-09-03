@@ -972,6 +972,7 @@ const SETUP_SOURCE_CONTEXT_STORE = 'TSCHOOL_SETUP_SOURCE_CONTEXT';
 const SOURCE_UI_CACHE_STORE = 'TSCHOOL_SOURCE_UI_CACHE';
 const SOURCE_OBSERVATION_STORE = 'TSCHOOL_SOURCE_OBSERVATION';
 const SYNC_STATE_STORE = 'TSCHOOL_SYNC_STATE';
+const MANAGED_EVENT_DELETION_STORE = 'TSCHOOL_MANAGED_EVENT_DELETION';
 const SYNC_JOB_STORE = 'TSCHOOL_SYNC_JOB';
 const STATUS_STORE = 'TSCHOOL_STATUS';
 const SYNC_PROGRESS_STORE = 'TSCHOOL_SYNC_PROGRESS';
@@ -1034,10 +1035,13 @@ const COURSE_OUTLINE_INDEX_SPREADSHEET_ID = '1zS6TdGMTPhz2Ja8bRs2AKAg0mRsBfXET9n
 const COURSE_OUTLINE_INDEX_SHEET_NAME = '課綱來源';
 const COURSE_OUTLINE_INDEX_HEADER_SCAN_LIMIT = 20;
 const COURSE_OUTLINE_INDEX_NOTICE_DETAIL_LIMIT = 12;
-const EVENT_METADATA_VERSION = 2;
+const EVENT_METADATA_VERSION = 3;
 const MANAGED_EVENT_TAG_KEY = 'tschool_managed';
 const SYNC_ID_EVENT_TAG_KEY = 'tschool_sync_id';
 const METADATA_VERSION_EVENT_TAG_KEY = 'tschool_meta_version';
+const EVENT_OWNER_TOKEN_TAG_KEY = 'tschool_owner';
+const EVENT_OWNER_TOKEN_PROPERTY = 'TSCHOOL_EVENT_OWNER_TOKEN';
+const EVENT_OWNER_SCOPE_PROPERTY = 'TSCHOOL_EVENT_OWNER_SCOPE';
 const MANAGED_EVENT_TAG_VALUE = '1';
 const STANDARD_DESCRIPTION_TEMPLATE = ${formatString(STANDARD_CUSTOM_DESCRIPTION_TEMPLATE)};
 const VISIBLE_DESCRIPTION_FOOTER = '[T-SCHOOL Schedule Sync]';
@@ -1109,6 +1113,7 @@ let courseOutlineSourceIndexRuntimeCache_ = null;
 let scheduleSourceRuntimeCache_ = Object.create(null);
 let emailTemplateManifestRuntimeCache_ = null;
 let emailTemplateManifestRuntimeLoadAttempted_ = false;
+let managedEventOwnerTokenRuntimeCache_ = '';
 
 function getControlPanelUi_() {
   return DocumentApp.getUi();
@@ -2333,11 +2338,11 @@ function previewSettingsImpactFromUi(input) {
   const businessNow = scheduleBusinessNow_();
   const todayKey = formatDateKey_(businessNow);
   const oldState = pruneExpiredSyncState_(loadSyncState_(), businessNow);
-  const desiredEvents = dedupeAndValidateDesiredEvents_(
+  const desiredEvents = filterExcludedManagedOccurrences_(dedupeAndValidateDesiredEvents_(
     enrichEventsWithCourseOutlines_(source.events
       .filter(event => event.dateKey >= todayKey)
       .filter(event => shouldIncludeEvent_(event, next)), next, source)
-  );
+  ), next);
   const calendarChanged = Boolean(
     previous.calendarId && previous.calendarId !== next.calendarId
   );
@@ -2483,7 +2488,7 @@ function saveSettingsAndSyncFromUi(input) {
   }
   const response = buildSyncUiResponse_(
     syncResult,
-    firstSetup ? '第一次同步完成，請檢查專用日曆' : '設定已儲存並同步'
+    firstSetup ? '第一次同步完成，請檢查同步日曆' : '設定已儲存並同步'
   );
   response.operationWarning = appendWarning_(
     result.operationWarning,
@@ -2559,6 +2564,151 @@ function removeManagedEventsFromUi() {
   return attachUiDataSafely_({
     message: '已移除 ' + count + ' 筆受管理事件'
   }, getSettingsUiData);
+}
+
+function deleteRestoredManagedOccurrenceFromUi(reviewId) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    throw new Error('背景同步正在保存行程，請稍後再刪除。');
+  }
+  let response;
+  try {
+    if (isActiveSyncJob_(loadSyncJob_())) {
+      throw new Error('同步仍在背景執行，請等待完成後再刪除。');
+    }
+    const settings = loadSettings_();
+    assertSetupImported_(settings);
+    const deletionState = loadManagedEventDeletionState_();
+    const review = deletionState.pending.find(item => item.id === String(reviewId || ''));
+    if (!review ||
+        String(review.calendarId || '') !== String(settings.calendarId || '') ||
+        !termKeysMatch_(review.termKey, settings.termKey)) {
+      throw new Error('這項待確認行程已過期，請重新開啟控制臺。');
+    }
+    const state = loadSyncState_();
+    const stateItem = state[review.stateKey];
+    if (!stateItem) {
+      throw new Error('這項行程已不在同步狀態中，請重新開啟控制臺。');
+    }
+    const calendar = CalendarApp.getCalendarById(settings.calendarId);
+    if (!calendar) throw new Error('找不到同步目標日曆，已停止刪除。');
+    deleteManagedOccurrenceEvents_(calendar, stateItem, review.stateKey);
+    delete state[review.stateKey];
+    const exclusion = {
+      key: makeManagedOccurrenceExclusionKey_(review.termKey, review.stateKey),
+      termKey: normalizeTermKey_(review.termKey),
+      stateKey: review.stateKey,
+      originalTitle: review.originalTitle,
+      dateKey: review.dateKey,
+      excludedAt: new Date().toISOString()
+    };
+    deletionState.excludedOccurrences = deletionState.excludedOccurrences
+      .filter(item => item.key !== exclusion.key);
+    deletionState.excludedOccurrences.unshift(exclusion);
+    deletionState.pending = deletionState.pending.filter(item => item.id !== review.id);
+    writeChunkedJson_(SYNC_STATE_STORE, state);
+    saveManagedEventDeletionState_(deletionState);
+    updateManagedDeletionStatus_(state, '已刪除單一受管理事件。');
+    response = {
+      message: '已刪除「' + review.originalTitle + '」' + review.dateKey + ' 的單一事件'
+    };
+  } finally {
+    lock.releaseLock();
+  }
+  return attachUiDataSafely_(response, getSettingsUiData);
+}
+
+function deleteRestoredManagedTitleFromUi(reviewId) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    throw new Error('背景同步正在保存行程，請稍後再刪除。');
+  }
+  let response;
+  try {
+    if (isActiveSyncJob_(loadSyncJob_())) {
+      throw new Error('同步仍在背景執行，請等待完成後再刪除。');
+    }
+    const settings = loadSettings_();
+    assertSetupImported_(settings);
+    const deletionState = loadManagedEventDeletionState_();
+    const review = deletionState.pending.find(item => item.id === String(reviewId || ''));
+    if (!review ||
+        String(review.calendarId || '') !== String(settings.calendarId || '') ||
+        !termKeysMatch_(review.termKey, settings.termKey)) {
+      throw new Error('這項待確認行程已過期，請重新開啟控制臺。');
+    }
+    const titleKeys = getManagedDeletionTitleKeys_(review.originalTitle);
+    const state = loadSyncState_();
+    const todayKey = formatDateKey_(scheduleBusinessNow_());
+    const targetKeys = Object.keys(state).filter(key =>
+      state[key].dateKey >= todayKey &&
+      titleKeys.indexOf(normalizeTitle_(state[key].originalTitle)) !== -1
+    );
+    const calendar = CalendarApp.getCalendarById(settings.calendarId);
+    if (!calendar) throw new Error('找不到同步目標日曆，已停止刪除。');
+    targetKeys.forEach(key => {
+      deleteManagedOccurrenceEvents_(calendar, state[key], key);
+      delete state[key];
+    });
+    settings.selectedTitles = settings.selectedTitles.filter(title =>
+      titleKeys.indexOf(normalizeTitle_(title)) === -1
+    );
+    settings.pendingTitles = settings.pendingTitles.filter(title =>
+      titleKeys.indexOf(normalizeTitle_(title)) === -1
+    );
+    const excludedLabels = titleKeys.length > 1
+      ? [NATURAL_ADVANCED_BASE_TITLE].concat(NATURAL_ADVANCED_VARIANT_TITLES)
+      : [review.originalTitle];
+    settings.excludedTitles = uniqueStrings_(settings.excludedTitles.concat(excludedLabels));
+    deletionState.pending = deletionState.pending.filter(item =>
+      titleKeys.indexOf(normalizeTitle_(item.originalTitle)) === -1
+    );
+    deletionState.excludedOccurrences = deletionState.excludedOccurrences.filter(item =>
+      titleKeys.indexOf(normalizeTitle_(item.originalTitle)) === -1
+    );
+    saveSettings_(settings);
+    writeChunkedJson_(SYNC_STATE_STORE, state);
+    saveManagedEventDeletionState_(deletionState);
+    updateManagedDeletionStatus_(state, '已刪除整門課程或活動的受管理事件。');
+    response = {
+      message: '已刪除「' + review.originalTitle + '」的 ' + targetKeys.length + ' 筆受管理事件，並從同步選擇移除'
+    };
+  } finally {
+    lock.releaseLock();
+  }
+  return attachUiDataSafely_(response, getSettingsUiData);
+}
+
+function getManagedDeletionTitleKeys_(title) {
+  const normalized = normalizeTitle_(title);
+  const naturalKeys = [NATURAL_ADVANCED_BASE_TITLE]
+    .concat(NATURAL_ADVANCED_VARIANT_TITLES)
+    .map(normalizeTitle_);
+  return naturalKeys.indexOf(normalized) !== -1 ? naturalKeys : [normalized];
+}
+
+function deleteManagedOccurrenceEvents_(calendar, item, stateKey) {
+  const seen = {};
+  const eventIds = [item && item.calendarEventId];
+  findManagedCalendarEventsByStateKey_(calendar, item, stateKey, {}).forEach(event => {
+    try {
+      eventIds.push(event.getId());
+    } catch (error) {
+      if (!isMissingCalendarEventError_(error)) throw error;
+    }
+  });
+  eventIds.filter(Boolean).forEach(eventId => {
+    if (seen[eventId]) return;
+    seen[eventId] = true;
+    deleteCalendarEvent_(calendar, eventId, stateKey);
+  });
+}
+
+function updateManagedDeletionStatus_(state, message) {
+  writeChunkedJson_(STATUS_STORE, Object.assign({}, loadStatus_(), {
+    message,
+    eventCount: Object.keys(state || {}).length
+  }));
 }
 
 function attachUiDataSafely_(response, loadUiData) {
@@ -2765,13 +2915,13 @@ function sanitizeSettingsInput_(input, previous, source) {
 
   if (migrationPending && calendarId !== previous.calendarId) {
     throw new Error(
-      '上一次專用日曆搬移尚未清理完成，現在不能再次更換日曆。' +
+      '上一次同步日曆搬移尚未清理完成，現在不能再次更換日曆。' +
       '請先完成目前同步，再重新選擇新的日曆。'
     );
   }
 
   if (calendarId) {
-    assertDedicatedCalendar_(calendarId);
+    assertOwnedSyncCalendar_(calendarId);
   }
 
   const requestedNotifyHour = normalizeHour_(value.notifySyncHour, 5);
@@ -2867,6 +3017,7 @@ function buildUiData_(settings, source) {
     source: buildSourceUiModel_(source, settings.gradeName),
     calendars: listOwnedCalendars_(),
     status: loadStatus_(),
+    managedDeletionReviews: buildManagedDeletionReviewUiModel_(settings),
     courseOutlineStatus: buildCourseOutlineUiStatus_(
       settings,
       source && (source.initialSetupSnapshot || source.sourceUnavailable) ? null : source,
@@ -2978,23 +3129,35 @@ function buildSourceUiModel_(source, gradeName) {
 }
 
 function listOwnedCalendars_() {
-  const defaultId = CalendarApp.getDefaultCalendar().getId();
-  return CalendarApp.getAllOwnedCalendars()
-    .reduce((items, calendar) => {
+  const defaultCalendar = CalendarApp.getDefaultCalendar();
+  const defaultId = defaultCalendar.getId();
+  const ownedCalendars = CalendarApp.getAllOwnedCalendars().slice();
+  if (!ownedCalendars.some(calendar => calendar.getId() === defaultId)) {
+    ownedCalendars.unshift(defaultCalendar);
+  }
+  return ownedCalendars
+    .map(calendar => {
       const id = calendar.getId();
-      if (id !== defaultId) items.push({ id, name: calendar.getName() });
-      return items;
-    }, [])
-    .sort((a, b) => a.name.localeCompare(b.name));
+      return {
+        id,
+        name: calendar.getName() + (id === defaultId ? '（主要）' : '')
+      };
+    })
+    .sort((a, b) => {
+      const aIsDefault = a.id === defaultId;
+      const bIsDefault = b.id === defaultId;
+      if (aIsDefault !== bIsDefault) return aIsDefault ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 function buildDedicatedCalendarName_(settings) {
   return sanitizeCalendarName_(settings.calendarName, settings.gradeName);
 }
 
-function ensureDedicatedCalendar_(settings) {
+function ensureSyncCalendar_(settings) {
   if (settings.calendarId) {
-    return assertDedicatedCalendar_(settings.calendarId);
+    return assertOwnedSyncCalendar_(settings.calendarId);
   }
 
   const calendarName = buildDedicatedCalendarName_(settings);
@@ -3052,19 +3215,15 @@ function findRecoverableDedicatedCalendars_(calendarName) {
   });
 }
 
-function assertDedicatedCalendar_(calendarId) {
+function assertOwnedSyncCalendar_(calendarId) {
   const calendar = CalendarApp.getCalendarById(calendarId);
 
   if (!calendar) {
-    throw new Error('找不到選擇的專用日曆。');
+    throw new Error('找不到選擇的同步日曆。');
   }
 
-  if (calendar.getId() === CalendarApp.getDefaultCalendar().getId()) {
-    throw new Error('不能使用主要日曆，請建立或選擇專用日曆。');
-  }
-
-  if (typeof calendar.isOwnedByMe === 'function' && !calendar.isOwnedByMe()) {
-    throw new Error('只能使用自己擁有的專用日曆。');
+  if (typeof calendar.isOwnedByMe !== 'function' || !calendar.isOwnedByMe()) {
+    throw new Error('只能使用自己擁有的日曆。');
   }
 
   return calendar;
@@ -3254,17 +3413,31 @@ function syncSchedule_(options) {
     assertTermTransitionCalendarWritesAllowed_(settings);
     settings = registerNewTitles_(settings, source);
     if (trackProgress) {
-      writeSyncProgress_(24, '正在確認專用日曆（可能需等待 0–10 分鐘）', 'running');
+      writeSyncProgress_(24, '正在確認同步日曆（可能需等待 0–10 分鐘）', 'running');
     }
-    const calendar = ensureDedicatedCalendar_(settings);
+    const calendar = ensureSyncCalendar_(settings);
     const businessNow = scheduleBusinessNow_();
     const todayKey = formatDateKey_(businessNow);
-    const desiredEvents = dedupeAndValidateDesiredEvents_(
+    const desiredEvents = filterExcludedManagedOccurrences_(dedupeAndValidateDesiredEvents_(
       enrichEventsWithCourseOutlines_(source.events
         .filter(event => event.dateKey >= todayKey)
         .filter(event => shouldIncludeEvent_(event, settings)), settings, source)
-    );
+    ), settings);
     const oldState = pruneExpiredSyncState_(loadSyncState_(), businessNow);
+    const recovery = recoverDeletedManagedEvents_(
+      calendar,
+      oldState,
+      desiredEvents,
+      settings,
+      source,
+      todayKey
+    );
+    if (recovery.restoredCount || recovery.relinkedCount) {
+      writeChunkedJson_(SYNC_STATE_STORE, recovery.state);
+    }
+    if (recovery.notificationReviews.length) {
+      sendManagedDeletionReviewNoticeSafe_(settings, recovery.notificationReviews);
+    }
     const input = buildSyncJobInput_(settings, source, desiredEvents, calendar);
     job = loadSyncJob_() || job;
 
@@ -3349,6 +3522,170 @@ function syncSchedule_(options) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function recoverDeletedManagedEvents_(calendar, oldState, desiredEvents, settings, source, todayKey) {
+  const state = oldState || {};
+  const plan = buildSyncPlan_(state, desiredEvents || [], todayKey);
+  const pairs = (plan.exact || []).concat(plan.moved || []);
+  const deletionState = loadManagedEventDeletionState_();
+  const cutoff = new Date(scheduleBusinessNow_());
+  cutoff.setDate(cutoff.getDate() - SYNC_STATE_PAST_RETENTION_DAYS);
+  const cutoffKey = formatDateKey_(cutoff);
+  deletionState.excludedOccurrences = deletionState.excludedOccurrences.filter(item =>
+    item.dateKey >= cutoffKey && termKeysMatch_(item.termKey, settings.termKey)
+  );
+  deletionState.pending = deletionState.pending.filter(item =>
+    String(item.calendarId || '') === String(calendar.getId()) &&
+    termKeysMatch_(item.termKey, source.termKey) &&
+    item.dateKey >= todayKey &&
+    state[item.stateKey]
+  );
+
+  if (!pairs.length) {
+    saveManagedEventDeletionState_(deletionState);
+    return {
+      state,
+      restoredCount: 0,
+      relinkedCount: 0,
+      notificationReviews: deletionState.pending.filter(item => !item.notificationSentAt)
+    };
+  }
+
+  const starts = pairs.map(pair => new Date(pair.newItem.start).getTime());
+  const ends = pairs.map(pair => new Date(pair.newItem.end).getTime());
+  const rangeStart = new Date(Math.min.apply(null, starts));
+  const rangeEnd = new Date(Math.max.apply(null, ends));
+  rangeStart.setDate(rangeStart.getDate() - 1);
+  rangeEnd.setDate(rangeEnd.getDate() + 1);
+  const liveIds = {};
+  const managedBySyncHash = {};
+  calendar.getEvents(rangeStart, rangeEnd).forEach(event => {
+    let eventId;
+    try {
+      eventId = String(event.getId() || '');
+    } catch (error) {
+      if (isMissingCalendarEventError_(error)) return;
+      throw error;
+    }
+    if (!eventId) return;
+    liveIds[eventId] = event;
+    if (getEventTagSafe_(event, MANAGED_EVENT_TAG_KEY) !== MANAGED_EVENT_TAG_VALUE ||
+        getEventTagSafe_(event, EVENT_OWNER_TOKEN_TAG_KEY) !== getManagedEventOwnerToken_()) {
+      return;
+    }
+    const syncHash = getEventTagSafe_(event, SYNC_ID_EVENT_TAG_KEY);
+    if (!syncHash) return;
+    if (!managedBySyncHash[syncHash]) managedBySyncHash[syncHash] = [];
+    managedBySyncHash[syncHash].push(event);
+  });
+
+  let restoredCount = 0;
+  let relinkedCount = 0;
+  pairs.forEach(pair => {
+    const oldKey = pair.oldItem.stateKey;
+    const oldEventId = String(pair.oldItem.calendarEventId || '');
+    if (liveIds[oldEventId] || getCalendarEventOrNull_(calendar, oldEventId)) return;
+
+    const oldSyncHash = hashText_(oldKey);
+    const alternateMatches = managedBySyncHash[oldSyncHash] || [];
+    if (alternateMatches.length > 1) {
+      throw new Error(
+        '[ACTION_REQUIRED] 日曆中出現多筆相同同步識別碼的受管理事件，系統已停止修改：' +
+        pair.newItem.originalTitle + '（' + pair.newItem.dateKey + '）。'
+      );
+    }
+    if (alternateMatches.length === 1) {
+      pair.oldItem.calendarEventId = alternateMatches[0].getId();
+      state[oldKey] = Object.assign({}, state[oldKey], {
+        calendarEventId: pair.oldItem.calendarEventId
+      });
+      relinkedCount += 1;
+      return;
+    }
+
+    const event = createCalendarEventIdempotent_(
+      calendar,
+      pair.newItem,
+      pair.newKey,
+      settings
+    );
+    if (oldKey !== pair.newKey) delete state[oldKey];
+    state[pair.newKey] = serializeStateItem_(
+      pair.newItem,
+      event.getId(),
+      makeEventSignature_(pair.newItem, settings),
+      settings
+    );
+    const reviewId = hashText_(normalizeTermKey_(source.termKey) + '|' + pair.newKey);
+    const previousReview = deletionState.pending.find(item => item.id === reviewId);
+    const review = {
+      id: reviewId,
+      termKey: normalizeTermKey_(source.termKey),
+      calendarId: calendar.getId(),
+      stateKey: pair.newKey,
+      originalTitle: pair.newItem.originalTitle,
+      dateKey: pair.newItem.dateKey,
+      isAllDay: Boolean(pair.newItem.isAllDay),
+      periodStart: Number(pair.newItem.periodStart) || 0,
+      periodEnd: Number(pair.newItem.periodEnd) || Number(pair.newItem.periodStart) || 0,
+      start: pair.newItem.start.toISOString(),
+      end: pair.newItem.end.toISOString(),
+      startTime: pair.newItem.startTime || '',
+      endTime: pair.newItem.endTime || '',
+      location: pair.newItem.location || '',
+      restoredCalendarEventId: event.getId(),
+      detectedAt: previousReview && previousReview.detectedAt || new Date().toISOString(),
+      restoredAt: new Date().toISOString(),
+      notificationSentAt: previousReview && previousReview.notificationSentAt || ''
+    };
+    deletionState.pending = deletionState.pending.filter(item => item.id !== reviewId);
+    deletionState.pending.unshift(review);
+    restoredCount += 1;
+  });
+
+  saveManagedEventDeletionState_(deletionState);
+  return {
+    state,
+    restoredCount,
+    relinkedCount,
+    notificationReviews: deletionState.pending.filter(item => !item.notificationSentAt)
+  };
+}
+
+function sendManagedDeletionReviewNoticeSafe_(settings, reviews) {
+  const items = (reviews || []).slice(0, 12);
+  if (!items.length) return false;
+  const labels = items.map(item =>
+    item.originalTitle + '（' + item.dateKey.replace(/-/g, '/') +
+      (item.isAllDay ? '，全天' : '，第 ' + item.periodStart +
+        (Number(item.periodEnd) === Number(item.periodStart) ? '' : '–' + item.periodEnd) + '節') +
+      '）'
+  );
+  const omitted = reviews.length > items.length
+    ? '\\n另有 ' + (reviews.length - items.length) + ' 項待確認行程。'
+    : '';
+  const body = '系統偵測到下列受管理行程已從日曆消失，為避免誤刪造成應到未到，已先自動補回：\\n\\n' +
+    labels.join('\\n') + omitted +
+    '\\n\\n請開啟行程同步控制臺，在「同步狀態」逐項選擇「刪除單一事件」或「刪除整門課程 / 活動」。';
+  const result = sendActionRequiredSafe_(
+    settings,
+    '已補回可能誤刪的行程',
+    body,
+    'managed-deletion-review|' + reviews.map(item => item.id).sort().join('|'),
+    'action_required',
+    { message: body },
+    { immediate: true }
+  );
+  if (!result.ok) return false;
+  const deletionState = loadManagedEventDeletionState_();
+  const sentIds = reviews.map(item => item.id);
+  const sentAt = new Date().toISOString();
+  deletionState.pending.forEach(item => {
+    if (sentIds.indexOf(item.id) !== -1) item.notificationSentAt = sentAt;
+  });
+  saveManagedEventDeletionState_(deletionState);
+  return true;
 }
 
 function buildSyncJobInput_(settings, source, desiredEvents, calendar) {
@@ -4329,6 +4666,7 @@ function confirmTermTransition_(settings, source, observation) {
   settings.termTransitionNoticeSentAt = '';
   settings.termTransitionNoticeLastError = '';
   saveSettings_(settings);
+  clearChunkedStore_(MANAGED_EVENT_DELETION_STORE);
   const nextObservation = observation || loadSourceObservation_();
   nextObservation.termCandidate = null;
   nextObservation.newTitleCandidates = [];
@@ -4679,21 +5017,21 @@ function deliverPromotedNewTitleNoticeAfterSync_(settings, source, state) {
 function shouldIncludeEvent_(event, settings) {
   const normalized = normalizeTitle_(event.originalTitle);
 
-  if (isScheduleNoteTitle_(event.originalTitle)) {
+  if (settings.selectedTitles.some(title => normalizeTitle_(title) === normalized)) {
     return true;
   }
 
-  if (settings.selectedTitles.some(title => normalizeTitle_(title) === normalized)) {
+  if (settings.excludedTitles.some(title => normalizeTitle_(title) === normalized)) {
+    return false;
+  }
+
+  if (isScheduleNoteTitle_(event.originalTitle)) {
     return true;
   }
 
   if (isCourseSelectionHidden_(event.originalTitle) &&
       settings.selectedTitles.some(isNaturalAdvancedVariantTitle_)) {
     return true;
-  }
-
-  if (settings.excludedTitles.some(title => normalizeTitle_(title) === normalized)) {
-    return false;
   }
 
   if (settings.pendingTitles.some(title => normalizeTitle_(title) === normalized)) {
@@ -4932,6 +5270,7 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
 }
 
 function createCalendarEvent_(calendar, item, stateKey, settings) {
+  getManagedEventOwnerToken_();
   const options = {
     location: buildEventLocation_(item),
     description: buildManagedDescription_(item, stateKey, settings)
@@ -4945,6 +5284,25 @@ function createCalendarEvent_(calendar, item, stateKey, settings) {
   return event;
 }
 
+function isMissingCalendarEventError_(error) {
+  const message = String(error && error.message ? error.message : error).toLowerCase();
+  return /(日曆活動|日曆事件|行程).*(不存在|已遭刪除|已被刪除)/.test(message) ||
+    /calendar event.*(does not exist|has (already )?been deleted)/.test(message);
+}
+
+function getCalendarEventOrNull_(calendar, eventId) {
+  if (!eventId) return null;
+  try {
+    const event = calendar.getEventById(eventId);
+    if (!event) return null;
+    event.getTitle();
+    return event;
+  } catch (error) {
+    if (isMissingCalendarEventError_(error)) return null;
+    throw error;
+  }
+}
+
 function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
   const matches = findManagedCalendarEventsByStateKey_(calendar, item, stateKey, settings);
   if (matches.length > 1) {
@@ -4955,16 +5313,21 @@ function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
   }
   if (matches.length === 1) {
     const event = matches[0];
-    const title = buildEventTitle_(item, settings);
-    const location = buildEventLocation_(item);
-    const description = buildManagedDescription_(item, stateKey, settings);
-    setManagedEventTags_(event, stateKey);
-    if (event.getTitle() !== title) event.setTitle(title);
-    if ((event.getLocation() || '') !== location) event.setLocation(location);
-    if ((event.getDescription() || '') !== description) event.setDescription(description);
-    applyEventAvailability_(event, item);
-    applyEventReminders_(event, settings);
-    return event;
+    try {
+      const title = buildEventTitle_(item, settings);
+      const location = buildEventLocation_(item);
+      const description = buildManagedDescription_(item, stateKey, settings);
+      setManagedEventTags_(event, stateKey);
+      if (event.getTitle() !== title) event.setTitle(title);
+      if ((event.getLocation() || '') !== location) event.setLocation(location);
+      if ((event.getDescription() || '') !== description) event.setDescription(description);
+      applyEventAvailability_(event, item);
+      applyEventReminders_(event, settings);
+      return event;
+    } catch (error) {
+      if (!isMissingCalendarEventError_(error)) throw error;
+      return createCalendarEvent_(calendar, item, stateKey, settings);
+    }
   }
   return createCalendarEvent_(calendar, item, stateKey, settings);
 }
@@ -4975,111 +5338,135 @@ function findManagedCalendarEventsByStateKey_(calendar, item, stateKey, settings
   rangeStart.setDate(rangeStart.getDate() - 1);
   rangeEnd.setDate(rangeEnd.getDate() + 1);
   const events = calendar.getEvents(rangeStart, rangeEnd);
-  const managedMatches = events.filter(event => isManagedEvent_(event, stateKey));
-  if (managedMatches.length) return managedMatches;
-
-  // CalendarApp 建立事件與 setTag 無法形成單一交易。若剛建立就逾時，
-  // 只接回內容完全相同、而且尚未帶任何管理標籤的唯一事件。
-  return events.filter(event =>
-    !isManagedEvent_(event, null) &&
-    calendarEventMatchesExpectedContent_(event, item, stateKey, settings)
-  );
+  return events.filter(event => isManagedEvent_(event, stateKey));
 }
 
 function updateCalendarEvent_(calendar, eventId, item, stateKey, settings, expectedOldStateKey, options) {
-  const event = calendar.getEventById(eventId);
+  const event = getCalendarEventOrNull_(calendar, eventId);
 
   if (!event) {
     return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
   }
+  try {
+    if (!isStoredManagedEvent_(event, expectedOldStateKey) &&
+        !isStoredManagedEvent_(event, stateKey)) {
+      throw new Error(
+        '[ACTION_REQUIRED] 找到原事件，但管理標記已被移除或不相符。系統已保留該事件並停止修改：' +
+        item.originalTitle + '（' + item.dateKey + '）。'
+      );
+    }
 
-  if (!isManagedEvent_(event, expectedOldStateKey) &&
-      !isManagedEvent_(event, stateKey)) {
-    throw new Error(
-      '[ACTION_REQUIRED] 找到原事件，但管理標記已被移除或不相符。系統已保留該事件並停止修改：' +
-      item.originalTitle + '（' + item.dateKey + '）。'
-    );
-  }
+    if (event.isAllDayEvent() !== Boolean(item.isAllDay)) {
+      event.deleteEvent();
+      return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
+    }
 
-  if (event.isAllDayEvent() !== Boolean(item.isAllDay)) {
-    event.deleteEvent();
+    const title = buildEventTitle_(item, settings);
+    const location = buildEventLocation_(item);
+    const description = buildManagedDescription_(item, stateKey, settings);
+    if (event.getTitle() !== title) event.setTitle(title);
+    if (item.isAllDay) {
+      if (formatDateKey_(event.getAllDayStartDate()) !== item.dateKey) event.setAllDayDate(item.start);
+    } else if (event.getStartTime().getTime() !== item.start.getTime() || event.getEndTime().getTime() !== item.end.getTime()) {
+      event.setTime(item.start, item.end);
+    }
+    if ((event.getLocation() || '') !== location) event.setLocation(location);
+    setManagedEventTags_(event, stateKey);
+    if ((event.getDescription() || '') !== description) event.setDescription(description);
+    applyEventReminders_(event, settings);
+    return event.getId();
+  } catch (error) {
+    if (!isMissingCalendarEventError_(error)) throw error;
     return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
   }
-
-  const title = buildEventTitle_(item, settings);
-  const location = buildEventLocation_(item);
-  const description = buildManagedDescription_(item, stateKey, settings);
-  if (event.getTitle() !== title) event.setTitle(title);
-  if (item.isAllDay) {
-    if (formatDateKey_(event.getAllDayStartDate()) !== item.dateKey) event.setAllDayDate(item.start);
-  } else if (event.getStartTime().getTime() !== item.start.getTime() || event.getEndTime().getTime() !== item.end.getTime()) {
-    event.setTime(item.start, item.end);
-  }
-  if ((event.getLocation() || '') !== location) event.setLocation(location);
-  setManagedEventTags_(event, stateKey);
-  if ((event.getDescription() || '') !== description) event.setDescription(description);
-  applyEventReminders_(event, settings);
-  return event.getId();
 }
 
 function updateCalendarOutlineFields_(calendar, eventId, item, stateKey, settings, expectedOldStateKey, options) {
-  const event = calendar.getEventById(eventId);
+  const event = getCalendarEventOrNull_(calendar, eventId);
   if (!event) {
     return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
   }
-  if (!isManagedEvent_(event, expectedOldStateKey) &&
-      !isManagedEvent_(event, stateKey)) {
-    throw new Error(
-      '[ACTION_REQUIRED] 課綱要更新的事件已失去管理標記，系統已保留原事件並停止修改：' +
-      item.originalTitle + '（' + item.dateKey + '）。'
-    );
+  try {
+    if (!isStoredManagedEvent_(event, expectedOldStateKey) &&
+        !isStoredManagedEvent_(event, stateKey)) {
+      throw new Error(
+        '[ACTION_REQUIRED] 課綱要更新的事件已失去管理標記，系統已保留原事件並停止修改：' +
+        item.originalTitle + '（' + item.dateKey + '）。'
+      );
+    }
+    const title = buildEventTitle_(item, settings);
+    const location = buildEventLocation_(item);
+    const description = buildManagedDescription_(item, stateKey, settings);
+    if (event.getTitle() !== title) event.setTitle(title);
+    if ((event.getLocation() || '') !== location) event.setLocation(location);
+    setManagedEventTags_(event, stateKey);
+    if ((event.getDescription() || '') !== description) event.setDescription(description);
+    return event.getId();
+  } catch (error) {
+    if (!isMissingCalendarEventError_(error)) throw error;
+    return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
   }
-  const title = buildEventTitle_(item, settings);
-  const location = buildEventLocation_(item);
-  const description = buildManagedDescription_(item, stateKey, settings);
-  if (event.getTitle() !== title) event.setTitle(title);
-  if ((event.getLocation() || '') !== location) event.setLocation(location);
-  setManagedEventTags_(event, stateKey);
-  if ((event.getDescription() || '') !== description) event.setDescription(description);
-  return event.getId();
 }
 
 function migrateCalendarEventMetadata_(calendar, eventId, item, stateKey, settings, expectedOldStateKey) {
-  const event = calendar.getEventById(eventId);
+  const event = getCalendarEventOrNull_(calendar, eventId);
   if (!event) {
     return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
   }
-  if (!isManagedEvent_(event, expectedOldStateKey) &&
-      !isManagedEvent_(event, stateKey)) {
-    throw new Error(
-      '[ACTION_REQUIRED] 要遷移的事件已失去管理標記，系統已保留原事件並停止修改：' +
-      item.originalTitle + '（' + item.dateKey + '）。'
-    );
+  try {
+    if (!isStoredManagedEvent_(event, expectedOldStateKey) &&
+        !isStoredManagedEvent_(event, stateKey)) {
+      throw new Error(
+        '[ACTION_REQUIRED] 要遷移的事件已失去管理標記，系統已保留原事件並停止修改：' +
+        item.originalTitle + '（' + item.dateKey + '）。'
+      );
+    }
+    const title = buildEventTitle_(item, settings);
+    const location = buildEventLocation_(item);
+    const description = buildManagedDescription_(item, stateKey, settings);
+    setManagedEventTags_(event, stateKey);
+    if (event.getTitle() !== title) event.setTitle(title);
+    if ((event.getLocation() || '') !== location) event.setLocation(location);
+    if ((event.getDescription() || '') !== description) event.setDescription(description);
+    return event.getId();
+  } catch (error) {
+    if (!isMissingCalendarEventError_(error)) throw error;
+    return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
   }
-  const title = buildEventTitle_(item, settings);
-  const location = buildEventLocation_(item);
-  const description = buildManagedDescription_(item, stateKey, settings);
-  setManagedEventTags_(event, stateKey);
-  if (event.getTitle() !== title) event.setTitle(title);
-  if ((event.getLocation() || '') !== location) event.setLocation(location);
-  if ((event.getDescription() || '') !== description) event.setDescription(description);
-  return event.getId();
 }
 
 function deleteCalendarEvent_(calendar, eventId, stateKey) {
   if (!eventId) return false;
-  const event = calendar.getEventById(eventId);
+  const event = getCalendarEventOrNull_(calendar, eventId);
   if (!event) return false;
-  if (!isManagedEvent_(event, stateKey)) {
-    throw new Error(
-      '[ACTION_REQUIRED] 事件的管理標記已被移除或不相符，系統已保留它並停止刪除。'
-    );
+  try {
+    if (!isStoredManagedEvent_(event, stateKey)) {
+      throw new Error(
+        '[ACTION_REQUIRED] 事件的管理標記已被移除或不相符，系統已保留它並停止刪除。'
+      );
+    }
+    event.deleteEvent();
+    return true;
+  } catch (error) {
+    if (isMissingCalendarEventError_(error)) return false;
+    throw error;
   }
-  event.deleteEvent();
-  return true;
 }
 
 function isManagedEvent_(event, stateKey) {
+  const managedTag = getEventTagSafe_(event, MANAGED_EVENT_TAG_KEY);
+  if (managedTag !== MANAGED_EVENT_TAG_VALUE) return false;
+  const ownerToken = getEventTagSafe_(event, EVENT_OWNER_TOKEN_TAG_KEY);
+  if (!ownerToken || ownerToken !== getManagedEventOwnerToken_()) return false;
+  return !stateKey ||
+    getEventTagSafe_(event, SYNC_ID_EVENT_TAG_KEY) === hashText_(stateKey);
+}
+
+function isStoredManagedEvent_(event, stateKey) {
+  if (isManagedEvent_(event, stateKey)) return true;
+
+  // 舊版事件只能透過同步狀態中已保存的 Event ID 進入此相容路徑；
+  // 日期範圍掃描與新事件復原絕不採用舊標記，以免接管其他事件。
   const managedTag = getEventTagSafe_(event, MANAGED_EVENT_TAG_KEY);
   if (managedTag === MANAGED_EVENT_TAG_VALUE) {
     return !stateKey ||
@@ -5097,10 +5484,28 @@ function isManagedEvent_(event, stateKey) {
 }
 
 function setManagedEventTags_(event, stateKey) {
-  // 最後才寫 managed flag。若中途逾時，下一次可用完整內容接回尚未完成標記的事件。
+  // 最後才寫 managed flag。只有 owner token 已完整寫入的事件，後續才會被辨識。
   event.setTag(SYNC_ID_EVENT_TAG_KEY, hashText_(stateKey));
   event.setTag(METADATA_VERSION_EVENT_TAG_KEY, String(EVENT_METADATA_VERSION));
+  event.setTag(EVENT_OWNER_TOKEN_TAG_KEY, getManagedEventOwnerToken_());
   event.setTag(MANAGED_EVENT_TAG_KEY, MANAGED_EVENT_TAG_VALUE);
+}
+
+function getManagedEventOwnerToken_() {
+  if (managedEventOwnerTokenRuntimeCache_) return managedEventOwnerTokenRuntimeCache_;
+  const properties = PropertiesService.getScriptProperties();
+  const ownerScope = String(ScriptApp.getScriptId() || '').trim();
+  if (!ownerScope) throw new Error('無法確認事件管理範圍，已停止修改日曆。');
+  let token = String(properties.getProperty(EVENT_OWNER_TOKEN_PROPERTY) || '').trim();
+  const storedScope = String(properties.getProperty(EVENT_OWNER_SCOPE_PROPERTY) || '').trim();
+  if (!token || storedScope !== ownerScope) {
+    token = String(Utilities.getUuid() || '').trim();
+    if (!token) throw new Error('無法建立事件管理身分，已停止修改日曆。');
+    properties.setProperty(EVENT_OWNER_TOKEN_PROPERTY, token);
+    properties.setProperty(EVENT_OWNER_SCOPE_PROPERTY, ownerScope);
+  }
+  managedEventOwnerTokenRuntimeCache_ = token;
+  return token;
 }
 
 function getEventTagSafe_(event, key) {
@@ -5110,18 +5515,6 @@ function getEventTagSafe_(event, key) {
   } catch (error) {
     return '';
   }
-}
-
-function calendarEventMatchesExpectedContent_(event, item, stateKey, settings) {
-  if (!event || event.isAllDayEvent() !== Boolean(item.isAllDay)) return false;
-  if (event.getTitle() !== buildEventTitle_(item, settings)) return false;
-  if ((event.getLocation() || '') !== buildEventLocation_(item)) return false;
-  if ((event.getDescription() || '') !== buildManagedDescription_(item, stateKey, settings)) return false;
-  if (item.isAllDay) {
-    return formatDateKey_(event.getAllDayStartDate()) === item.dateKey;
-  }
-  return event.getStartTime().getTime() === item.start.getTime() &&
-    event.getEndTime().getTime() === item.end.getTime();
 }
 
 function applyEventReminders_(event, settings) {
@@ -6696,13 +7089,13 @@ function describeCourseOutlineStatusForUser_(outline) {
 }
 
 function getDesiredCourseOutlineEvents_(settings, source, now) {
-  return filterCourseOutlineLookaheadEvents_(
+  return filterExcludedManagedOccurrences_(filterCourseOutlineLookaheadEvents_(
     source && source.events || [],
     now || scheduleBusinessNow_(),
     COURSE_OUTLINE_LOOKAHEAD_DAYS
   )
     .filter(event => shouldIncludeEvent_(event, settings))
-    .filter(event => !event.isAllDay);
+    .filter(event => !event.isAllDay), settings);
 }
 
 function hasFreshCourseOutlineSnapshot_(settings, source) {
@@ -7630,6 +8023,76 @@ function loadSyncState_() {
   return normalized;
 }
 
+function loadManagedEventDeletionState_() {
+  const stored = readChunkedJson_(MANAGED_EVENT_DELETION_STORE, null) || {};
+  return {
+    schemaVersion: 1,
+    pending: (Array.isArray(stored.pending) ? stored.pending : [])
+      .filter(item => item && item.id && item.stateKey && item.originalTitle && item.dateKey)
+      .slice(0, 200),
+    excludedOccurrences: (Array.isArray(stored.excludedOccurrences)
+      ? stored.excludedOccurrences
+      : [])
+      .filter(item => item && item.key && item.termKey && item.stateKey && item.dateKey)
+      .slice(0, 500)
+  };
+}
+
+function saveManagedEventDeletionState_(state) {
+  writeChunkedJson_(MANAGED_EVENT_DELETION_STORE, {
+    schemaVersion: 1,
+    pending: Array.isArray(state && state.pending) ? state.pending.slice(0, 200) : [],
+    excludedOccurrences: Array.isArray(state && state.excludedOccurrences)
+      ? state.excludedOccurrences.slice(0, 500)
+      : []
+  });
+}
+
+function makeManagedOccurrenceExclusionKey_(termKey, stateKey) {
+  return hashText_(normalizeTermKey_(termKey) + '|' + String(stateKey || ''));
+}
+
+function filterExcludedManagedOccurrences_(events, settings) {
+  const termKey = normalizeTermKey_(settings && settings.termKey);
+  if (!termKey) return events || [];
+  const excludedKeys = {};
+  loadManagedEventDeletionState_().excludedOccurrences.forEach(item => {
+    if (termKeysMatch_(item.termKey, termKey)) excludedKeys[item.key] = true;
+  });
+  return (events || []).filter(item =>
+    !excludedKeys[makeManagedOccurrenceExclusionKey_(termKey, makeOccurrenceKey_(item))]
+  );
+}
+
+function buildManagedDeletionReviewUiModel_(settings) {
+  const state = loadSyncState_();
+  const calendarId = String(settings && settings.calendarId || '');
+  const termKey = normalizeTermKey_(settings && settings.termKey);
+  const todayKey = formatDateKey_(scheduleBusinessNow_());
+  return loadManagedEventDeletionState_().pending
+    .filter(item =>
+      String(item.calendarId || '') === calendarId &&
+      termKeysMatch_(item.termKey, termKey) &&
+      item.dateKey >= todayKey &&
+      state[item.stateKey]
+    )
+    .map(item => ({
+      id: item.id,
+      originalTitle: item.originalTitle,
+      dateKey: item.dateKey,
+      periodLabel: item.isAllDay
+        ? '全天'
+        : ('第 ' + item.periodStart +
+          (Number(item.periodEnd) === Number(item.periodStart)
+            ? ''
+            : '–' + item.periodEnd) + '節'),
+      timeLabel: item.isAllDay
+        ? ''
+        : [item.startTime, item.endTime].filter(Boolean).join('–'),
+      location: item.location || ''
+    }));
+}
+
 function normalizeStoredState_(state) {
   const result = {};
   Object.keys(state || {}).forEach(key => {
@@ -8097,7 +8560,10 @@ function removeManagedEventsFromCalendar_(calendarId, clearState) {
   let deleted = 0;
   if (!calendar) return deleted;
   Object.keys(state).forEach(key => { if (deleteCalendarEvent_(calendar, state[key].calendarEventId, key)) deleted += 1; });
-  if (clearState) clearChunkedStore_(SYNC_STATE_STORE);
+  if (clearState) {
+    clearChunkedStore_(SYNC_STATE_STORE);
+    clearChunkedStore_(MANAGED_EVENT_DELETION_STORE);
+  }
   return deleted;
 }
 
@@ -8126,6 +8592,7 @@ function resetSyncState() {
       throw new Error('同步仍在背景執行，請等待完成後再重設狀態。');
     }
     clearChunkedStore_(SYNC_STATE_STORE);
+    clearChunkedStore_(MANAGED_EVENT_DELETION_STORE);
     clearChunkedStore_(STATUS_STORE);
   } finally {
     lock.releaseLock();

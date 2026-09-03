@@ -261,7 +261,15 @@
     }
     .course-list-shell[data-can-scroll-up="true"]::before,
     .course-list-shell[data-can-scroll-down="true"]::after { opacity: 1; }
-    .course-list { display: grid; gap: var(--space-4); max-height: 360px; padding-right: var(--space-1); overflow-y: auto; overscroll-behavior-y: auto; }
+    .course-list {
+      display: grid;
+      gap: var(--space-4);
+      max-height: 360px;
+      margin-inline: calc(var(--space-1) * -1);
+      padding: var(--space-1) var(--space-2) var(--space-2) var(--space-1);
+      overflow-y: auto;
+      overscroll-behavior-y: auto;
+    }
     .course-group { display: grid; gap: var(--space-2); }
     .course-group h3 {
       margin: 0;
@@ -300,6 +308,15 @@
     .pending-actions button { min-height: 36px; padding: 0 var(--space-2); border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 10px; font-weight: 640; }
     .pending-actions .keep { background: var(--ink); color: var(--paper-bright); }
     .pending-actions .remove { border-color: var(--shift); background: var(--paper-bright); color: var(--error); }
+
+    .managed-deletion-review { margin-bottom: var(--space-4); }
+    .managed-deletion-list { display: grid; gap: var(--space-2); }
+    .managed-deletion-item { padding: var(--space-3); border: 1px solid var(--warning); border-radius: var(--radius-control); background: #fff4f1; }
+    .managed-deletion-item strong { display: block; font-size: 12px; line-height: 18px; }
+    .managed-deletion-meta { margin: var(--space-1) 0 0; color: var(--ink-soft); font-size: 10px; line-height: 16px; }
+    .managed-deletion-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3); }
+    .managed-deletion-actions button { min-height: 38px; padding: var(--space-1) var(--space-2); border: 1px solid var(--shift); border-radius: var(--radius-control); background: var(--paper-bright); color: var(--error); cursor: pointer; font-size: 10px; font-weight: 640; line-height: 15px; }
+    .managed-deletion-actions button:last-child { background: var(--shift); color: var(--paper-bright); }
 
     .calendar-picker { display: grid; gap: var(--field-gap); }
     .calendar-create {
@@ -492,7 +509,7 @@
       .topbar { padding: var(--space-3); }
       .content { padding-inline: var(--space-2); }
       .calendar-create, .status-grid { grid-template-columns: 1fr; }
-      .pending-actions { grid-template-columns: 1fr; }
+      .pending-actions, .managed-deletion-actions { grid-template-columns: 1fr; }
       .footer { grid-template-columns: auto minmax(0, 1fr); padding: var(--space-2); }
       .sync-primary { padding-inline: var(--space-2); }
     }
@@ -534,6 +551,9 @@
     <main class="content">
       <section class="section">
         <div class="section-head"><h2>同步狀態</h2></div>
+        <div class="managed-deletion-review" id="managed-deletion-review" role="region" aria-label="待確認刪除範圍" aria-live="polite" hidden>
+          <div class="managed-deletion-list" id="managed-deletion-review-list"></div>
+        </div>
         <div class="status-grid"><div class="metric"><span>上次同步</span><strong id="last-sync">尚未同步</strong></div><div class="metric"><span>受管理事件</span><strong id="event-count">0</strong></div></div>
         <div class="sync-stat-grid" aria-label="上次同步事件統計">
           <div class="sync-stat"><span>新增</span><strong id="sync-created">0</strong></div>
@@ -550,25 +570,25 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>日曆</h2><span>不允許主要日曆</span></div>
+        <div class="section-head"><h2>日曆</h2></div>
         <div class="calendar-picker">
-          <label class="field"><span>同步目標日曆</span><select id="calendar"></select></label>
+          <label class="field"><span>同步目標日曆</span><select id="calendar" aria-describedby="calendar-safety-hint"></select></label>
+          <p class="hint field-hint" id="calendar-safety-hint">可以選擇其他日曆，程式只會管理它建立的事件</p>
           <div class="calendar-create" id="calendar-create">
             <label class="field"><span>新日曆名稱</span><input type="text" id="calendar-name" maxlength="100" autocomplete="off" aria-describedby="calendar-create-hint"></label>
             <button type="button" class="small-button" id="create-calendar">建立日曆</button>
-            <p class="hint field-hint" id="calendar-create-hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆。</p>
+            <p class="hint field-hint" id="calendar-create-hint">若不先建立，首次同步會使用上方名稱自動建立專用日曆</p>
           </div>
         </div>
         <label class="field"><span>行程提醒</span><select id="reminder-mode"><option value="none">不提醒</option><option value="popup">日曆彈出通知</option><option value="email">Email 提醒</option></select></label>
         <div class="field" id="reminder-wrap" hidden>
           <span id="reminder-minutes-label">提前時間</span>
-          <div class="reminder-minutes-options" role="group" aria-labelledby="reminder-minutes-label" aria-describedby="reminder-minutes-hint">
+          <div class="reminder-minutes-options" role="group" aria-labelledby="reminder-minutes-label">
             <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="10"><span><span class="choice-copy"><strong>10 分鐘</strong></span></span></label>
             <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="30"><span><span class="choice-copy"><strong>30 分鐘</strong></span></span></label>
             <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="60"><span><span class="choice-copy"><strong>1 小時</strong></span></span></label>
             <label class="choice reminder-minute-choice"><input type="checkbox" data-reminder-minute value="1440"><span><span class="choice-copy"><strong>1 天</strong></span></span></label>
           </div>
-          <small class="hint field-hint" id="reminder-minutes-hint">可複選；每個時間都會建立一次提醒。</small>
         </div>
       </section>
 
@@ -581,7 +601,7 @@
         </div>
         <label class="choice term-grade-confirmation" id="term-grade-confirmation" hidden>
           <input type="checkbox" id="term-grade-confirmed">
-          <span><span class="choice-copy"><strong>我已確認這是新學期就讀年級</strong><small>若已升年級，請先切換上方年級再勾選。</small></span></span>
+          <span><span class="choice-copy"><strong>我已確認這是新學期就讀年級</strong><small>若已升年級，請先切換上方年級再勾選</small></span></span>
         </label>
         <div class="source-health grade-source-health" id="source-health"><div><strong id="source-title">讀取中</strong><span id="source-detail"></span></div></div>
       </section>
@@ -830,14 +850,18 @@
         renderSource(data.source);
         renderCourses();
         renderPending(settings.pendingTitles || []);
+        renderManagedDeletionReviews(data.managedDeletionReviews || []);
         renderStatus(data.status);
         renderTermTransition(data.termTransition, data.courseOutlineStatus, data.source);
         updateConditionalFields();
         var needsTermSelection = Boolean(data.termTransition && data.termTransition.required);
         var verifyingTerm = Boolean(data.termTransition && data.termTransition.verifying);
         var sourceUnavailable = Boolean(data.source && data.source.unavailable);
+        var hasManagedDeletionReviews = Boolean(
+          data.managedDeletionReviews && data.managedDeletionReviews.length
+        );
         byId('top-status').dataset.state = !needsTermSelection && !verifyingTerm &&
-          !sourceUnavailable && data.status && data.status.ok
+          !sourceUnavailable && !hasManagedDeletionReviews && data.status && data.status.ok
           ? 'success'
           : 'attention';
         byId('top-status').textContent = verifyingTerm
@@ -846,9 +870,11 @@
           ? '待重新選擇課程與活動'
           : (sourceUnavailable
             ? '課表來源暫時離線'
-          : (data.status && data.status.ok
-            ? '狀態正常'
-            : (settings.setupComplete ? '需檢查狀態' : '待首次同步'))));
+          : (hasManagedDeletionReviews
+            ? '待確認刪除範圍'
+            : (data.status && data.status.ok
+              ? '狀態正常'
+              : (settings.setupComplete ? '需檢查狀態' : '待首次同步')))));
         byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
           ? '完成選擇並同步'
@@ -874,13 +900,13 @@
           : '請完成新學期設定';
         byId('term-transition-message').textContent =
           verifying
-            ? '系統會觀察 30 分鐘。期間不會改動日曆、清空選擇或寄送新學期提醒。'
+            ? '系統會觀察 30 分鐘。期間不會改動日曆、清空選擇或寄送新學期提醒'
             : '確認新學期年級 → 選擇課程與活動 → 完成選擇並同步';
         var outlineMessage = byId('term-transition-outline-message');
         if (verifying) {
           outlineMessage.hidden = !transition.verificationDueAt;
           outlineMessage.textContent = transition.verificationDueAt
-            ? '預計於 ' + new Date(transition.verificationDueAt).toLocaleString('zh-TW') + ' 再次確認。'
+            ? '預計於 ' + new Date(transition.verificationDueAt).toLocaleString('zh-TW') + ' 再次確認'
             : '';
           return;
         }
@@ -890,14 +916,14 @@
         outlineMessage.hidden = !indexWarning && !missingCurrentOutline &&
           !transition.noticeFailed && !noticeScheduled;
         outlineMessage.textContent = transition.noticeFailed
-          ? '提醒信暫時無法寄出，但這裡會持續保留重新選擇課程與活動的提示。'
+          ? '提醒信暫時無法寄出，但這裡會持續保留重新選擇課程與活動的提示'
           : (indexWarning
             ? indexWarning
             : (missingCurrentOutline
-              ? '這學期的課綱尚未加入中央索引；可先同步基本行程。上架後，自動同步或下一次手動同步會補入課綱。'
+              ? '這學期的課綱尚未加入中央索引；可先同步基本行程。上架後，自動同步或下一次手動同步會補入課綱'
               : (noticeScheduled
                 ? '新學期提醒預計於 ' +
-                  new Date(transition.noticeScheduledFor).toLocaleString('zh-TW') + ' 寄出。'
+                  new Date(transition.noticeScheduledFor).toLocaleString('zh-TW') + ' 寄出'
                 : '')));
       }
 
@@ -939,6 +965,13 @@
           document.querySelectorAll('[data-keep],[data-remove]'),
           function (button) { button.disabled = sourceUnavailable; }
         );
+        Array.prototype.forEach.call(
+          document.querySelectorAll('[data-delete-managed-occurrence],[data-delete-managed-title]'),
+          function (button) {
+            button.disabled = false;
+            button.dataset.validationDisabled = 'false';
+          }
+        );
         if (requiresSelection || verifyingTerm || sourceUnavailable) setSyncMenuOpen(false);
       }
 
@@ -952,7 +985,7 @@
           ? source.firstDate + (source.lastDate ? '–' + source.lastDate : '')
           : '';
         byId('source-detail').textContent = source.unavailable
-          ? (source.unavailableMessage || '目前顯示上次可用摘要，恢復連線後才能儲存或同步。') +
+          ? (source.unavailableMessage || '目前顯示上次可用摘要，恢復連線後才能儲存或同步') +
             (dateRange ? ' ' + dateRange : '')
           : dateRange;
       }
@@ -1069,8 +1102,10 @@
       }
 
       function renderCalendars(calendars, selectedId, calendarName) {
-        var items = [{ id: '', name: '建立新的專用日曆' }].concat(calendars || []);
-        byId('calendar').innerHTML = items.map(function (item) { return '<option value="' + escapeHtml(item.id) + '" ' + (item.id === selectedId ? 'selected' : '') + '>' + escapeHtml(item.name) + '</option>'; }).join('');
+        var ownedCalendars = calendars || [];
+        var effectiveSelectedId = selectedId || (ownedCalendars[0] && ownedCalendars[0].id) || '';
+        var items = [{ id: '', name: '建立新的專用日曆' }].concat(ownedCalendars);
+        byId('calendar').innerHTML = items.map(function (item) { return '<option value="' + escapeHtml(item.id) + '" ' + (item.id === effectiveSelectedId ? 'selected' : '') + '>' + escapeHtml(item.name) + '</option>'; }).join('');
         var nextName = calendarName || defaultCalendarName(getCheckedGrade());
         byId('calendar-name').value = nextName;
         byId('calendar-name').dataset.autoName = String(/^高[一二三]行程｜T-SCHOOL Schedule Sync$/.test(nextName));
@@ -1150,6 +1185,22 @@
         byId('pending-list').innerHTML = items.map(function (title) { return '<div class="pending-item"><strong>' + escapeHtml(title) + '</strong><div class="pending-actions"><button type="button" class="keep" data-keep="' + escapeHtml(title) + '">屬於我，保留</button><button type="button" class="remove" data-remove="' + escapeHtml(title) + '">不屬於我，下次移除</button></div></div>'; }).join('');
       }
 
+      function renderManagedDeletionReviews(items) {
+        var panel = byId('managed-deletion-review');
+        var list = byId('managed-deletion-review-list');
+        panel.hidden = !items.length;
+        list.innerHTML = items.map(function (item) {
+          var meta = [item.dateKey, item.periodLabel, item.timeLabel, item.location].filter(Boolean);
+          return '<article class="managed-deletion-item">' +
+            '<strong>' + escapeHtml(item.originalTitle) + '</strong>' +
+            '<p class="managed-deletion-meta">' + escapeHtml(meta.join(' · ')) + '</p>' +
+            '<div class="managed-deletion-actions">' +
+              '<button type="button" data-delete-managed-occurrence="' + escapeHtml(item.id) + '">刪除單一事件</button>' +
+              '<button type="button" data-delete-managed-title="' + escapeHtml(item.id) + '">刪除整門課程 / 活動</button>' +
+            '</div></article>';
+        }).join('');
+      }
+
       function renderStatus(status) {
         byId('last-sync').textContent = status && status.lastSyncLabel ? status.lastSyncLabel : '尚未同步';
         byId('event-count').textContent = status && status.eventCount != null ? String(status.eventCount) : '0';
@@ -1166,7 +1217,7 @@
         var hasError = Boolean(status && status.ok === false);
         message.hidden = !hasError;
         message.textContent = hasError
-          ? (status.message || '同步發生錯誤，請稍後再試。')
+          ? (status.message || '同步發生錯誤，請稍後再試')
           : '';
       }
 
@@ -1204,12 +1255,12 @@
         var keepPolling = false;
         var settings = collectSettings();
         var oldCalendarId = model && model.settings ? model.settings.calendarId : '';
-        if (oldCalendarId && oldCalendarId !== settings.calendarId && !window.confirm('更換專用日曆後，系統會先在新日曆完成重建，再移除舊日曆中的受管理未來事件。過去事件與私人事件不會受影響。是否繼續？')) return;
+        if (oldCalendarId && oldCalendarId !== settings.calendarId && !window.confirm('更換同步日曆後，系統會先在新日曆完成重建，再移除舊日曆中的受管理未來事件。過去事件與其他事件不會受影響。是否繼續？')) return;
         setBusy(true, runSync ? '正在計算變更…' : '正在儲存設定…');
         try {
           if (runSync) {
             var preview = await server('previewSettingsImpactFromUi', settings);
-            var previewMessage = (preview.calendarChanged ? '將搬移至新的專用日曆。\n\n' : '') + '預計新增 ' + preview.created + '、調整 ' + preview.updated + '、取消 ' + preview.deleted + '、未變更 ' + preview.unchanged + ' 筆受管理事件。\n私人事件不會受影響';
+            var previewMessage = (preview.calendarChanged ? '將搬移至新的同步日曆。\n\n' : '') + '預計新增 ' + preview.created + '、調整 ' + preview.updated + '、取消 ' + preview.deleted + '、未變更 ' + preview.unchanged + ' 筆受管理事件。\n其他事件不會受影響';
             if ((preview.created || preview.updated || preview.deleted || preview.calendarChanged) && !window.confirm(previewMessage + '\n\n是否套用？')) return;
             startSyncProgress(
               model && model.settings && !model.settings.setupComplete
@@ -1447,6 +1498,29 @@
         }
       });
       byId('pending-list').addEventListener('click', async function (event) { var title = event.target.dataset.keep || event.target.dataset.remove; if (!title) return; setBusy(true, '正在更新項目…'); try { var method = event.target.dataset.keep ? 'confirmPendingTitleFromUi' : 'rejectPendingTitleFromUi'; var result = await server(method, title); renderUiResult(result); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
+      byId('managed-deletion-review-list').addEventListener('click', async function (event) {
+        var button = event.target.closest('[data-delete-managed-occurrence],[data-delete-managed-title]');
+        if (!button || busy) return;
+        var reviewId = button.dataset.deleteManagedOccurrence || button.dataset.deleteManagedTitle;
+        var review = (model.managedDeletionReviews || []).find(function (item) { return item.id === reviewId; });
+        if (!review) return;
+        var deleteWholeTitle = Boolean(button.dataset.deleteManagedTitle);
+        if (deleteWholeTitle && !window.confirm(
+          '這會將「' + review.originalTitle + '」今天以後的所有受管理行程移至日曆垃圾桶，並從同步選擇移除。同日曆中的私人事件不會受影響。是否繼續？'
+        )) return;
+        setBusy(true, deleteWholeTitle ? '正在刪除整門課程或活動…' : '正在刪除單一事件…');
+        try {
+          var result = await server(
+            deleteWholeTitle ? 'deleteRestoredManagedTitleFromUi' : 'deleteRestoredManagedOccurrenceFromUi',
+            reviewId
+          );
+          renderUiResult(result);
+        } catch (error) {
+          showToast(error.message);
+        } finally {
+          setBusy(false);
+        }
+      });
 
       function loadInitialUi() {
         clearTimeout(initialLoadRetryTimer);

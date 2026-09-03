@@ -491,11 +491,40 @@ assert.equal(
   '同步選單開啟後應將焦點移入第一個選單項目'
 );
 const syncStatusHeadingIndex = sidebarHtml.indexOf('<h2>同步狀態</h2>');
+const managedDeletionReviewIndex = sidebarHtml.indexOf('id="managed-deletion-review"');
+const statusGridIndex = sidebarHtml.indexOf('class="status-grid"');
 const calendarHeadingIndex = sidebarHtml.indexOf('<h2>日曆</h2>');
 const autoSyncIndex = sidebarHtml.indexOf('id="auto-sync"');
 const gradeHeadingIndex = sidebarHtml.indexOf('<h2>年級</h2>');
 const sourceHealthIndex = sidebarHtml.indexOf('id="source-health"');
 assert.equal(syncStatusHeadingIndex < autoSyncIndex, true);
+assert.equal(syncStatusHeadingIndex < managedDeletionReviewIndex, true);
+assert.equal(managedDeletionReviewIndex < statusGridIndex, true);
+assert.equal(sidebarHtml.includes('id="managed-deletion-review-title"'), false);
+assert.equal(sidebarHtml.includes('為避免應到未到，系統已先補回'), false);
+assert.equal(sidebarHtml.includes('aria-label="待確認刪除範圍"'), true);
+assert.equal(sidebarHtml.includes('.managed-deletion-review { margin-bottom: var(--space-4); }'), true);
+assert.equal(sidebarHtml.includes('.managed-deletion-list { display: grid; gap: var(--space-2); }'), true);
+assert.equal(
+  sidebarHtml.includes('.managed-deletion-item { padding: var(--space-3); border: 1px solid var(--warning); border-radius: var(--radius-control); background: #fff4f1; }'),
+  true,
+  '每筆待確認事件應使用與狀態框相同間距規格的獨立珊瑚色小卡'
+);
+assert.equal(sidebarHtml.includes('刪除單一事件'), true);
+assert.equal(sidebarHtml.includes('刪除整門課程 / 活動'), true);
+assert.equal(sidebarHtml.includes('刪除整門課程／活動'), false);
+assert.equal(
+  sidebarHtml.includes('這一筆受管理行程移至日曆垃圾桶'),
+  false,
+  '刪除單一事件不得顯示二次確認'
+);
+assert.equal(
+  sidebarHtml.includes('今天以後的所有受管理行程移至日曆垃圾桶'),
+  true,
+  '刪除整門課程 / 活動仍須顯示二次確認'
+);
+assert.equal(sidebarHtml.includes('data-delete-managed-occurrence'), true);
+assert.equal(sidebarHtml.includes('data-delete-managed-title'), true);
 assert.equal(autoSyncIndex < calendarHeadingIndex, true);
 assert.equal(calendarHeadingIndex < gradeHeadingIndex, true);
 assert.equal(gradeHeadingIndex < sourceHealthIndex, true);
@@ -504,6 +533,12 @@ assert.equal(
   true
 );
 assert.equal((sidebarHtml.match(/class="sync-stat"/g) || []).length, 4);
+assert.equal(sidebarHtml.includes('margin-inline: calc(var(--space-1) * -1);'), true);
+assert.equal(
+  sidebarHtml.includes('padding: var(--space-1) var(--space-2) var(--space-2) var(--space-1);'),
+  true,
+  '課程清單捲動區必須保留已選按鈕位移與陰影的完整空間'
+);
 ['sync-created', 'sync-updated', 'sync-deleted', 'sync-unchanged'].forEach(id => {
   assert.equal(sidebarHtml.includes(`id="${id}"`), true);
 });
@@ -539,7 +574,7 @@ assert.equal(
 );
 assert.equal((sidebarHtml.match(/data-reminder-minute value=/g) || []).length, 4);
 assert.equal(sidebarHtml.includes('id="reminder-minutes"'), false);
-assert.equal(sidebarHtml.includes('可複選；每個時間都會建立一次提醒。'), true);
+assert.equal(sidebarHtml.includes('reminder-minutes-hint'), false);
 assert.equal(sidebarHtml.includes('reminderMinutesList: reminderMinutesList'), true);
 assert.equal(sidebarHtml.includes('請至少保留一個提前時間'), true);
 assert.match(
@@ -1981,7 +2016,9 @@ assert.equal(
   'forceRepairFromUi',
   'createDedicatedCalendarForUi',
   'confirmPendingTitleFromUi',
-  'rejectPendingTitleFromUi'
+  'rejectPendingTitleFromUi',
+  'deleteRestoredManagedOccurrenceFromUi',
+  'deleteRestoredManagedTitleFromUi'
 ].forEach(handler => {
   assert.equal(
     generatedCode.includes(`function ${handler}(`),
@@ -1994,6 +2031,10 @@ assert.equal(generatedCode.includes('const SETUP_CODE_SCHEMA_VERSION = 2;'), tru
 assert.equal(generatedCode.includes('const SETUP_CATALOG_FINGERPRINT_VERSION = 3;'), true);
 assert.equal(generatedCode.includes('const SETUP_CONTEXT_FINGERPRINT_VERSION = 3;'), true);
 assert.equal(generatedCode.includes('const SCHEDULE_FINGERPRINT_VERSION = 4;'), true);
+assert.equal(generatedCode.includes('const EVENT_METADATA_VERSION = 3;'), true);
+assert.equal(generatedCode.includes("const EVENT_OWNER_TOKEN_TAG_KEY = 'tschool_owner';"), true);
+assert.equal(generatedCode.includes("const EVENT_OWNER_SCOPE_PROPERTY = 'TSCHOOL_EVENT_OWNER_SCOPE';"), true);
+assert.equal(generatedCode.includes('function calendarEventMatchesExpectedContent_('), false);
 assert.equal(
   generatedCode.includes('source.fingerprint === settings.sourceFingerprint'),
   false,
@@ -2011,6 +2052,22 @@ assert.match(
     `產生的 Code.gs 應嵌入控制臺區段「${heading}」`
   );
 });
+assert.equal(sidebarHtml.includes('可使用主要日曆'), false);
+assert.equal(sidebarHtml.includes('不允許主要日曆'), false);
+assert.equal(
+  sidebarHtml.includes('可以選擇其他日曆，程式只會管理它建立的事件'),
+  true
+);
+assert.equal(
+  sidebarHtml.includes('可以選擇其他日曆，程式只會管理它建立的事件。'),
+  false
+);
+assert.equal(sidebarHtml.includes('可複選；每個時間都會建立一次提醒'), false);
+assert.match(
+  sidebarHtml,
+  /function renderCalendars\(calendars, selectedId, calendarName\)[\s\S]*?var effectiveSelectedId = selectedId \|\| \(ownedCalendars\[0\] && ownedCalendars\[0\]\.id\) \|\| '';/,
+  '尚未儲存日曆選擇時應預設選取排在第一個的主要日曆'
+);
 assert.equal(generatedCode.includes('COURSE_DICTIONARY'), false);
 assert.match(
   generatedCode,
@@ -2019,12 +2076,12 @@ assert.match(
 );
 assert.match(
   generatedCode,
-  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?const calendarName = buildDedicatedCalendarName_\(settings\);[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{\s*selected: true\s*\}\)/,
+  /function ensureSyncCalendar_\(settings\)[\s\S]*?const calendarName = buildDedicatedCalendarName_\(settings\);[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{\s*selected: true\s*\}\)/,
   '首次同步自動建立的專用 Calendar 應預設顯示'
 );
 assert.match(
   generatedCode,
-  /function ensureDedicatedCalendar_\(settings\)[\s\S]*?findRecoverableDedicatedCalendars_\(calendarName\)[\s\S]*?settings\.calendarId = recoverableCalendars\[0\]\.getId\(\)[\s\S]*?return recoverableCalendars\[0\]/,
+  /function ensureSyncCalendar_\(settings\)[\s\S]*?findRecoverableDedicatedCalendars_\(calendarName\)[\s\S]*?settings\.calendarId = recoverableCalendars\[0\]\.getId\(\)[\s\S]*?return recoverableCalendars\[0\]/,
   '日曆已建立但 Calendar ID 尚未保存時，下次必須接回同一個受管理日曆'
 );
 assert.equal(
@@ -2456,15 +2513,38 @@ function formatDate(dateValue, pattern) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+const bootstrapScriptPropertiesData = {};
 const context = vm.createContext({
   console,
   Intl,
+  PropertiesService: {
+    getScriptProperties() {
+      return {
+        getProperty(key) {
+          return Object.prototype.hasOwnProperty.call(bootstrapScriptPropertiesData, key)
+            ? bootstrapScriptPropertiesData[key]
+            : null;
+        },
+        setProperty(key, value) {
+          bootstrapScriptPropertiesData[key] = String(value);
+        }
+      };
+    }
+  },
+  ScriptApp: {
+    getScriptId() {
+      return 'test-control-panel-script-id';
+    }
+  },
   Utilities: {
     formatDate(dateValue, timezone, pattern) {
       assert.equal(timezone, 'Asia/Taipei');
       return formatDate(dateValue, pattern);
     },
     sleep() {},
+    getUuid() {
+      return 'test-control-panel-owner-token';
+    },
     base64DecodeWebSafe(value) {
       return Array.from(Buffer.from(String(value).replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
     },
@@ -2480,6 +2560,41 @@ const context = vm.createContext({
 });
 
 vm.runInContext(generatedCode, context);
+
+const copiedControlPanelProperties = {
+  TSCHOOL_EVENT_OWNER_TOKEN: 'copied-owner-token',
+  TSCHOOL_EVENT_OWNER_SCOPE: 'original-script-id'
+};
+const copiedControlPanelContext = vm.createContext({
+  console,
+  Intl,
+  PropertiesService: {
+    getScriptProperties() {
+      return {
+        getProperty(key) {
+          return copiedControlPanelProperties[key] || null;
+        },
+        setProperty(key, value) {
+          copiedControlPanelProperties[key] = String(value);
+        }
+      };
+    }
+  },
+  ScriptApp: {
+    getScriptId() {
+      return 'copied-script-id';
+    }
+  },
+  Utilities: {
+    getUuid() {
+      return 'rotated-owner-token';
+    }
+  }
+});
+vm.runInContext(generatedCode, copiedControlPanelContext);
+assert.equal(copiedControlPanelContext.getManagedEventOwnerToken_(), 'rotated-owner-token');
+assert.equal(copiedControlPanelProperties.TSCHOOL_EVENT_OWNER_SCOPE, 'copied-script-id');
+assert.equal(copiedControlPanelProperties.TSCHOOL_EVENT_OWNER_TOKEN, 'rotated-owner-token');
 
 assert.deepEqual(
   Array.from(context.sortCatalogItemsByPeriod_(selectionOrderItems), item => item.title),
@@ -2532,7 +2647,7 @@ assert.equal(
   '沒有 Calendar 操作時應直接進入收尾，不應卡在規劃區間'
 );
 
-function makeOwnedCalendarForListTest(id, name) {
+function makeOwnedCalendarForListTest(id, name, owned) {
   const calls = { getId: 0, getName: 0 };
   return {
     calls,
@@ -2543,6 +2658,9 @@ function makeOwnedCalendarForListTest(id, name) {
     getName() {
       calls.getName += 1;
       return name;
+    },
+    isOwnedByMe() {
+      return owned !== false;
     }
   };
 }
@@ -2564,13 +2682,43 @@ context.CalendarApp = {
 assert.deepEqual(
   JSON.parse(JSON.stringify(context.listOwnedCalendars_())),
   [
+    { id: 'default', name: '主要日曆（主要）' },
     { id: 'calendar-a', name: 'A 日曆' },
     { id: 'calendar-b', name: 'B 日曆' }
   ]
 );
 assert.equal(calendarAForListTest.calls.getId, 1);
 assert.equal(calendarBForListTest.calls.getId, 1);
-assert.equal(defaultCalendarForListTest.calls.getName, 0);
+assert.equal(defaultCalendarForListTest.calls.getName, 1);
+const nonOwnedCalendarForValidation = makeOwnedCalendarForListTest(
+  'shared-calendar',
+  '他人日曆',
+  false
+);
+context.CalendarApp.getCalendarById = id => ({
+  default: defaultCalendarForListTest,
+  'calendar-a': calendarAForListTest,
+  'shared-calendar': nonOwnedCalendarForValidation
+}[id] || null);
+assert.equal(
+  context.assertOwnedSyncCalendar_('default'),
+  defaultCalendarForListTest,
+  '主要日曆應可作為同步目標'
+);
+assert.equal(
+  context.assertOwnedSyncCalendar_('calendar-a'),
+  calendarAForListTest,
+  '其他本人擁有的日曆應可作為同步目標'
+);
+assert.throws(
+  () => context.assertOwnedSyncCalendar_('shared-calendar'),
+  /只能使用自己擁有的日曆/,
+  '非本人擁有的日曆仍須拒絕'
+);
+assert.throws(
+  () => context.assertOwnedSyncCalendar_('missing-calendar'),
+  /找不到選擇的同步日曆/
+);
 delete context.CalendarApp;
 assert.throws(
   () => context.assertSheetsReadonlyServiceAvailable_(),
@@ -6281,7 +6429,7 @@ assert.equal(embeddedOutlineIndex.source, 'embedded_fallback');
 assert.equal(embeddedOutlineIndex.setsByGrade['高二'][0].key, '114-2-high2');
 context.resetCourseOutlineSourceIndexRuntimeCache_();
 
-function createMockCalendar() {
+function createMockCalendar(calendarId = 'mock-calendar') {
   let eventCounter = 0;
   const events = new Map();
 
@@ -6337,6 +6485,7 @@ function createMockCalendar() {
   }
 
   return {
+    getId() { return calendarId; },
     createEvent(title, start, end, options) {
       return makeEvent(title, start, end, options, false);
     },
@@ -6587,8 +6736,8 @@ assert.equal(
     excludedTitles: ['備註｜開放吉林六樓階梯教室自習。'],
     pendingTitles: []
   }),
-  true,
-  '備註行程不可被舊設定或隱藏的排除狀態漏掉'
+  false,
+  '使用者在誤刪確認中移除整項備註活動後，後續同步不得再加回'
 );
 const batchDesired = Array.from({ length: 422 }, (_, index) => makeBatchFixtureEvent(index));
 const batchCalendar = createMockCalendar();
@@ -6623,14 +6772,15 @@ assert.equal(
   '新狀態應使用中性短雜湊簽章版本，且不得保存 type'
 );
 assert.equal(
-  Object.values(batchState).every(item => item.metadataVersion === 2),
+  Object.values(batchState).every(item => item.metadataVersion === 3),
   true,
   '新狀態應標記為新版隱藏事件標籤與顯示格式'
 );
 assert.equal(
   batchCalendar.activeEvents().every(event =>
     event.getTag('tschool_managed') === '1' &&
-    event.getTag('tschool_meta_version') === '2' &&
+    event.getTag('tschool_meta_version') === '3' &&
+    event.getTag('tschool_owner') === context.getManagedEventOwnerToken_() &&
     event.getDescription().indexOf('同步識別碼：') === -1 &&
     event.getDescription().indexOf('[T-SCHOOL-SCHEDULE-SYNC]') === -1 &&
     event.getDescription().indexOf('[T-SCHOOL Schedule Sync]') !== -1
@@ -6715,7 +6865,7 @@ assert.equal(firstSetupForceCalendar.activeEvents().length, 422);
 const recoveryCalendar = createMockCalendar();
 const recoveryItem = makeBatchFixtureEvent(0);
 const recoveryKey = context.makeOccurrenceKey_(recoveryItem);
-const recoveredExistingEvent = recoveryCalendar.createEvent(
+const matchingUserEvent = recoveryCalendar.createEvent(
   context.buildEventTitle_(recoveryItem),
   recoveryItem.start,
   recoveryItem.end,
@@ -6724,8 +6874,8 @@ const recoveredExistingEvent = recoveryCalendar.createEvent(
     description: context.buildManagedDescription_(recoveryItem, recoveryKey, batchSettings)
   }
 );
-let recoveredReminderRepairs = 0;
-recoveredExistingEvent.removeAllReminders = () => { recoveredReminderRepairs += 1; };
+let matchingUserEventReminderChanges = 0;
+matchingUserEvent.removeAllReminders = () => { matchingUserEventReminderChanges += 1; };
 const recoveryJob = makeSyncJobForTest(1, false);
 recoveryJob.inFlight = [{
   type: 'create',
@@ -6742,12 +6892,263 @@ const recoveryResult = context.runSyncJobBatch_(
   '2026-08-01'
 );
 assert.equal(recoveryResult.pending, false);
-assert.equal(recoveryCalendar.activeEvents().length, 1, 'Calendar 已寫入但狀態未存時不得重複建立');
+assert.equal(
+  recoveryCalendar.activeEvents().length,
+  2,
+  '未標記事件即使內容完全相同也不得被接管；安全上允許另建同步事件'
+);
 assert.equal(Object.keys(recoveryResult.state).length, 1);
 assert.equal(
-  recoveredReminderRepairs,
+  recoveryResult.state[recoveryKey].calendarEventId === matchingUserEvent.getId(),
+  false,
+  '同步狀態不得保存內容相同的使用者事件 ID'
+);
+assert.equal(matchingUserEventReminderChanges, 0, '不得改動內容相同之使用者事件的提醒');
+assert.equal(matchingUserEvent.getTag('tschool_managed'), '');
+assert.equal(matchingUserEvent.getTag('tschool_owner'), '');
+
+const taggedRecoveryCalendar = createMockCalendar();
+const taggedRecoveryEvent = context.createCalendarEvent_(
+  taggedRecoveryCalendar,
+  recoveryItem,
+  recoveryKey,
+  batchSettings
+);
+let taggedRecoveryReminderRepairs = 0;
+taggedRecoveryEvent.removeAllReminders = () => { taggedRecoveryReminderRepairs += 1; };
+const taggedRecoveryJob = makeSyncJobForTest(1, false);
+taggedRecoveryJob.inFlight = [{
+  type: 'create',
+  newKey: recoveryKey,
+  newItem: JSON.parse(JSON.stringify(recoveryItem)),
+  signature: context.makeEventSignature_(recoveryItem, batchSettings)
+}];
+const taggedRecoveryResult = context.runSyncJobBatch_(
+  taggedRecoveryJob,
+  taggedRecoveryCalendar,
+  {},
+  [recoveryItem],
+  batchSettings,
+  '2026-08-01'
+);
+assert.equal(taggedRecoveryCalendar.activeEvents().length, 1);
+assert.equal(
+  taggedRecoveryResult.state[recoveryKey].calendarEventId,
+  taggedRecoveryEvent.getId(),
+  '只有完整帶有本控制臺權杖的事件才可在續跑時接回'
+);
+assert.equal(
+  taggedRecoveryReminderRepairs,
   1,
-  '接回已建立事件時仍須重新套用提醒，修復建立後中斷的情況'
+  '接回本控制臺已建立的事件時仍須重新套用提醒'
+);
+
+context.clearChunkedStore_('TSCHOOL_MANAGED_EVENT_DELETION');
+context.clearChunkedStore_('TSCHOOL_NOTICE_STATE');
+context.clearChunkedStore_('TSCHOOL_SYNC_JOB');
+const managedDeletionTermKey = '一年級|2026-1';
+const managedDeletionSettings = Object.assign({}, batchSettings, {
+  schemaVersion: 9,
+  setupImportedAt: new Date().toISOString(),
+  setupCodeVersion: 2,
+  setupComplete: true,
+  gradeName: '高一',
+  termKey: managedDeletionTermKey,
+  calendarId: 'managed-deletion-calendar',
+  calendarName: '測試日曆',
+  notificationEmail: 'managed-deletion@example.com',
+  selectedTitles: ['誤刪測試課程'],
+  pendingTitles: [],
+  excludedTitles: []
+});
+const managedDeletionCalendar = createMockCalendar(managedDeletionSettings.calendarId);
+const managedDeletionItem = Object.assign({}, makeBatchFixtureEvent(40), {
+  originalTitle: '誤刪測試課程'
+});
+const managedDeletionKey = context.makeOccurrenceKey_(managedDeletionItem);
+const managedDeletionEvent = context.createCalendarEvent_(
+  managedDeletionCalendar,
+  managedDeletionItem,
+  managedDeletionKey,
+  managedDeletionSettings
+);
+const sameTitleUserEvent = managedDeletionCalendar.createEvent(
+  context.buildEventTitle_(managedDeletionItem),
+  managedDeletionItem.start,
+  managedDeletionItem.end,
+  {
+    location: context.buildEventLocation_(managedDeletionItem),
+    description: '使用者手動建立'
+  }
+);
+const managedDeletionState = {
+  [managedDeletionKey]: context.serializeStateItem_(
+    managedDeletionItem,
+    managedDeletionEvent.getId(),
+    context.makeEventSignature_(managedDeletionItem, managedDeletionSettings),
+    managedDeletionSettings
+  )
+};
+managedDeletionEvent.deleteEvent();
+const recoveredManagedDeletion = context.recoverDeletedManagedEvents_(
+  managedDeletionCalendar,
+  managedDeletionState,
+  [managedDeletionItem],
+  managedDeletionSettings,
+  { termKey: managedDeletionTermKey },
+  managedDeletionItem.dateKey
+);
+assert.equal(recoveredManagedDeletion.restoredCount, 1);
+assert.equal(managedDeletionCalendar.activeEvents().length, 2);
+assert.equal(sameTitleUserEvent.getTag('tschool_managed'), '');
+assert.equal(
+  recoveredManagedDeletion.state[managedDeletionKey].calendarEventId === sameTitleUserEvent.getId(),
+  false,
+  '補回誤刪行程時不得接管同標題的使用者事件'
+);
+assert.equal(recoveredManagedDeletion.notificationReviews.length, 1);
+const emailsBeforeManagedDeletionNotice = sentEmailMessages.length;
+assert.equal(
+  context.sendManagedDeletionReviewNoticeSafe_(
+    managedDeletionSettings,
+    recoveredManagedDeletion.notificationReviews
+  ),
+  true
+);
+assert.equal(sentEmailMessages.length, emailsBeforeManagedDeletionNotice + 1);
+assert.match(sentEmailMessages.at(-1).subject, /已補回可能誤刪的行程/);
+assert.match(sentEmailMessages.at(-1).body, /為避免誤刪造成應到未到，已先自動補回/);
+assert.match(sentEmailMessages.at(-1).body, /開啟行程同步控制臺/);
+assert.match(sentEmailMessages.at(-1).body, /逐項選擇「刪除單一事件」或「刪除整門課程 \/ 活動」/);
+assert.doesNotMatch(sentEmailMessages.at(-1).htmlBody, /deleteRestoredManaged/);
+const secondManagedDeletionRecovery = context.recoverDeletedManagedEvents_(
+  managedDeletionCalendar,
+  recoveredManagedDeletion.state,
+  [managedDeletionItem],
+  managedDeletionSettings,
+  { termKey: managedDeletionTermKey },
+  managedDeletionItem.dateKey
+);
+assert.equal(secondManagedDeletionRecovery.restoredCount, 0);
+assert.equal(secondManagedDeletionRecovery.notificationReviews.length, 0);
+assert.equal(managedDeletionCalendar.activeEvents().length, 2);
+managedDeletionCalendar.getEventById(
+  secondManagedDeletionRecovery.state[managedDeletionKey].calendarEventId
+).deleteEvent();
+const repeatedManagedDeletionRecovery = context.recoverDeletedManagedEvents_(
+  managedDeletionCalendar,
+  secondManagedDeletionRecovery.state,
+  [managedDeletionItem],
+  managedDeletionSettings,
+  { termKey: managedDeletionTermKey },
+  managedDeletionItem.dateKey
+);
+assert.equal(repeatedManagedDeletionRecovery.restoredCount, 1);
+assert.equal(repeatedManagedDeletionRecovery.notificationReviews.length, 0);
+assert.equal(managedDeletionCalendar.activeEvents().length, 2);
+
+context.writeChunkedJson_('TSCHOOL_SETTINGS', managedDeletionSettings);
+context.writeChunkedJson_('TSCHOOL_SYNC_STATE', repeatedManagedDeletionRecovery.state);
+context.CalendarApp.getCalendarById = id =>
+  id === managedDeletionSettings.calendarId ? managedDeletionCalendar : null;
+context.deleteRestoredManagedOccurrenceFromUi(
+  context.loadManagedEventDeletionState_().pending[0].id
+);
+assert.equal(managedDeletionCalendar.activeEvents().length, 1);
+assert.equal(managedDeletionCalendar.activeEvents()[0].getId(), sameTitleUserEvent.getId());
+assert.equal(Object.keys(context.loadSyncState_()).length, 0);
+assert.equal(
+  context.filterExcludedManagedOccurrences_(
+    [managedDeletionItem],
+    context.loadSettings_()
+  ).length,
+  0,
+  '確認刪除單一事件後，本學期同一行程不得再自動補回'
+);
+
+context.clearChunkedStore_('TSCHOOL_MANAGED_EVENT_DELETION');
+context.clearChunkedStore_('TSCHOOL_NOTICE_STATE');
+const wholeTitleCalendar = createMockCalendar('whole-title-calendar');
+const wholeTitleSettings = Object.assign({}, managedDeletionSettings, {
+  calendarId: 'whole-title-calendar',
+  selectedTitles: ['整門刪除測試', '保留課程'],
+  excludedTitles: []
+});
+const wholeTitleFirst = Object.assign({}, makeBatchFixtureEvent(40), {
+  originalTitle: '整門刪除測試'
+});
+const wholeTitleSecond = Object.assign({}, makeBatchFixtureEvent(41), {
+  originalTitle: '整門刪除測試'
+});
+const retainedTitleItem = Object.assign({}, makeBatchFixtureEvent(42), {
+  originalTitle: '保留課程'
+});
+const wholeTitlePast = Object.assign({}, makeBatchFixtureEvent(0), {
+  originalTitle: '整門刪除測試'
+});
+const wholeTitleItems = [wholeTitleFirst, wholeTitleSecond, retainedTitleItem];
+const wholeTitleStoredItems = [wholeTitlePast].concat(wholeTitleItems);
+const wholeTitleState = {};
+wholeTitleStoredItems.forEach(item => {
+  const key = context.makeOccurrenceKey_(item);
+  const event = context.createCalendarEvent_(wholeTitleCalendar, item, key, wholeTitleSettings);
+  wholeTitleState[key] = context.serializeStateItem_(
+    item,
+    event.getId(),
+    context.makeEventSignature_(item, wholeTitleSettings),
+    wholeTitleSettings
+  );
+});
+const wholeTitleUserEvent = wholeTitleCalendar.createEvent(
+  '整門刪除測試 [測試教室]',
+  wholeTitleFirst.start,
+  wholeTitleFirst.end,
+  { location: '測試教室', description: '使用者手動建立' }
+);
+wholeTitleCalendar.getEventById(
+  wholeTitleState[context.makeOccurrenceKey_(wholeTitleFirst)].calendarEventId
+).deleteEvent();
+const recoveredWholeTitle = context.recoverDeletedManagedEvents_(
+  wholeTitleCalendar,
+  wholeTitleState,
+  wholeTitleItems,
+  wholeTitleSettings,
+  { termKey: managedDeletionTermKey },
+  wholeTitleFirst.dateKey
+);
+context.writeChunkedJson_('TSCHOOL_SETTINGS', wholeTitleSettings);
+context.writeChunkedJson_('TSCHOOL_SYNC_STATE', recoveredWholeTitle.state);
+context.CalendarApp.getCalendarById = id =>
+  id === wholeTitleSettings.calendarId ? wholeTitleCalendar : null;
+context.deleteRestoredManagedTitleFromUi(
+  context.loadManagedEventDeletionState_().pending[0].id
+);
+assert.equal(JSON.stringify(context.loadSettings_().selectedTitles), JSON.stringify(['保留課程']));
+assert.equal(context.loadSettings_().excludedTitles.includes('整門刪除測試'), true);
+assert.equal(Object.keys(context.loadSyncState_()).length, 2);
+assert.equal(wholeTitleCalendar.activeEvents().length, 3);
+assert.equal(wholeTitleCalendar.activeEvents().some(event =>
+  event.getStartTime().toISOString() === wholeTitlePast.start.toISOString()
+), true, '刪除整門課程或活動時仍要保留過去行程');
+assert.equal(wholeTitleCalendar.activeEvents().some(event =>
+  event.getId() === wholeTitleUserEvent.getId()
+), true);
+assert.equal(wholeTitleUserEvent.getTag('tschool_managed'), '');
+
+const staleCalendarEvent = {
+  getTitle() { throw new Error('Calendar event does not exist or has already been deleted'); }
+};
+assert.equal(context.getCalendarEventOrNull_({ getEventById() { return staleCalendarEvent; } }, 'stale'), null);
+assert.equal(
+  context.isMissingCalendarEventError_(new Error('日曆活動不存在或已遭刪除')),
+  true
+);
+assert.throws(
+  () => context.getCalendarEventOrNull_({
+    getEventById() { throw new Error('Calendar API permission denied'); }
+  }, 'forbidden'),
+  /permission denied/,
+  '只能將明確的已刪除／不存在視為缺失，權限錯誤不得被吞掉'
 );
 
 const legacyMarkerCalendar = createMockCalendar();
@@ -6782,7 +7183,12 @@ assert.equal(
 );
 assert.equal(legacyMarkerEvent.getTag('tschool_managed'), '1');
 assert.equal(legacyMarkerEvent.getTag('tschool_sync_id'), context.hashText_(recoveryKey));
-assert.equal(legacyMarkerEvent.getTag('tschool_meta_version'), '2');
+assert.equal(legacyMarkerEvent.getTag('tschool_meta_version'), '3');
+assert.equal(
+  legacyMarkerEvent.getTag('tschool_owner'),
+  context.getManagedEventOwnerToken_(),
+  '舊版事件只能由已保存 Event ID 遷移，遷移後應補上本控制臺權杖'
+);
 
 const movedRecoveryCalendar = createMockCalendar();
 const movedOldItem = makeBatchFixtureEvent(0);
@@ -6834,6 +7240,43 @@ assert.throws(
   '發現兩筆相同管理識別碼時不得建立第三筆'
 );
 
+const foreignOwnerCalendar = createMockCalendar();
+const foreignOwnerEvent = foreignOwnerCalendar.createEvent(
+  context.buildEventTitle_(recoveryItem),
+  recoveryItem.start,
+  recoveryItem.end,
+  {
+    location: context.buildEventLocation_(recoveryItem),
+    description: context.buildManagedDescription_(recoveryItem, recoveryKey, batchSettings)
+  }
+);
+foreignOwnerEvent.setTag('tschool_sync_id', context.hashText_(recoveryKey));
+foreignOwnerEvent.setTag('tschool_meta_version', '3');
+foreignOwnerEvent.setTag('tschool_owner', 'another-control-panel-token');
+foreignOwnerEvent.setTag('tschool_managed', '1');
+let foreignOwnerReminderChanges = 0;
+foreignOwnerEvent.removeAllReminders = () => { foreignOwnerReminderChanges += 1; };
+assert.deepEqual(
+  Array.from(context.findManagedCalendarEventsByStateKey_(
+    foreignOwnerCalendar,
+    recoveryItem,
+    recoveryKey,
+    batchSettings
+  )),
+  [],
+  '其他控制臺權杖的事件不得被目前控制臺辨識'
+);
+const isolatedCreatedEvent = context.createCalendarEventIdempotent_(
+  foreignOwnerCalendar,
+  recoveryItem,
+  recoveryKey,
+  batchSettings
+);
+assert.equal(foreignOwnerCalendar.activeEvents().length, 2);
+assert.notEqual(isolatedCreatedEvent.getId(), foreignOwnerEvent.getId());
+assert.equal(foreignOwnerReminderChanges, 0);
+assert.equal(foreignOwnerEvent.deleted, false);
+
 const unmanagedCalendar = createMockCalendar();
 const unmanagedEvent = unmanagedCalendar.createEvent(
   recoveryItem.originalTitle,
@@ -6853,6 +7296,16 @@ assert.throws(
   /管理標記/,
   '既有事件失去管理標記後不得被更新'
 );
+assert.throws(
+  () => context.deleteCalendarEvent_(
+    unmanagedCalendar,
+    unmanagedEvent.getId(),
+    recoveryKey
+  ),
+  /管理標記/,
+  '未標記事件即使 Event ID 被誤傳入也不得刪除'
+);
+assert.equal(unmanagedEvent.deleted, false);
 
 const migrationSanitized = context.sanitizeSettingsInput_(
   {

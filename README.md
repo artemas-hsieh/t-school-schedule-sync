@@ -1,17 +1,18 @@
 # T-SCHOOL Schedule Sync
 
-T-SCHOOL Schedule Sync 會把你選擇的行程同步到專用 Google Calendar，並在課表調整時更新行程、寄送通知。
+T-SCHOOL Schedule Sync 會把你選擇的行程同步到你擁有的 Google Calendar，並在課表調整時更新行程、寄送通知。
 
 [開啟線上設定器](https://artemas-hsieh.github.io/t-school-schedule-sync/)
 
 ## 可以做什麼
 
 - 依年級讀取目前行程，讓你選擇要同步的項目。
-- 把日期、節次與地點加入專用 Google Calendar。
+- 把日期、節次與地點加入你選擇的 Google Calendar。
 - 在適用年級與學期補上未來 30 天的課綱內容與實體課程教室。
 - 每天以 03:00、11:00、18:00、21:00 為中心，在各自前後一小時內分散檢查課表並更新 Calendar。
 - 預設開啟即時通知；每日成功摘要固定於 06:00。
 - 從 Google Docs 行程同步控制臺調整行程選擇、通知、Calendar 與自動同步設定。
+- 受管理行程疑似被手動刪除時先自動補回，再透過 Email 提醒你到控制臺刪除單一事件，或確認刪除整門課程 / 活動。
 
 ## 開始前準備
 
@@ -19,7 +20,7 @@ T-SCHOOL Schedule Sync 會把你選擇的行程同步到專用 Google Calendar�
 
 你需要可以使用 Google Docs、Google Calendar 與 Apps Script 的 Google 帳號。如果要使用課綱補充，也需要能開啟適用課綱的校內帳號。
 
-請使用只交給 T-SCHOOL Schedule Sync 管理的專用 Calendar，不要使用主要日曆。
+你可以使用主要日曆、其他自己擁有的日曆，或讓控制臺建立新的專用 Calendar。程式只會管理由這份控制臺建立並帶有專屬隱藏標記的事件。
 
 ## 安裝
 
@@ -45,7 +46,7 @@ T-SCHOOL Schedule Sync 會把你選擇的行程同步到專用 Google Calendar�
 
 ### 3. 完成首次同步
 
-1. 在自動開啟的控制臺選擇已有的專用 Calendar，或建立一個新的專用 Calendar。
+1. 在自動開啟的控制臺選擇主要日曆、其他自己擁有的 Calendar，或建立一個新的專用 Calendar。
 2. 按下「儲存並首次同步」。
 3. 保持控制臺開啟，直到畫面明確表示可以關閉。
 
@@ -65,6 +66,8 @@ Google Docs 上方的「T-SCHOOL Schedule Sync」選單提供：
 | 查看同步狀態 | 查看最近結果、背景進度與需要處理的問題 |
 | 強制修復 | 重新套用今天以後的來源內容，可能覆蓋手動修改過的受管理行程 |
 | 移除受管理事件 | 刪除本工具建立且仍可辨識的 Calendar 行程 |
+
+若你直接在 Google Calendar 刪除仍在課表中的受管理行程，系統會在下次同步先補回，並寄信提醒。請用電腦開啟行程同步控制臺，在「同步狀態」區段選擇「刪除單一事件」或「刪除整門課程 / 活動」。刪除單一事件會直接執行；刪除整門課程 / 活動時會再要求確認。這些動作只處理本控制臺已記錄且管理標記相符的事件，同日曆中的私人事件不會受影響。
 
 ## 新學期與版本更新
 
