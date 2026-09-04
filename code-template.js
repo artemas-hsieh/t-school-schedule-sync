@@ -2329,6 +2329,26 @@ function saveSettingsFromUi(input) {
   );
 }
 
+function saveSettingsAutomaticallyFromUi(input) {
+  const result = saveSettingsCore_(input, { refreshTriggersOnlyWhenChanged: true });
+  const response = {
+    message: '設定已自動儲存',
+    operationWarning: result.operationWarning || '',
+    settings: result.settings,
+    termTransition: buildTermTransitionUiModel_(result.settings, result.source)
+  };
+  try {
+    scheduleCourseOutlineRefreshIfNeeded_(result.settings, result.source);
+  } catch (error) {
+    response.operationWarning = appendWarning_(
+      response.operationWarning,
+      '設定已儲存，但課綱背景更新暫時無法排程。'
+    );
+    Logger.log('自動儲存後無法排程課綱背景更新：' + userFacingError_(error));
+  }
+  return response;
+}
+
 function previewSettingsImpactFromUi(input) {
   const previous = loadSettings_();
   assertSetupImported_(previous);
@@ -2449,10 +2469,6 @@ function prepareFirstSyncCourseOutlinesFromUi(input) {
         unavailableItemCount: snapshot.diagnostics.unavailableItemCount,
         unavailableItemNames: snapshot.diagnostics.unavailableItemNames,
         message: '未來 30 天可讀取的課綱資料已準備完成，第一批行程會直接帶入。' +
-          (snapshot.diagnostics.unavailableItemCount
-            ? '\\n另有 ' + snapshot.diagnostics.unavailableItemCount +
-              ' 項課程或活動沒有可讀取的課綱資料，對應欄位會留空。'
-            : '') +
           (stateWarning ? '\\n' + stateWarning : '')
       };
     } catch (error) {
@@ -2489,6 +2505,9 @@ function saveSettingsAndSyncFromUi(input) {
   const response = buildSyncUiResponse_(
     syncResult,
     firstSetup ? '第一次同步完成，請檢查同步日曆' : '設定已儲存並同步'
+  );
+  response.feedbackInvitation = Boolean(
+    firstSetup && response.pending && !syncResult.retrying
   );
   response.operationWarning = appendWarning_(
     result.operationWarning,
@@ -2810,7 +2829,7 @@ function rejectPendingTitleFromUi(title) {
   }, getSettingsUiData);
 }
 
-function saveSettingsCore_(input) {
+function saveSettingsCore_(input, options) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) {
     throw new Error('背景同步正在保存行程，暫時無法改設定。請稍後再試。');
@@ -2831,6 +2850,11 @@ function saveSettingsCore_(input) {
       );
     }
     const next = sanitizeSettingsInput_(input, oldSettings, source);
+    const refreshTriggersOnlyWhenChanged = Boolean(
+      options && options.refreshTriggersOnlyWhenChanged
+    );
+    const triggerSettingsChanged = makeAutoSyncTriggerSettingsSignature_(oldSettings) !==
+      makeAutoSyncTriggerSettingsSignature_(next);
 
     saveSettings_(next);
     const observation = loadSourceObservation_();
@@ -2852,8 +2876,10 @@ function saveSettingsCore_(input) {
           TERM_TRANSITION_VERIFICATION_HANDLER
         ]);
       }
-      if (next.setupComplete) refreshAutoSyncTriggers_(next);
-      else deleteAutoSyncTriggersUnlocked_();
+      if (!refreshTriggersOnlyWhenChanged || triggerSettingsChanged) {
+        if (next.setupComplete) refreshAutoSyncTriggers_(next);
+        else deleteAutoSyncTriggersUnlocked_();
+      }
     } catch (automationError) {
       operationWarnings.push('設定已儲存，但自動同步觸發器暫時無法更新。');
       Logger.log('設定儲存後無法更新自動同步觸發器：' + userFacingError_(automationError));
@@ -2867,6 +2893,21 @@ function saveSettingsCore_(input) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function makeAutoSyncTriggerSettingsSignature_(settings) {
+  const value = settings || {};
+  return JSON.stringify({
+    setupComplete: Boolean(value.setupComplete),
+    autoSyncEnabled: value.autoSyncEnabled !== false,
+    pendingTermKey: String(value.pendingTermKey || ''),
+    gradeName: String(value.gradeName || ''),
+    instantNotificationsEnabled: value.instantNotificationsEnabled !== false,
+    notificationHours: normalizeHourArray_(
+      value.notificationHours || value.autoSyncHours,
+      value.notifySyncHour
+    )
+  });
 }
 
 function assertFirstSetupTermStillCurrent_(settings, source) {
@@ -8310,9 +8351,9 @@ function refreshAutoSyncTriggers_(settings) {
       .create();
   });
   const notificationHours = getEffectiveNotificationHours_(settings);
-  const dailySummaryHour = getDailySummaryHour_(settings);
+  const successSummaryHour = getSuccessSummaryHour_(settings);
   notificationHours.forEach(hour => {
-    const handler = hour === dailySummaryHour
+    const handler = hour === successSummaryHour
       ? FINAL_NOTIFICATION_HANDLER
       : NOTIFICATION_HANDLER;
     ScriptApp.newTrigger(handler)
@@ -8365,7 +8406,7 @@ function getEffectiveNotificationHours_(settings) {
   );
 }
 
-function getDailySummaryHour_(settings) {
+function getSuccessSummaryHour_(settings) {
   const hours = getEffectiveNotificationHours_(settings);
   return settings && settings.instantNotificationsEnabled === false
     ? Math.max.apply(null, hours)
@@ -8608,6 +8649,7 @@ function sendScheduledNotifications() {
 }
 
 function sendScheduledNotificationsWithDailySummary() {
+  // 保留舊 Trigger 相容名稱，成功摘要已改為每週日寄送
   return requestScheduledNotificationDelivery_(true);
 }
 
@@ -8616,14 +8658,14 @@ function retryScheduledNotificationDelivery() {
   return processScheduledNotificationDelivery_();
 }
 
-function requestScheduledNotificationDelivery_(includeDailySummary) {
+function requestScheduledNotificationDelivery_(includeWeeklySummary) {
   assertSetupImported_(loadSettings_());
   const properties = PropertiesService.getScriptProperties();
   const previous = loadScheduledNotificationDeliveryRequest_();
   properties.setProperty(NOTIFICATION_DELIVERY_REQUEST_STORE, JSON.stringify({
     requestedAt: new Date().toISOString(),
-    includeDailySummary: Boolean(
-      includeDailySummary || previous && previous.includeDailySummary
+    includeWeeklySummary: Boolean(
+      includeWeeklySummary || previous && previous.includeWeeklySummary
     )
   }));
   return processScheduledNotificationDelivery_();
@@ -8637,10 +8679,12 @@ function loadScheduledNotificationDeliveryRequest_() {
     const request = JSON.parse(raw);
     return {
       requestedAt: String(request.requestedAt || ''),
-      includeDailySummary: Boolean(request.includeDailySummary)
+      includeWeeklySummary: Boolean(
+        request.includeWeeklySummary || request.includeDailySummary
+      )
     };
   } catch (error) {
-    return { requestedAt: '', includeDailySummary: false };
+    return { requestedAt: '', includeWeeklySummary: false };
   }
 }
 
@@ -8677,10 +8721,10 @@ function processScheduledNotificationDelivery_() {
       null
     );
     const queuedNotificationCount = flushQueuedNotificationsSafe_(settings);
-    const successSummarySent = request.includeDailySummary &&
+    const successSummarySent = request.includeWeeklySummary &&
       !changeNotificationSent &&
-      !hasChangeNotificationToday_()
-      ? sendLatestSyncSuccessSummaryIfNeeded_(settings)
+      !hasChangeNotificationToday_(request.requestedAt)
+      ? sendLatestSyncSuccessSummaryIfNeeded_(settings, request.requestedAt)
       : false;
 
     PropertiesService.getScriptProperties()
@@ -8701,8 +8745,10 @@ function processScheduledNotificationDelivery_() {
   }
 }
 
-function sendLatestSyncSuccessSummaryIfNeeded_(settings) {
-  const dateKey = formatDateKey_(new Date());
+function sendLatestSyncSuccessSummaryIfNeeded_(settings, scheduledAt) {
+  const summaryDate = scheduledAt ? new Date(scheduledAt) : new Date();
+  if (!isWeeklySuccessSummaryDay_(summaryDate)) return false;
+  const dateKey = formatDateKey_(summaryDate);
   const queueState = loadNotificationQueueState_();
   if (queueState.lastSuccessSummaryDate === dateKey) return false;
   const status = loadStatus_();
@@ -8718,6 +8764,12 @@ function sendLatestSyncSuccessSummaryIfNeeded_(settings) {
   queueState.lastSuccessSummaryDate = dateKey;
   saveNotificationQueueState_(queueState);
   return true;
+}
+
+function isWeeklySuccessSummaryDay_(dateValue) {
+  const date = dateValue ? new Date(dateValue) : new Date();
+  return !isNaN(date.getTime()) &&
+    Utilities.formatDate(date, TIMEZONE, 'u') === '7';
 }
 
 function sendSyncNotificationsSafe_(settings, result, options) {
@@ -8929,8 +8981,9 @@ function deliverScheduleChangeNotification_(settings, currentChangeData) {
   }
 }
 
-function hasChangeNotificationToday_() {
-  return loadNotificationQueueState_().lastChangeDate === formatDateKey_(new Date());
+function hasChangeNotificationToday_(dateValue) {
+  const date = dateValue ? new Date(dateValue) : new Date();
+  return loadNotificationQueueState_().lastChangeDate === formatDateKey_(date);
 }
 
 function mergeChangeEmailData_(left, right) {

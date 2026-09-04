@@ -131,6 +131,11 @@ assert.equal(configuratorAppSource.includes('fullCodeToggle'), false);
 assert.equal(configuratorAppSource.includes('你的即時通知：'), false);
 assert.equal(configuratorAppSource.includes("appVersion: '2.0.0-rc.2'"), true);
 assert.equal(configuratorAppSource.includes('每日摘要時間：'), false);
+assert.equal(
+  configuratorAppSource.includes('即時通知開啟時，每週日摘要固定於 06:00 寄出'),
+  true,
+  '設定網站應說明成功摘要固定在每週日寄出'
+);
 assert.match(
   configuratorAppSource,
   /const notificationSummary = instantNotificationsEnabled[\s\S]*?\? \['行程有調整就盡快通知'\][\s\S]*?: getSelectedNotifyHours\(\)\.map/,
@@ -355,6 +360,55 @@ assert.equal(sidebarHtml.includes('<span>說明格式</span>'), false);
 assert.equal(sidebarHtml.includes('id="hours"'), false, '控制臺不應顯示與實際設定不一致的固定同步時段');
 assert.equal(sidebarHtml.includes('id="calendar-name"'), true);
 assert.equal(sidebarHtml.includes('id="reimport-setup">重新匯入設定碼</button>'), true);
+assert.equal(sidebarHtml.includes('id="save">儲存</button>'), true, '控制臺必須保留手動儲存按鈕');
+assert.equal(
+  sidebarHtml.includes('id="autosave-status" data-state="idle" role="status" aria-live="polite"'),
+  true,
+  '自動儲存狀態必須可被輔助技術宣告'
+);
+assert.equal(sidebarHtml.includes('變更會自動儲存'), true);
+assert.equal(sidebarHtml.includes("server('saveSettingsAutomaticallyFromUi', settings)"), true);
+assert.equal(sidebarHtml.includes('var AUTO_SAVE_TOAST_DURATION_MS = 5000;'), true);
+assert.equal(
+  sidebarHtml.includes("showAutoSaveToast();"),
+  true,
+  '自動儲存成功必須顯示可自動關閉的深色通知'
+);
+assert.match(
+  sidebarHtml,
+  /function showAutoSaveToast\(\)[\s\S]*?dataset\.kind === 'persistent'\) return;[\s\S]*?showToast\('設定已自動儲存', \{ autoDismiss: true \}\)/,
+  '自動儲存成功通知不得覆蓋尚未關閉的錯誤、警告或手動操作結果'
+);
+assert.match(
+  sidebarHtml,
+  /if \(options && options\.autoDismiss\)[\s\S]*?setTimeout[\s\S]*?AUTO_SAVE_TOAST_DURATION_MS/,
+  '只有明確標示的自動儲存通知可在 5 秒後關閉'
+);
+assert.match(
+  sidebarHtml,
+  /背景同步正在保存行程[\s\S]*?autoSaveRetryCount < 3[\s\S]*?scheduleAutoSave\(1500\)/,
+  '自動儲存遇到 Script Lock 競爭時應有上限的延遲重試'
+);
+assert.match(
+  sidebarHtml,
+  /var AUTO_SAVE_DELAY_MS = 900;[\s\S]*?function markSettingsChanged\(delay\)[\s\S]*?scheduleAutoSave\(delay\)/,
+  '控制臺變更應經過集中防抖後再自動儲存'
+);
+assert.match(
+  sidebarHtml,
+  /byId\('reimport-setup'\)\.addEventListener\('click', async function[\s\S]*?if \(autoSavePromise\) await autoSavePromise;[\s\S]*?server\('showSetupImportDialog'/,
+  '重新匯入設定碼前必須等待已在途中的自動儲存'
+);
+assert.match(
+  sidebarHtml,
+  /function runAction\(method, label, trackProgress\)[\s\S]*?flushPendingAutoSave\(\)[\s\S]*?server\(method, null\)/,
+  '執行同步、修復或停止前必須先完成待處理的自動儲存'
+);
+assert.match(
+  sidebarHtml,
+  /model\.settings && model\.settings\.calendarId && !byId\('calendar'\)\.value[\s\S]*?建立新日曆後自動儲存/,
+  '新專用日曆建立前不得先儲存空 Calendar ID'
+);
 assert.equal(sidebarHtml.includes('id="sync-progress"'), true);
 assert.equal(sidebarHtml.includes('function pollSyncProgress(generation)'), true);
 assert.equal(sidebarHtml.includes('id="sync-progress-warning"'), true);
@@ -392,11 +446,27 @@ assert.match(
 );
 assert.equal(sidebarHtml.includes('id="toast-close" aria-label="關閉通知"'), true);
 assert.equal(sidebarHtml.includes('class="toast" id="toast" hidden'), true);
-assert.equal(sidebarHtml.includes('showToast.timer'), false, '彈出式通知不得自動消失');
+assert.equal(sidebarHtml.includes('showToast.timer'), false, '不得以共用 showToast 計時器讓其他通知自動消失');
+assert.equal(sidebarHtml.includes("byId('toast').dataset.kind = options && options.autoDismiss ? 'autosave' : 'persistent'"), true);
+assert.equal(
+  sidebarHtml.includes("feedbackLink.rel = 'noopener noreferrer'"),
+  true,
+  '回饋表單連結必須隔離新分頁的 opener'
+);
+assert.equal(
+  sidebarHtml.includes("feedbackLink.textContent = '提供一些意見'"),
+  true,
+  '首批同步完成通知必須提供可點擊的回饋連結'
+);
+assert.match(
+  sidebarHtml,
+  /feedbackInvitation: Boolean\(result && result\.feedbackInvitation\)/,
+  '只有後端指定的操作結果才能顯示回饋邀請'
+);
 assert.equal(
   sidebarHtml.includes("byId('toast-close').addEventListener('click', dismissToast)"),
   true,
-  '彈出式通知必須由使用者手動關閉'
+  '所有彈出式通知仍必須可由使用者手動關閉'
 );
 assert.match(
   sidebarHtml,
@@ -726,6 +796,11 @@ assert.equal(
   true
 );
 assert.equal(sidebarHtml.includes('<span>每日成功摘要</span>'), false);
+assert.equal(
+  sidebarHtml.includes('即時通知開啟時，每週日摘要固定於 06:00 寄出'),
+  true,
+  '控制臺應說明成功摘要固定在每週日寄出'
+);
 assert.equal(sidebarHtml.includes('id="include-activities"'), false);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), false);
 [
@@ -1245,12 +1320,27 @@ assert.equal(
 assert.equal(
   configuratorAppSource.includes('homeEntryHeroTimeRatio: 2 / 3'),
   true,
-  '首頁開始設定捲動應讓 Hero 動畫約占總時間三分之二'
+  '首頁 Hero 與第一張卡片之間應保留約三分之二的 Hero 時間比例'
+);
+assert.equal(
+  configuratorAppSource.includes('homeEntryScrollDuration: 1.35'),
+  true,
+  '首頁單次捲動完整動畫時間應縮短為 1.35 秒'
 );
 assert.match(
   configuratorAppSource,
-  /function runHomeEntryVirtualScroll\([\s\S]*?heroProgress = elapsedMs \/ heroDurationMs[\s\S]*?cardProgress = \(elapsedMs - heroDurationMs\)[\s\S]*?programmatic: false,[\s\S]*?lerp: homeEntryLerp/,
-  '首頁開始設定應以兩段線性虛擬目標推動 Lenis，可視平滑僅由 lerp 處理'
+  /function getHomeEntryTimelinePosition\([\s\S]*?function getHomeEntryTargetAtTimeline\([\s\S]*?heroProgress[\s\S]*?cardProgress[\s\S]*?function runHomeEntryVirtualScroll\([\s\S]*?cruiseVelocity = 1 \/ totalDurationMs[\s\S]*?programmatic: false,[\s\S]*?lerp: homeEntryLerp/,
+  '首頁去回應共用兩段線性時間軸推動 Lenis，可視平滑僅由 lerp 處理'
+);
+assert.equal(
+  configuratorAppSource.includes('homeEntryDirectionChangeDuration: 0.32'),
+  true,
+  'Hero 中途反向應集中控制減速與反向加速時間'
+);
+assert.match(
+  configuratorAppSource,
+  /targetVelocity = motion\.cruiseVelocity \* motion\.direction[\s\S]*?maximumVelocityChange[\s\S]*?motion\.velocity < targetVelocity[\s\S]*?motion\.velocity > targetVelocity[\s\S]*?motion\.timelinePosition \+ motion\.velocity \* elapsedMs/,
+  'Hero 反向時應保留連續速度，先減速穿越零點再反向加速'
 );
 assert.equal(
   configuratorAppSource.includes('createHomeEntryScrollEasing'),
@@ -1259,13 +1349,28 @@ assert.equal(
 );
 assert.match(
   configuratorAppSource,
-  /function enterFirstStepWithPageScroll\(\)[\s\S]*?heroAnimationEndTarget[\s\S]*?runHomeEntryVirtualScroll\(\{[\s\S]*?heroAnimationEndTarget,[\s\S]*?scrollTarget/,
-  '首頁開始設定應以 Hero 動畫完成位置作為兩段勻速目標的距離分界'
+  /function getHomeEntryScrollGeometry\(\)[\s\S]*?heroAnimationEndTarget = clamp\([\s\S]*?function getHomeEntryTimelinePosition/,
+  '首頁單次捲動應以 Hero 動畫完成位置作為兩段目標的距離分界'
 );
 assert.match(
   configuratorAppSource,
-  /virtualScroll: payload => \{[\s\S]*?tschoolCancelHomeEntryScroll\?\.\(\{ resetMomentum: true \}\)/,
-  '使用者主動捲動時應取消首頁按鈕的虛擬捲動並交還控制權'
+  /virtualScroll: payload => \{[\s\S]*?boundaryHandler\(payload\)[\s\S]*?if \(shouldContinue\)[\s\S]*?tschoolCancelHomeEntryScroll/,
+  '虛擬捲動應先讓 Hero 單次觸發接管輸入，其他範圍才交還 Lenis 連續捲動'
+);
+assert.match(
+  configuratorAppSource,
+  /function handleHomeEntryScrollIntent\(direction, event\)[\s\S]*?homeEntryScrollActive[\s\S]*?runHomeEntryVirtualScroll\(\{[\s\S]*?direction[\s\S]*?Math\.abs\(deltaY\) >= MOTION_CONFIG\.homeEntryIntentThreshold[\s\S]*?handleHomeEntryScrollIntent\(Math\.sign\(deltaY\), event\)/,
+  'Hero 與第一張卡片間應以單次捲動觸發完整去回動畫，並允許動畫期間反向'
+);
+assert.match(
+  configuratorAppSource,
+  /function releaseProgrammaticScrollForInput\(\)[\s\S]*?clearActiveSectionTransition\(\{ requestUpdate: false \}\)[\s\S]*?clearNavigationFocusLock\(\)[\s\S]*?resetScrollMomentum\(\)[\s\S]*?function handleBoundaryVirtualScroll\(payload\)[\s\S]*?releaseProgrammaticScrollForInput\(\)/,
+  '第 1–5 張卡片的自動轉場與步驟選單定位都應可被人工捲動中斷'
+);
+assert.equal(
+  /if \(automatedTargetStep\) \{\s*if \(event\?\.cancelable\) event\.preventDefault\(\);\s*return false;/.test(configuratorAppSource),
+  false,
+  '卡片轉場期間不得再攔截人工捲動'
 );
 assert.match(
   configuratorHtml,
@@ -1274,8 +1379,43 @@ assert.match(
 );
 assert.match(
   configuratorStylesSource,
+  /--hero-line-width:\s*2px;[\s\S]*?border: var\(--hero-line-width\) solid var\(--ink\);[\s\S]*?height: var\(--hero-line-width\);[\s\S]*?border-width: var\(--hero-line-width\);/,
+  '桌機版 Hero 主要外框、連接線與行程卡應維持原線寬'
+);
+assert.match(
+  configuratorStylesSource,
+  /\.schedule-grid span \{[\s\S]*?var\(--hero-grid-line-width, 1px\)[\s\S]*?\.calendar-time \{[\s\S]*?var\(--hero-grid-line-width, 1px\)/,
+  'Hero 紙張內部格線應由響應式線寬變數控制'
+);
+assert.match(
+  configuratorStylesSource,
+  /@media \(max-width: 760px\) \{[\s\S]*?\.hero-paper-track \{\s*--hero-line-width: 1\.2px;\s*--hero-grid-line-width: 0\.6px;/,
+  '只有行動版 Hero 外框與內部格線應降為原本的 0.6 倍'
+);
+assert.match(
+  configuratorStylesSource,
+  /html\.has-js \.hero-stage:not\(\.is-layout-ready\) \.transfer-path,[\s\S]*?visibility: hidden;/,
+  'Hero 動態元件在首次實測定位完成前不得顯示估算座標'
+);
+assert.equal(
+  configuratorAppSource.includes("stage.classList.add('is-layout-ready')"),
+  true,
+  'Hero 實測定位完成後應立即顯示動態元件'
+);
+assert.match(
+  configuratorStylesSource,
   /--hero-fog-vertical-mask:\s*linear-gradient\([\s\S]*?#000 calc\(100% - var\(--hero-fog-vertical-bleed\) - 48px\),[\s\S]*?transparent calc\(100% - var\(--hero-fog-vertical-bleed\) \+ 16px\),[\s\S]*?transparent 100%/,
   'Hero 模糊層底部應在視覺區邊緣淡出，不得跨越 Hero 與設定區的背景交界'
+);
+assert.match(
+  configuratorStylesSource,
+  /@media \(max-width: 760px\) \{[\s\S]*?\.hero-progressive-fog \{\s*display: none;/,
+  '行動版 Hero 不應顯示左側漸進式模糊遮罩'
+);
+assert.match(
+  configuratorStylesSource,
+  /@media \(max-width: 760px\) and \(min-height: 780px\) and \(max-aspect-ratio: 3 \/ 5\) \{[\s\S]*?minmax\(0, 1fr\) auto[\s\S]*?minmax\(0, 2\.4fr\) auto[\s\S]*?grid-row: 2;[\s\S]*?grid-row: 4;[\s\S]*?height: min\(calc\(44dvh \+ 14px\), 404px\);[\s\S]*?grid-row: 6;[\s\S]*?grid-row: 8;/,
+  '狹長手機應將 Hero 四組內容平均分布於可用高度，而不是把剩餘高度留在動畫列內'
 );
 assert.match(
   configuratorHtml,
@@ -1916,6 +2056,16 @@ assert.throws(
   '通用程式不得保存重新導向後的 tokenized 課表網址'
 );
 assert.doesNotThrow(() => new Function(generatedCode));
+assert.match(
+  generatedCode,
+  /response\.feedbackInvitation = Boolean\(\s*firstSetup && response\.pending && !syncResult\.retrying\s*\)/,
+  '回饋邀請只能出現在首次同步已安全保存且仍需背景續跑時'
+);
+assert.equal(
+  generatedCode.includes('項課程或活動沒有可讀取的課綱資料，對應欄位會留空'),
+  false,
+  '第一次同步完成通知不應顯示課綱缺漏項目數'
+);
 obsoleteSetupCodeNames.forEach(obsoleteSetupCodeName => {
   assert.equal(
     generatedCode.includes(obsoleteSetupCodeName),
@@ -2028,6 +2178,7 @@ assert.equal(
   'previewSettingsImpactFromUi',
   'prepareFirstSyncCourseOutlinesFromUi',
   'saveSettingsFromUi',
+  'saveSettingsAutomaticallyFromUi',
   'saveSettingsAndSyncFromUi',
   'runSyncFromUi',
   'forceRepairFromUi',
@@ -2164,6 +2315,16 @@ assert.match(
   saveSettingsCoreFunctionSource,
   /LockService\.getScriptLock\(\)[\s\S]*?tryLock\(15000\)/,
   '前台儲存設定必須和背景同步使用同一種 Script Lock'
+);
+assert.match(
+  generatedCode,
+  /function saveSettingsAutomaticallyFromUi\(input\)[\s\S]*?saveSettingsCore_\(input, \{ refreshTriggersOnlyWhenChanged: true \}\)[\s\S]*?settings: result\.settings[\s\S]*?termTransition: buildTermTransitionUiModel_/,
+  '自動儲存必須沿用原有後端驗證與 Script Lock，且回傳精簡狀態'
+);
+assert.match(
+  saveSettingsCoreFunctionSource,
+  /refreshTriggersOnlyWhenChanged[\s\S]*?makeAutoSyncTriggerSettingsSignature_\(oldSettings\)[\s\S]*?makeAutoSyncTriggerSettingsSignature_\(next\)[\s\S]*?if \(!refreshTriggersOnlyWhenChanged \|\| triggerSettingsChanged\)/,
+  '一般欄位的自動儲存不得反覆刪除與重建定時觸發器'
 );
 assert.match(
   saveSettingsCoreFunctionSource,
@@ -2421,7 +2582,12 @@ assert.equal(
 assert.equal(
   generatedCode.includes("function sendScheduledNotificationsWithDailySummary()"),
   true,
-  '最後一個通知時間應有獨立的每日成功摘要入口'
+  '應保留舊 Trigger 使用的成功摘要入口名稱'
+);
+assert.equal(
+  generatedCode.includes('成功摘要已改為每週日寄送'),
+  true,
+  '舊 Trigger 相容入口必須標示現行的每週日語意'
 );
 assert.equal(
   generatedCode.includes("function retryScheduledNotificationDelivery()"),
@@ -2509,6 +2675,10 @@ const formatter = new Intl.DateTimeFormat('en-CA', {
   minute: '2-digit',
   hourCycle: 'h23'
 });
+const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Taipei',
+  weekday: 'short'
+});
 
 function formatDate(dateValue, pattern) {
   const parts = Object.fromEntries(
@@ -2525,6 +2695,12 @@ function formatDate(dateValue, pattern) {
 
   if (pattern === 'H') {
     return String(Number(parts.hour));
+  }
+
+  if (pattern === 'u') {
+    return String({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[
+      weekdayFormatter.format(new Date(dateValue))
+    ]);
   }
 
   return `${parts.year}-${parts.month}-${parts.day}`;
@@ -4942,7 +5118,7 @@ assert.deepEqual(
 assert.deepEqual(
   Array.from(context.getEffectiveNotificationHours_(initialGeneratedSettings)),
   [6],
-  '即時通知開啟時，每日摘要觸發時間應固定為 06:00'
+  '即時通知開啟時，每週日成功摘要時間應固定為 06:00'
 );
 context.writeChunkedJson_('TSCHOOL_SOURCE_UI_CACHE', {
   gradeName: '高二',
@@ -5933,6 +6109,16 @@ context.writeChunkedJson_('TSCHOOL_SETTINGS', {
   setupCodeVersion: 1,
   notificationEmail: 'test@example.com'
 });
+scriptProperties.setProperty('TSCHOOL_NOTIFICATION_DELIVERY_REQUEST', JSON.stringify({
+  requestedAt: '2026-09-06T06:00:00+08:00',
+  includeDailySummary: true
+}));
+assert.equal(
+  context.loadScheduledNotificationDeliveryRequest_().includeWeeklySummary,
+  true,
+  '舊版每日摘要請求更新後應無縫轉為每週日摘要請求'
+);
+scriptProperties.deleteProperty('TSCHOOL_NOTIFICATION_DELIVERY_REQUEST');
 context.requestScheduledNotificationDelivery_(true);
 assert.equal(
   sentEmailMessages.length,
@@ -6010,15 +6196,76 @@ context.writeChunkedJson_('TSCHOOL_STATUS', {
   deleted: 0,
   unchanged: 9
 });
-const emailsBeforeDailySummary = sentEmailMessages.length;
-context.requestScheduledNotificationDelivery_(true);
-assert.equal(sentEmailMessages.length, emailsBeforeDailySummary + 1);
-assert.match(sentEmailMessages.at(-1).subject, /行程同步狀態正常/);
+const emailsBeforeWeeklySummaryRequest = sentEmailMessages.length;
+const currentDayAllowsWeeklySummary = context.isWeeklySuccessSummaryDay_(new Date());
 context.requestScheduledNotificationDelivery_(true);
 assert.equal(
   sentEmailMessages.length,
-  emailsBeforeDailySummary + 1,
-  '最後通知時間的每日成功摘要同一天不得重複寄送'
+  emailsBeforeWeeklySummaryRequest + (currentDayAllowsWeeklySummary ? 1 : 0),
+  '一般排程通知只能在週日寄出成功摘要'
+);
+if (currentDayAllowsWeeklySummary) {
+  assert.match(sentEmailMessages.at(-1).subject, /行程同步狀態正常/);
+}
+context.requestScheduledNotificationDelivery_(true);
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeWeeklySummaryRequest + (currentDayAllowsWeeklySummary ? 1 : 0),
+  '同一週日的成功摘要不得重複寄送'
+);
+context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
+assert.equal(
+  context.isWeeklySuccessSummaryDay_(new Date('2026-09-06T06:00:00+08:00')),
+  true,
+  '週日應允許成功摘要'
+);
+assert.equal(
+  context.isWeeklySuccessSummaryDay_(new Date('2026-09-07T06:00:00+08:00')),
+  false,
+  '非週日不得寄出成功摘要'
+);
+const emailsBeforeFixedWeeklySummary = sentEmailMessages.length;
+assert.equal(
+  context.sendLatestSyncSuccessSummaryIfNeeded_(
+    notificationTimingSettings,
+    '2026-09-06T06:00:00+08:00'
+  ),
+  true
+);
+assert.equal(sentEmailMessages.length, emailsBeforeFixedWeeklySummary + 1);
+assert.match(sentEmailMessages.at(-1).subject, /行程同步狀態正常/);
+assert.equal(
+  context.sendLatestSyncSuccessSummaryIfNeeded_(
+    notificationTimingSettings,
+    '2026-09-06T22:00:00+08:00'
+  ),
+  false,
+  '同一週日不得重複寄出成功摘要'
+);
+assert.equal(
+  context.sendLatestSyncSuccessSummaryIfNeeded_(
+    notificationTimingSettings,
+    '2026-09-07T06:00:00+08:00'
+  ),
+  false,
+  '週一即使狀態正常也不得寄出成功摘要'
+);
+assert.equal(sentEmailMessages.length, emailsBeforeFixedWeeklySummary + 1);
+context.saveNotificationQueueState_({
+  pending: [],
+  pendingChangeData: null,
+  lastChangeDate: '2026-09-06',
+  lastSuccessSummaryDate: ''
+});
+scriptProperties.setProperty('TSCHOOL_NOTIFICATION_DELIVERY_REQUEST', JSON.stringify({
+  requestedAt: '2026-09-06T22:00:00+08:00',
+  includeWeeklySummary: true
+}));
+context.processScheduledNotificationDelivery_();
+assert.equal(
+  sentEmailMessages.length,
+  emailsBeforeFixedWeeklySummary + 1,
+  '週日當天已有行程調整時不得再寄成功摘要'
 );
 
 const emailsBeforeImmediateError = sentEmailMessages.length;
@@ -8248,7 +8495,7 @@ assert.deepEqual(
     )
     .map(trigger => trigger.schedule.hour),
   [22],
-  '最後一個通知時間應寄送待寄異動，無異動時才寄每日成功摘要'
+  '最後一個通知時間應寄送待寄異動，只在週日無異動時寄成功摘要'
 );
 assert.deepEqual(
   projectTriggers
@@ -8257,7 +8504,7 @@ assert.deepEqual(
     )
     .map(trigger => trigger.schedule.nearMinute),
   [0],
-  '每日摘要 Trigger 應維持整點前後約 15 分鐘的既有精度'
+  '週日成功摘要所用 Trigger 應維持整點前後約 15 分鐘的既有精度'
 );
 context.refreshAutoSyncTriggers_({
   gradeName: '高一',
@@ -8280,7 +8527,7 @@ assert.deepEqual(
     )
     .map(trigger => trigger.schedule.hour),
   [6],
-  '即時通知開啟時應只在 06:00 建立每日摘要 Trigger'
+  '即時通知開啟時應只在 06:00 建立成功摘要所用 Trigger'
 );
 assert.equal(
   projectTriggers.some(trigger =>

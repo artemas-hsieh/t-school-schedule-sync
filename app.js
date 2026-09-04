@@ -59,8 +59,11 @@ const MOTION_CONFIG = Object.freeze({
   focusSwitchHysteresisForward: 48,
   focusSwitchHysteresisBackward: 96,
   generatedCodeTransitionDelay: 48,
-  homeEntryScrollDuration: 1.6,
+  homeEntryScrollDuration: 1.35,
   homeEntryHeroTimeRatio: 2 / 3,
+  homeEntrySnapTolerance: 24,
+  homeEntryIntentThreshold: 0.5,
+  homeEntryDirectionChangeDuration: 0.32,
   footerReturnScrollDuration: 3.25,
   heroTileTravel: 0.72,
   heroTileStagger: 0.08,
@@ -657,7 +660,7 @@ function updateNotifyHourState() {
   const instantEnabled = elements.instantNotifications?.checked !== false;
   getNotifyHourSelects().forEach(select => {
     select.title = instantEnabled
-      ? '即時通知開啟時，每日摘要固定於 06:00 寄出'
+      ? '即時通知開啟時，每週日摘要固定於 06:00 寄出'
       : (hasValidEmail ? '' : '請先填寫有效的校內 Email');
   });
 }
@@ -1439,9 +1442,16 @@ function initSmoothScroll() {
     anchors: true,
     autoRaf: true,
     virtualScroll: payload => {
-      window.tschoolCancelHomeEntryScroll?.({ resetMomentum: true });
       const boundaryHandler = window.tschoolBoundaryVirtualScroll;
-      return typeof boundaryHandler === 'function' ? boundaryHandler(payload) : true;
+      const shouldContinue = typeof boundaryHandler === 'function'
+        ? boundaryHandler(payload)
+        : true;
+
+      if (shouldContinue) {
+        window.tschoolCancelHomeEntryScroll?.({ resetMomentum: true });
+      }
+
+      return shouldContinue;
     }
   });
 
@@ -1911,6 +1921,7 @@ function initHeroScroll() {
       'is-complete',
       !layout.reducedMotion && progress >= layout.animationEnd
     );
+    stage.classList.add('is-layout-ready');
   }
 
   function requestUpdate() {
@@ -2132,6 +2143,7 @@ function initStepJourney() {
   let generatedCodeTransitionId = 0;
   let homeEntryScrollFrameId = 0;
   let homeEntryScrollActive = false;
+  let homeEntryScrollMotion = null;
   const completionStates = new Map([
     [2, 'initial'],
     [3, 'initial'],
@@ -2368,6 +2380,24 @@ function initStepJourney() {
     }
   }
 
+  function releaseProgrammaticScrollForInput() {
+    const hadProgrammaticScroll = Boolean(
+      activeSectionTransition ||
+      automatedTargetStep ||
+      navigationTargetStep
+    );
+
+    clearActiveSectionTransition({ requestUpdate: false });
+    clearNavigationFocusLock();
+    automatedTargetStep = 0;
+
+    if (hadProgrammaticScroll) {
+      resetScrollMomentum();
+    }
+
+    return hadProgrammaticScroll;
+  }
+
   function scrollToStep(stepNumber, options) {
     if (stepNumber < 1 || stepNumber > maxUnlockedStep) {
       return;
@@ -2430,27 +2460,16 @@ function initStepJourney() {
     }
 
     resetScrollMomentum();
-    const scrollTarget = getStepScrollTarget(target, 1);
+    const homeEntryGeometry = getHomeEntryScrollGeometry();
+    const scrollTarget = homeEntryGeometry?.scrollTarget || getStepScrollTarget(target, 1);
 
-    if (window.tschoolLenis && smoothScrollEnabled()) {
+    if (window.tschoolLenis && smoothScrollEnabled() && homeEntryGeometry) {
       const currentScroll = window.tschoolLenis.animatedScroll;
-      const heroStage = document.getElementById('hero-stage');
-      const heroTiles = heroStage?.querySelectorAll('.transfer-tile').length || 0;
-      const heroAnimationEndProgress = Math.min(
-        1,
-        MOTION_CONFIG.heroTileTravel +
-          MOTION_CONFIG.heroTileStagger * Math.max(0, heroTiles - 1)
-      );
-      const heroViewportHeight = window.visualViewport?.height || window.innerHeight;
-      const heroAnimationEndTarget = heroStage
-        ? getDocumentLayoutTop(heroStage) +
-          Math.max(0, heroStage.offsetHeight - heroViewportHeight) * heroAnimationEndProgress
-        : currentScroll;
 
       runHomeEntryVirtualScroll({
         currentScroll,
-        heroAnimationEndTarget,
-        scrollTarget
+        ...homeEntryGeometry,
+        direction: 1
       });
     } else {
       window.scrollTo({ top: scrollTarget, behavior: smoothScrollEnabled() ? 'smooth' : 'auto' });
@@ -2461,6 +2480,7 @@ function initStepJourney() {
     if (!homeEntryScrollActive && !homeEntryScrollFrameId) return false;
 
     homeEntryScrollActive = false;
+    homeEntryScrollMotion = null;
     if (homeEntryScrollFrameId) {
       window.cancelAnimationFrame(homeEntryScrollFrameId);
       homeEntryScrollFrameId = 0;
@@ -2471,53 +2491,159 @@ function initStepJourney() {
     return true;
   }
 
-  function runHomeEntryVirtualScroll({ currentScroll, heroAnimationEndTarget, scrollTarget }) {
+  function getHomeEntryScrollGeometry() {
+    const target = steps[0];
+    const heroStage = document.getElementById('hero-stage');
+
+    if (!target || !heroStage) {
+      return null;
+    }
+
+    const heroTiles = heroStage.querySelectorAll('.transfer-tile').length;
+    const heroAnimationEndProgress = Math.min(
+      1,
+      MOTION_CONFIG.heroTileTravel +
+        MOTION_CONFIG.heroTileStagger * Math.max(0, heroTiles - 1)
+    );
+    const heroViewportHeight = window.visualViewport?.height || window.innerHeight;
+    const heroStartTarget = getDocumentLayoutTop(heroStage);
+    const scrollTarget = getStepScrollTarget(target, 1);
+    const heroAnimationEndTarget = clamp(
+      heroStartTarget +
+        Math.max(0, heroStage.offsetHeight - heroViewportHeight) * heroAnimationEndProgress,
+      heroStartTarget,
+      scrollTarget
+    );
+
+    return {
+      heroStartTarget,
+      heroAnimationEndTarget,
+      scrollTarget
+    };
+  }
+
+  function getHomeEntryTimelinePosition(scrollPosition, geometry) {
+    const heroTimeRatio = clamp(MOTION_CONFIG.homeEntryHeroTimeRatio, 0.05, 0.95);
+    const heroDistance = Math.max(
+      1,
+      geometry.heroAnimationEndTarget - geometry.heroStartTarget
+    );
+    const cardDistance = Math.max(
+      1,
+      geometry.scrollTarget - geometry.heroAnimationEndTarget
+    );
+
+    if (scrollPosition <= geometry.heroAnimationEndTarget) {
+      return heroTimeRatio * clamp(
+        (scrollPosition - geometry.heroStartTarget) / heroDistance,
+        0,
+        1
+      );
+    }
+
+    return heroTimeRatio + (1 - heroTimeRatio) * clamp(
+      (scrollPosition - geometry.heroAnimationEndTarget) / cardDistance,
+      0,
+      1
+    );
+  }
+
+  function getHomeEntryTargetAtTimeline(timelinePosition, geometry) {
+    const heroTimeRatio = clamp(MOTION_CONFIG.homeEntryHeroTimeRatio, 0.05, 0.95);
+
+    if (timelinePosition <= heroTimeRatio) {
+      const heroProgress = timelinePosition / heroTimeRatio;
+      return geometry.heroStartTarget +
+        (geometry.heroAnimationEndTarget - geometry.heroStartTarget) * heroProgress;
+    }
+
+    const cardProgress = (timelinePosition - heroTimeRatio) / (1 - heroTimeRatio);
+    return geometry.heroAnimationEndTarget +
+      (geometry.scrollTarget - geometry.heroAnimationEndTarget) * cardProgress;
+  }
+
+  function runHomeEntryVirtualScroll({
+    currentScroll,
+    heroStartTarget,
+    heroAnimationEndTarget,
+    scrollTarget,
+    direction
+  }) {
     const lenis = window.tschoolLenis;
-    if (!lenis || scrollTarget <= currentScroll + 1) return;
+    if (!lenis || scrollTarget <= heroStartTarget + 1) return;
+
+    if (homeEntryScrollActive && homeEntryScrollMotion) {
+      homeEntryScrollMotion.direction = direction < 0 ? -1 : 1;
+      return;
+    }
 
     cancelHomeEntryVirtualScroll();
 
+    const geometry = { heroStartTarget, heroAnimationEndTarget, scrollTarget };
     const totalDurationMs = Math.max(1, MOTION_CONFIG.homeEntryScrollDuration * 1000);
-    const heroTimeRatio = clamp(MOTION_CONFIG.homeEntryHeroTimeRatio, 0.05, 0.95);
-    const heroDurationMs = totalDurationMs * heroTimeRatio;
-    const heroTarget = clamp(heroAnimationEndTarget, currentScroll, scrollTarget);
+    const startTimeline = getHomeEntryTimelinePosition(currentScroll, geometry);
     const homeEntryLerp = window.matchMedia('(pointer: coarse)').matches
       ? MOTION_CONFIG.scrollTouchLerp
       : MOTION_CONFIG.scrollLerp;
-    let startedAt = Number.NaN;
+    const initialDirection = direction < 0 ? -1 : 1;
+    const cruiseVelocity = 1 / totalDurationMs;
 
     homeEntryScrollActive = true;
+    homeEntryScrollMotion = {
+      cruiseVelocity,
+      direction: initialDirection,
+      geometry,
+      lastTimestamp: Number.NaN,
+      timelinePosition: startTimeline,
+      velocity: cruiseVelocity * initialDirection
+    };
 
     const advanceVirtualScroll = timestamp => {
-      if (!homeEntryScrollActive) return;
-      if (!Number.isFinite(startedAt)) startedAt = timestamp;
+      const motion = homeEntryScrollMotion;
+      if (!homeEntryScrollActive || !motion) return;
 
-      const elapsedMs = Math.min(Math.max(0, timestamp - startedAt), totalDurationMs);
-      let nextTarget;
-
-      if (elapsedMs <= heroDurationMs) {
-        const heroProgress = elapsedMs / heroDurationMs;
-        nextTarget = currentScroll + (heroTarget - currentScroll) * heroProgress;
-      } else {
-        const cardProgress = (elapsedMs - heroDurationMs) /
-          (totalDurationMs - heroDurationMs);
-        nextTarget = heroTarget + (scrollTarget - heroTarget) * cardProgress;
+      if (!Number.isFinite(motion.lastTimestamp)) {
+        motion.lastTimestamp = timestamp;
       }
 
-      const inputComplete = elapsedMs >= totalDurationMs;
+      const elapsedMs = Math.min(48, Math.max(0, timestamp - motion.lastTimestamp));
+      motion.lastTimestamp = timestamp;
+      const targetVelocity = motion.cruiseVelocity * motion.direction;
+      const directionChangeDurationMs = Math.max(
+        1,
+        MOTION_CONFIG.homeEntryDirectionChangeDuration * 1000
+      );
+      const maximumVelocityChange =
+        (motion.cruiseVelocity * 2 / directionChangeDurationMs) * elapsedMs;
+
+      if (motion.velocity < targetVelocity) {
+        motion.velocity = Math.min(targetVelocity, motion.velocity + maximumVelocityChange);
+      } else if (motion.velocity > targetVelocity) {
+        motion.velocity = Math.max(targetVelocity, motion.velocity - maximumVelocityChange);
+      }
+
+      motion.timelinePosition = clamp(
+        motion.timelinePosition + motion.velocity * elapsedMs,
+        0,
+        1
+      );
+      const nextTarget = getHomeEntryTargetAtTimeline(
+        motion.timelinePosition,
+        motion.geometry
+      );
+      const inputComplete =
+        (motion.direction > 0 && motion.velocity > 0 && motion.timelinePosition >= 1) ||
+        (motion.direction < 0 && motion.velocity < 0 && motion.timelinePosition <= 0);
       lenis.scrollTo(nextTarget, {
         // Match Lenis' own wheel path: the target advances linearly while its
         // lerp remains solely responsible for visible smoothing and settling.
         programmatic: false,
-        lerp: homeEntryLerp,
-        onComplete: inputComplete
-          ? () => {
-              homeEntryScrollActive = false;
-            }
-          : undefined
+        lerp: homeEntryLerp
       });
 
       if (inputComplete) {
+        homeEntryScrollActive = false;
+        homeEntryScrollMotion = null;
         homeEntryScrollFrameId = 0;
         return;
       }
@@ -2526,6 +2652,53 @@ function initStepJourney() {
     };
 
     homeEntryScrollFrameId = window.requestAnimationFrame(advanceVirtualScroll);
+  }
+
+  function handleHomeEntryScrollIntent(direction, event) {
+    const lenis = window.tschoolLenis;
+
+    if (!lenis || !smoothScrollEnabled() || prefersReducedMotion()) {
+      return false;
+    }
+
+    const geometry = getHomeEntryScrollGeometry();
+    const currentScroll = Number.isFinite(lenis.animatedScroll)
+      ? lenis.animatedScroll
+      : window.scrollY;
+
+    if (homeEntryScrollActive) {
+      if (event?.cancelable) event.preventDefault();
+      runHomeEntryVirtualScroll({
+        currentScroll,
+        ...geometry,
+        direction
+      });
+      return true;
+    }
+
+    const tolerance = MOTION_CONFIG.homeEntrySnapTolerance;
+
+    if (
+      !geometry ||
+      currentScroll < geometry.heroStartTarget - tolerance ||
+      currentScroll > geometry.scrollTarget + tolerance ||
+      (direction > 0 && currentScroll >= geometry.scrollTarget - 1) ||
+      (direction < 0 && currentScroll <= geometry.heroStartTarget + 1)
+    ) {
+      return false;
+    }
+
+    if (event?.cancelable) event.preventDefault();
+    clearNavigationFocusLock();
+    focusInputDirection = direction;
+    preserveActiveStepAfterLayout = false;
+    resetScrollMomentum();
+    runHomeEntryVirtualScroll({
+      currentScroll,
+      ...geometry,
+      direction
+    });
+    return true;
   }
 
   function setActiveStep(stepNumber) {
@@ -3133,15 +3306,18 @@ function initStepJourney() {
     if (deltaY !== 0) {
       focusInputDirection = Math.sign(deltaY);
       preserveActiveStepAfterLayout = false;
-    }
-
-    if (automatedTargetStep) {
-      if (event?.cancelable) event.preventDefault();
-      return false;
+      releaseProgrammaticScrollForInput();
     }
 
     if (deltaY === 0) {
       return true;
+    }
+
+    if (
+      Math.abs(deltaY) >= MOTION_CONFIG.homeEntryIntentThreshold &&
+      handleHomeEntryScrollIntent(Math.sign(deltaY), event)
+    ) {
+      return false;
     }
 
     const maximumScrollY = getMaximumScrollY();
@@ -3397,7 +3573,7 @@ function initStepJourney() {
   window.tschoolBoundaryVirtualScroll = handleBoundaryVirtualScroll;
 
   const releaseLayoutFocusOnScrollInput = event => {
-    clearNavigationFocusLock();
+    releaseProgrammaticScrollForInput();
     const deltaY = Number(event.deltaY);
     if (Number.isFinite(deltaY) && deltaY !== 0) {
       focusInputDirection = Math.sign(deltaY);
@@ -3406,20 +3582,27 @@ function initStepJourney() {
   };
   const releaseLayoutFocusOnScrollKey = event => {
     if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+      const direction = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ||
+        (event.key === ' ' && event.shiftKey)
+        ? -1
+        : 1;
+
+      releaseProgrammaticScrollForInput();
+
+      if (handleHomeEntryScrollIntent(direction, event)) {
+        return;
+      }
+
       cancelHomeEntryVirtualScroll({ resetMomentum: true });
       clearNavigationFocusLock();
-      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
-        focusInputDirection = -1;
-      } else {
-        focusInputDirection = 1;
-      }
+      focusInputDirection = direction;
       preserveActiveStepAfterLayout = false;
     }
   };
 
   window.addEventListener('wheel', releaseLayoutFocusOnScrollInput, { passive: true });
   window.addEventListener('touchmove', releaseLayoutFocusOnScrollInput, { passive: true });
-  window.addEventListener('keydown', releaseLayoutFocusOnScrollKey, { passive: true });
+  window.addEventListener('keydown', releaseLayoutFocusOnScrollKey);
   window.tschoolCancelHomeEntryScroll = cancelHomeEntryVirtualScroll;
   window.addEventListener('scroll', requestUpdate, { passive: true });
   window.addEventListener('resize', () => {

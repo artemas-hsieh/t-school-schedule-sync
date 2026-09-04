@@ -75,7 +75,7 @@
       border: 0 !important;
     }
 
-    .app { min-height: 100vh; padding-bottom: 88px; }
+    .app { min-height: 100vh; padding-bottom: 112px; }
     .topbar {
       position: sticky;
       top: 0;
@@ -418,16 +418,19 @@
       left: 0;
       z-index: 12;
       display: grid;
-      grid-template-columns: auto 1fr;
+      grid-template-columns: auto minmax(0, 1fr);
       gap: var(--space-2);
       padding: var(--space-3);
       border-top: 1px solid var(--chrome-line);
       background: rgba(244, 247, 242, .97);
       backdrop-filter: blur(12px);
     }
-    .footer > button, .sync-primary, .sync-menu-toggle { min-height: 48px; border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 12px; font-weight: 640; transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
-    .footer > button:hover, .sync-primary:hover, .sync-menu-toggle:hover { box-shadow: 3px 3px 0 rgba(20, 33, 29, .22); transform: translate(-1px, -1px); }
-    .footer > button:active, .sync-primary:active, .sync-menu-toggle:active { box-shadow: none; transform: translate(1px, 1px); }
+    .autosave-status { display: flex; min-width: 0; margin: 0; grid-column: 1 / -1; align-items: center; color: var(--ink-soft); font-size: 10px; font-weight: 640; line-height: 16px; }
+    .autosave-status[data-state="saving"] { color: var(--sync-dark); }
+    .autosave-status[data-state="attention"], .autosave-status[data-state="error"] { color: var(--warning); }
+    .save, .sync-primary, .sync-menu-toggle { min-height: 48px; border: 1px solid var(--ink); border-radius: var(--radius-control); cursor: pointer; font-size: 12px; font-weight: 640; transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+    .save:hover, .sync-primary:hover, .sync-menu-toggle:hover { box-shadow: 3px 3px 0 rgba(20, 33, 29, .22); transform: translate(-1px, -1px); }
+    .save:active, .sync-primary:active, .sync-menu-toggle:active { box-shadow: none; transform: translate(1px, 1px); }
     .save { padding: 0 var(--space-4); background: var(--paper-bright); color: var(--ink); }
     .sync-actions { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 48px; }
     .sync-primary, .sync-menu-toggle { border-radius: 0; background: var(--sync); color: var(--paper-bright); }
@@ -491,9 +494,13 @@
     .sync-progress-detail { color: var(--ink-soft); font-family: var(--body); font-size: 10px; line-height: 16px; text-align: left; }
     .sync-progress-warning { margin: 0; color: var(--warning); font-family: var(--body); font-size: 11px; font-weight: 640; line-height: 16px; text-align: left; }
     .sync-progress-warning[data-safe-to-close="true"] { color: var(--sync-dark); }
-    .toast { position: fixed; right: var(--space-3); bottom: 76px; left: var(--space-3); z-index: 60; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: start; padding: var(--space-3); border: 1px solid var(--paper-bright); border-radius: var(--radius-control); background: var(--ink); color: var(--paper-bright); font-size: 11px; line-height: 16px; opacity: 0; pointer-events: none; transform: translateY(var(--space-2)); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
+    .toast { position: fixed; right: var(--space-3); bottom: 108px; left: var(--space-3); z-index: 60; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: start; padding: var(--space-3); border: 1px solid var(--paper-bright); border-radius: var(--radius-control); background: var(--ink); color: var(--paper-bright); font-size: 11px; line-height: 16px; opacity: 0; pointer-events: none; transform: translateY(var(--space-2)); transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out); }
     .toast.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
     .toast-message { min-width: 0; white-space: pre-line; }
+    .toast-feedback { display: block; margin-top: var(--space-2); }
+    .toast-feedback a { color: inherit; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .toast-feedback a:hover { text-decoration-thickness: 2px; }
+    .toast-feedback a:focus-visible { border-radius: 1px; outline: 2px solid currentColor; outline-offset: 2px; }
     .toast-close { display: grid; width: 28px; height: 28px; margin: -6px -6px -6px 0; padding: 0; place-items: center; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: inherit; cursor: pointer; font-size: 18px; line-height: 1; }
     .toast-close:hover { border-color: currentColor; }
     .app.is-ready .section { animation: section-in 360ms var(--ease-out) both; }
@@ -641,6 +648,7 @@
     </main>
 
     <footer class="footer">
+      <p class="autosave-status" id="autosave-status" data-state="idle" role="status" aria-live="polite">變更會自動儲存</p>
       <button type="button" class="save" id="save">儲存</button>
       <div class="sync-actions">
         <button type="button" class="sync-primary" id="save-sync">儲存並首次同步</button>
@@ -674,6 +682,17 @@
       var customNotificationHours = [6];
       var initialLoadRetryTimer = null;
       var INITIAL_LOAD_RETRY_DELAY_MS = 1500;
+      var FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeubrhtU4oRfpG-1S4Bm6U5jws-VtKPt0A2tqts5_Riwel9NA/viewform';
+      var autoSaveTimer = null;
+      var autoSavePromise = null;
+      var autoSaveRevision = 0;
+      var autoSavedRevision = 0;
+      var autoSaveRetryCount = 0;
+      var autoSaveToastTimer = null;
+      var toastHideTimer = null;
+      var calendarChangeApproved = false;
+      var AUTO_SAVE_DELAY_MS = 900;
+      var AUTO_SAVE_TOAST_DURATION_MS = 5000;
       var NATURAL_ADVANCED_BASE_TITLE = '自然進階(二)';
       var SCHEDULE_NOTE_TITLE_PREFIX = '備註｜';
 
@@ -729,20 +748,156 @@
         if (!value) {
           updateActionAvailability();
           if (byId('notify-hours-list')) updateNotifyHourOptions();
+          if (autoSaveRevision > autoSavedRevision && !autoSavePromise) scheduleAutoSave(250);
         }
       }
-      function showToast(message) {
+      function setAutoSaveStatus(message, state) {
+        var status = byId('autosave-status');
+        status.textContent = message;
+        status.dataset.state = state || 'idle';
+      }
+      function getAutoSaveBlockMessage() {
+        if (!model) return '正在讀取設定';
+        if (model.termTransition && model.termTransition.verifying) return '新學期驗證期間無法儲存';
+        if (model.source && model.source.unavailable) return '課表來源恢復後再自動儲存';
+        var catalog = model.source && model.source.catalog || {};
+        var hasSelection = (catalog.all || []).some(function (item) {
+          return selectedTitles.has(item.title);
+        });
+        if (!hasSelection) return '選擇至少一項後自動儲存';
+        if (model.termTransition && model.termTransition.required && !byId('term-grade-confirmed').checked) {
+          return '確認新學期年級後自動儲存';
+        }
+        if (byId('email').validity && !byId('email').validity.valid) return '請先修正 Email';
+        if (model.settings && model.settings.calendarId && !byId('calendar').value) {
+          return '建立新日曆後自動儲存';
+        }
+        return '';
+      }
+      function scheduleAutoSave(delay) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        var blockMessage = getAutoSaveBlockMessage();
+        if (blockMessage) {
+          setAutoSaveStatus(blockMessage, 'attention');
+          return;
+        }
+        if (busy) {
+          setAutoSaveStatus('等待目前操作完成', 'attention');
+          return;
+        }
+        autoSaveTimer = setTimeout(function () { runAutoSave(false); }, delay == null ? AUTO_SAVE_DELAY_MS : delay);
+      }
+      function markSettingsChanged(delay) {
+        autoSaveRevision += 1;
+        autoSaveRetryCount = 0;
+        setAutoSaveStatus('尚未儲存', 'attention');
+        scheduleAutoSave(delay);
+      }
+      function runAutoSave(allowWhileBusy) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        if (autoSavePromise) return autoSavePromise;
+        var blockMessage = getAutoSaveBlockMessage();
+        if (blockMessage) {
+          setAutoSaveStatus(blockMessage, 'attention');
+          return Promise.resolve(false);
+        }
+        if (busy && !allowWhileBusy) return Promise.resolve(false);
+        var revision = autoSaveRevision;
+        var settings = collectSettings();
+        var previousTransitionRequired = Boolean(model.termTransition && model.termTransition.required);
+        var succeeded = false;
+        setAutoSaveStatus('正在自動儲存…', 'saving');
+        autoSavePromise = server('saveSettingsAutomaticallyFromUi', settings).then(function (result) {
+          succeeded = true;
+          autoSaveRetryCount = 0;
+          autoSavedRevision = Math.max(autoSavedRevision, revision);
+          calendarChangeApproved = false;
+          if (revision === autoSaveRevision) {
+            model.settings = result.settings;
+            model.termTransition = result.termTransition;
+            if (previousTransitionRequired !== Boolean(result.termTransition && result.termTransition.required)) {
+              render(model);
+            } else {
+              updateActionAvailability();
+            }
+            setAutoSaveStatus('已自動儲存', 'saved');
+            if (!result.operationWarning) showAutoSaveToast();
+          }
+          if (result.operationWarning) showToast(result.operationWarning);
+          return true;
+        }).catch(function (error) {
+          var retryable = String(error && error.message || error).indexOf('背景同步正在保存行程') !== -1;
+          if (retryable && autoSaveRetryCount < 3) {
+            autoSaveRetryCount += 1;
+            setAutoSaveStatus('背景同步完成後會再自動儲存', 'attention');
+            scheduleAutoSave(1500);
+            return false;
+          }
+          setAutoSaveStatus('自動儲存失敗', 'error');
+          showToast(error.message);
+          return false;
+        }).finally(function () {
+          autoSavePromise = null;
+          if (succeeded && autoSaveRevision > autoSavedRevision) scheduleAutoSave(250);
+        });
+        return autoSavePromise;
+      }
+      async function flushPendingAutoSave() {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        if (autoSavePromise) await autoSavePromise;
+        if (autoSaveRevision <= autoSavedRevision) return true;
+        return runAutoSave(true);
+      }
+      function showToast(message, options) {
+        clearTimeout(autoSaveToastTimer);
+        clearTimeout(toastHideTimer);
+        autoSaveToastTimer = null;
+        toastHideTimer = null;
         var normalizedMessage = String(message == null ? '' : message)
           .split('\n')
           .map(function (line) { return line.replace(/。+(\s*)$/, '$1'); })
           .join('\n');
-        byId('toast-message').textContent = normalizedMessage;
+        var messageNode = byId('toast-message');
+        messageNode.textContent = normalizedMessage;
+        if (options && options.feedbackInvitation) {
+          var feedback = document.createElement('span');
+          var feedbackLink = document.createElement('a');
+          feedback.className = 'toast-feedback';
+          feedback.appendChild(document.createTextNode('期待你可以'));
+          feedbackLink.href = FEEDBACK_FORM_URL;
+          feedbackLink.target = '_blank';
+          feedbackLink.rel = 'noopener noreferrer';
+          feedbackLink.textContent = '提供一些意見';
+          feedback.appendChild(feedbackLink);
+          feedback.appendChild(document.createTextNode('，讓本工具更好用，十分感謝！'));
+          messageNode.appendChild(feedback);
+        }
         byId('toast').hidden = false;
         byId('toast').classList.add('show');
+        byId('toast').dataset.kind = options && options.autoDismiss ? 'autosave' : 'persistent';
+        if (options && options.autoDismiss) {
+          autoSaveToastTimer = setTimeout(function () {
+            if (byId('toast').dataset.kind === 'autosave') dismissToast();
+          }, AUTO_SAVE_TOAST_DURATION_MS);
+        }
+      }
+      function showAutoSaveToast() {
+        var toast = byId('toast');
+        if (!toast.hidden && toast.dataset.kind === 'persistent') return;
+        showToast('設定已自動儲存', { autoDismiss: true });
       }
       function dismissToast() {
-        byId('toast').classList.remove('show');
-        byId('toast').hidden = true;
+        clearTimeout(autoSaveToastTimer);
+        clearTimeout(toastHideTimer);
+        autoSaveToastTimer = null;
+        var toast = byId('toast');
+        toast.classList.remove('show');
+        toastHideTimer = setTimeout(function () {
+          if (!toast.classList.contains('show')) toast.hidden = true;
+        }, 180);
       }
       function showResultMessage(result) {
         var messages = [
@@ -751,7 +906,11 @@
           result && result.uiRefreshWarning,
           result && result.calendarListWarning
         ].filter(Boolean);
-        if (messages.length) showToast(messages.join('\n'));
+        if (messages.length) {
+          showToast(messages.join('\n'), {
+            feedbackInvitation: Boolean(result && result.feedbackInvitation)
+          });
+        }
       }
       function renderUiResult(result) {
         if (result && result.uiData) render(result.uiData);
@@ -826,6 +985,7 @@
 
       function render(data) {
         model = data;
+        calendarChangeApproved = false;
         var settings = data.settings;
         selectedTitles = new Set((settings.selectedTitles || []).filter(function (title) {
           return !isCourseSelectionHidden(title);
@@ -879,10 +1039,10 @@
             : (data.status && data.status.ok
               ? '狀態正常'
               : (settings.setupComplete ? '需檢查狀態' : '待首次同步')))));
-        byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('save-sync').textContent = needsTermSelection
           ? '完成選擇並同步'
           : (settings.setupComplete ? '儲存並同步' : '儲存並首次同步');
+        byId('save').textContent = needsTermSelection ? '儲存新學期設定' : '儲存';
         byId('reimport-setup').hidden = Boolean(settings.setupComplete);
         updateActionAvailability();
       }
@@ -1088,7 +1248,7 @@
         selects.forEach(function (select, selectIndex) {
           select.disabled = instantEnabled;
           select.title = instantEnabled
-            ? '即時通知開啟時，每日摘要固定於 06:00 寄出'
+            ? '即時通知開啟時，每週日摘要固定於 06:00 寄出'
             : '';
           Array.prototype.forEach.call(select.options, function (option) {
             var optionHour = Number(option.value);
@@ -1259,9 +1419,12 @@
         var keepPolling = false;
         var settings = collectSettings();
         var oldCalendarId = model && model.settings ? model.settings.calendarId : '';
-        if (oldCalendarId && oldCalendarId !== settings.calendarId && !window.confirm('更換同步日曆後，系統會先在新日曆完成重建，再移除舊日曆中的受管理未來事件。過去事件與其他事件不會受影響。是否繼續？')) return;
+        if (oldCalendarId && oldCalendarId !== settings.calendarId && !calendarChangeApproved && !window.confirm('更換同步日曆後，系統會先在新日曆完成重建，再移除舊日曆中的受管理未來事件。過去事件與其他事件不會受影響。是否繼續？')) return;
         setBusy(true, runSync ? '正在計算變更…' : '正在儲存設定…');
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
         try {
+          if (autoSavePromise) await autoSavePromise;
           if (runSync) {
             var preview = await server('previewSettingsImpactFromUi', settings);
             var previewMessage = (preview.calendarChanged ? '將搬移至新的同步日曆。\n\n' : '') + '預計新增 ' + preview.created + '、調整 ' + preview.updated + '、取消 ' + preview.deleted + '、未變更 ' + preview.unchanged + ' 筆受管理事件。\n其他事件不會受影響';
@@ -1287,6 +1450,9 @@
             });
           }
           var result = await server(runSync ? 'saveSettingsAndSyncFromUi' : 'saveSettingsFromUi', settings);
+          autoSavedRevision = autoSaveRevision;
+          calendarChangeApproved = false;
+          setAutoSaveStatus('已儲存', 'saved');
           renderUiResult(result);
           if (result.pending) {
             keepPolling = true;
@@ -1307,9 +1473,10 @@
       async function runAction(method, label, trackProgress) {
         if (busy) return;
         var keepPolling = false;
-        if (trackProgress) startSyncProgress(label);
-        else setBusy(true, label);
+        setBusy(true, autoSaveRevision > autoSavedRevision ? '正在儲存最新變更…' : label);
         try {
+          if (!await flushPendingAutoSave()) throw new Error('最新設定尚未儲存，已取消這次操作');
+          if (trackProgress) startSyncProgress(label);
           var result = await server(method, null);
           renderUiResult(result);
           if (result.pending) {
@@ -1329,22 +1496,39 @@
       }
 
       document.addEventListener('change', function (event) {
+        var shouldAutoSave = false;
         if (event.target.matches('#course-list input[data-kind="schedule-item"]')) {
           event.target.checked
             ? selectedTitles.add(event.target.value)
             : selectedTitles.delete(event.target.value);
           renderCourses();
+          shouldAutoSave = true;
         }
         if (event.target.matches('[data-notify-hour]')) {
           customNotificationHours = getSelectedNotifyHours();
           updateNotifyHourOptions();
+          shouldAutoSave = true;
         }
         if (event.target.id === 'instant-notifications') {
           if (event.target.checked) customNotificationHours = getSelectedNotifyHours();
           renderNotificationPreferences();
+          shouldAutoSave = true;
         }
-        if (event.target.id === 'calendar') updateCalendarFields();
-        if (event.target.id === 'term-grade-confirmed') updateActionAvailability();
+        if (event.target.id === 'calendar') {
+          var oldCalendarId = model && model.settings ? model.settings.calendarId : '';
+          if (oldCalendarId && oldCalendarId !== event.target.value && !window.confirm('更換同步日曆後，系統會先在新日曆完成重建，再移除舊日曆中的受管理未來事件。過去事件與其他事件不會受影響。是否繼續？')) {
+            event.target.value = oldCalendarId;
+            updateCalendarFields();
+            return;
+          }
+          calendarChangeApproved = Boolean(oldCalendarId && oldCalendarId !== event.target.value);
+          updateCalendarFields();
+          shouldAutoSave = true;
+        }
+        if (event.target.id === 'term-grade-confirmed') {
+          updateActionAvailability();
+          shouldAutoSave = true;
+        }
         if (event.target.name === 'grade') {
           if (byId('calendar-name').dataset.autoName === 'true') byId('calendar-name').value = defaultCalendarName(event.target.value);
           byId('term-grade-confirmed').checked = false;
@@ -1363,18 +1547,28 @@
               data
             );
             renderCourses();
+            markSettingsChanged();
           }).catch(function (error) {
             showToast(error.message);
           }).finally(function () {
             setBusy(false);
           });
+          return;
         }
-        if (event.target.id === 'reminder-mode') updateConditionalFields();
+        if (event.target.id === 'reminder-mode') {
+          updateConditionalFields();
+          shouldAutoSave = true;
+        }
         if (event.target.matches('[data-reminder-minute]') && !getSelectedReminderMinutes().length) {
           event.target.checked = true;
           showToast('請至少保留一個提前時間');
+        } else if (event.target.matches('[data-reminder-minute]')) {
+          shouldAutoSave = true;
         }
+        if (event.target.id === 'auto-sync') shouldAutoSave = true;
+        if (shouldAutoSave) markSettingsChanged();
       });
+      byId('email').addEventListener('input', function () { markSettingsChanged(1200); });
       byId('course-search').addEventListener('input', renderCourses);
       byId('course-list').addEventListener('scroll', updateCourseScrollShadows, { passive: true });
       window.addEventListener('resize', updateCourseScrollShadows, { passive: true });
@@ -1385,7 +1579,10 @@
           renderCourses();
         }
       });
-      byId('calendar-name').addEventListener('input', function () { byId('calendar-name').dataset.autoName = 'false'; });
+      byId('calendar-name').addEventListener('input', function () {
+        byId('calendar-name').dataset.autoName = 'false';
+        markSettingsChanged(1200);
+      });
       byId('course-search-action').addEventListener('click', function () {
         if (byId('course-search').value) {
           byId('course-search').value = '';
@@ -1402,6 +1599,7 @@
           updateNotifyHourOptions();
           customNotificationHours = getSelectedNotifyHours();
           getNotifyHourSelects()[getNotifyHourSelects().length - 1].focus();
+          markSettingsChanged();
           return;
         }
         if (!removeButton) return;
@@ -1413,6 +1611,7 @@
         updateNotifyHourOptions();
         customNotificationHours = getSelectedNotifyHours();
         if (nextFocus) nextFocus.focus();
+        markSettingsChanged();
       });
       byId('term-transition-action').addEventListener('click', function () {
         var selectedGrade = document.querySelector('input[name="grade"]:checked');
@@ -1426,12 +1625,18 @@
         event.preventDefault();
         dismissToast();
       });
-      byId('reimport-setup').addEventListener('click', function () {
+      byId('reimport-setup').addEventListener('click', async function () {
         if (busy) return;
+        setBusy(true, '正在準備重新匯入…');
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        if (autoSavePromise) await autoSavePromise;
+        autoSavedRevision = autoSaveRevision;
         server('showSetupImportDialog', null).then(function () {
           google.script.host.close();
         }).catch(function (error) {
           showToast(error.message);
+          setBusy(false);
         });
       });
       byId('sync-menu-toggle').addEventListener('click', function () {
@@ -1491,17 +1696,21 @@
       byId('create-calendar').addEventListener('click', async function () {
         var calendarName = byId('calendar-name').value.trim() || defaultCalendarName(getCheckedGrade());
         setBusy(true, '正在建立專用日曆…');
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
         try {
+          if (autoSavePromise) await autoSavePromise;
           var result = await server('createDedicatedCalendarForUi', { calendarName: calendarName, gradeName: getCheckedGrade() });
           renderCalendars(result.calendars, result.calendarId, result.calendarName);
           showResultMessage(result);
+          markSettingsChanged(0);
         } catch (error) {
           showToast(error.message);
         } finally {
           setBusy(false);
         }
       });
-      byId('pending-list').addEventListener('click', async function (event) { var title = event.target.dataset.keep || event.target.dataset.remove; if (!title) return; setBusy(true, '正在更新項目…'); try { var method = event.target.dataset.keep ? 'confirmPendingTitleFromUi' : 'rejectPendingTitleFromUi'; var result = await server(method, title); renderUiResult(result); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
+      byId('pending-list').addEventListener('click', async function (event) { var title = event.target.dataset.keep || event.target.dataset.remove; if (!title) return; setBusy(true, '正在更新項目…'); try { if (!await flushPendingAutoSave()) throw new Error('最新設定尚未儲存，已取消這次操作'); var method = event.target.dataset.keep ? 'confirmPendingTitleFromUi' : 'rejectPendingTitleFromUi'; var result = await server(method, title); renderUiResult(result); } catch (error) { showToast(error.message); } finally { setBusy(false); } });
       byId('managed-deletion-review-list').addEventListener('click', async function (event) {
         var button = event.target.closest('[data-delete-managed-occurrence],[data-delete-managed-title]');
         if (!button || busy) return;
@@ -1514,6 +1723,7 @@
         )) return;
         setBusy(true, deleteWholeTitle ? '正在刪除整門課程或活動…' : '正在刪除單一事件…');
         try {
+          if (!await flushPendingAutoSave()) throw new Error('最新設定尚未儲存，已取消這次操作');
           var result = await server(
             deleteWholeTitle ? 'deleteRestoredManagedTitleFromUi' : 'deleteRestoredManagedOccurrenceFromUi',
             reviewId
