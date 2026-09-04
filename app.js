@@ -1347,11 +1347,19 @@ function initHeroMetadata() {
     return;
   }
 
-  window.TSchoolScheduleData
-    .fetchGradeSchedule('高一')
-    .then(payload => window.TSchoolScheduleData.summarizePayload(payload, new Date()))
-    .then(summary => renderWeekNumber(summary.firstDate))
-    .catch(() => {});
+  const fetchSpeculativeHeroSchedule = () => {
+    window.TSchoolScheduleData
+      .fetchGradeSchedule('高一')
+      .then(payload => window.TSchoolScheduleData.summarizePayload(payload, new Date()))
+      .then(summary => renderWeekNumber(summary.firstDate))
+      .catch(() => {});
+  };
+
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fetchSpeculativeHeroSchedule);
+  } else {
+    setTimeout(fetchSpeculativeHeroSchedule, 1000);
+  }
 }
 
 function initFooterReturn() {
