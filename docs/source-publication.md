@@ -65,4 +65,6 @@
 
 使用者決定停止個人 Mac 上的課表擷取與定期排程，原因是干擾正常使用電腦；相鄰私人專案僅保留程式與測試供未來評估，重新啟用本機擷取須先取得使用者新的明確要求
 
+已移除 `io.tschool.schedule-source` LaunchAgent，確認本機無擷取／審核程序，審核頁連接埠未監聽
+
 Cloudflare staging 已完成首次人工核准；正式來源、通知與真實 Google Docs／Calendar 驗收未完成，後續需先選定不依賴個人 Mac 持續運作的來源方案

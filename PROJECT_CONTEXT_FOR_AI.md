@@ -171,6 +171,7 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 ## 2026-09-18 本機擷取停止決策
 
 - 使用者認為專用 Chrome、定期背景工作及本機課表擷取干擾正常使用電腦，已要求取消整套在本機執行的擷取流程
+- 2026-09-18 已移除 `io.tschool.schedule-source` LaunchAgent，確認登入服務中沒有此工作、本機擷取與審核程序為零、審核頁不再監聽；私人 repo 的程式碼與 repo 外歷史狀態保留作紀錄
 - 相鄰私人專案 `../t-school-schedule-source` 保留已完成的程式與測試作為歷史成果；不得因其存在就重新安裝 LaunchAgent、啟動 Playwright 擷取、執行 shadow／正式 collect，或要求使用者以個人 Mac 維持定期工作
 - Cloudflare staging 曾部署並完成首次人工核准，但這不代表正式來源已切換；公開專案的 `NORMALIZED_API_ORIGIN` 仍是空字串，Google Docs／Calendar 的新來源真實驗收尚未完成
 - 後續若要繼續來源更新，先與使用者討論不依賴其個人 Mac 持續執行的替代方案；既有課表來源安全檢查及課程大綱 Sheets 的獨立讀取邊界仍須維持
