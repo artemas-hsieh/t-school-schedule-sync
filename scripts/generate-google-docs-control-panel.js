@@ -122,7 +122,7 @@ function main() {
   const buildAppsScriptCode = loadGenerator();
   const output = buildAppsScriptCode({
     appVersion: options.appVersion,
-    sourceApiUrl: scheduleData.API_URL,
+    sourceApiUrl: scheduleData.NORMALIZED_API_ORIGIN || scheduleData.API_URL,
     emailTemplateManifestUrl: options.emailTemplateManifestUrl,
     highLoadTestingEnabled: options.highLoadTestingEnabled
   });

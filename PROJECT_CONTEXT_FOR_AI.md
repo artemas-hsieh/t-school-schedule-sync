@@ -164,4 +164,13 @@ https://artemas-hsieh.github.io/t-school-schedule-sync/
 - 公開設定產生器維持靜態、免建置且無外部執行階段依賴。
 - Calendar 配額安全與可復原性優先於最大寫入速度。
 - 不得還原與任務無關的未提交使用者修改。
-- 既有 Google Sheet 控制臺可繼續運作，但新版網站不提供更新程式碼。Google Docs 母版自動更新、舊副本遷移與重新接回既有狀態列為後續工作，不得假設目前已有相容更新路徑。
+- 所有使用者均使用 Google Docs 控制臺；課表 Sheet 與 Sheet 控制臺已停止使用，不再規劃其相容或遷移分支；課程大綱 Sheets 維持既有獨立資料來源
+- 正規化來源契約位於 `source-contract.js`，私人發布專案保存相同版本的契約；正式 Cloudflare origin 尚未設定，`NORMALIZED_API_ORIGIN` 保持空字串，必須完成真實來源探針與 staging 驗收後才切換
+- 正規化來源在讀取時檢查同步許可與36小時有效期限，每個 Calendar 批次及每筆事件新增、修改與自動刪除前重新取得目前許可；暫停不授權清除現有事件與設定
+
+## 2026-09-18 本機擷取停止決策
+
+- 使用者認為專用 Chrome、定期背景工作及本機課表擷取干擾正常使用電腦，已要求取消整套在本機執行的擷取流程
+- 相鄰私人專案 `../t-school-schedule-source` 保留已完成的程式與測試作為歷史成果；不得因其存在就重新安裝 LaunchAgent、啟動 Playwright 擷取、執行 shadow／正式 collect，或要求使用者以個人 Mac 維持定期工作
+- Cloudflare staging 曾部署並完成首次人工核准，但這不代表正式來源已切換；公開專案的 `NORMALIZED_API_ORIGIN` 仍是空字串，Google Docs／Calendar 的新來源真實驗收尚未完成
+- 後續若要繼續來源更新，先與使用者討論不依賴其個人 Mac 持續執行的替代方案；既有課表來源安全檢查及課程大綱 Sheets 的獨立讀取邊界仍須維持

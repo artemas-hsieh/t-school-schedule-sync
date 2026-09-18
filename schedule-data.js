@@ -1,5 +1,7 @@
 (function (root, factory) {
-  const api = factory();
+  const contractFactory = typeof module === 'object' && module.exports
+    ? require('./source-contract.js') : root.TSchoolSourceContractFactory;
+  const api = factory(contractFactory);
 
   if (typeof module === 'object' && module.exports) {
     module.exports = api;
@@ -8,10 +10,13 @@
   if (root) {
     root.TSchoolScheduleData = api;
   }
-})(typeof window !== 'undefined' ? window : globalThis, function () {
+})(typeof window !== 'undefined' ? window : globalThis, function (contractFactory) {
   'use strict';
 
   const API_URL = 'https://script.google.com/macros/s/AKfycbxoTgVMnLevp0OPZQEFOYscUrXD1iMagasz2WPArXpkG-w6jRygVMS8kOwcywhnQW_i/exec';
+  // Set only during the verified production cutover; never from installer input.
+  const NORMALIZED_API_ORIGIN = '';
+  const sourceContract = contractFactory();
   const GRADE_API_NAMES = {
     '高一': '一年級',
     '高二': '二年級',
@@ -522,6 +527,9 @@
   }
 
   function assertPayload(payload) {
+    if (payload && payload.schemaVersion === 1 && payload.schedule) {
+      return sourceContract.validateResponse(payload, payload.schedule.grade.label, new Date());
+    }
     if (!payload || typeof payload !== 'object') {
       throw new Error('課表來源沒有回傳可讀取的資料。');
     }
@@ -732,6 +740,22 @@
   }
 
   function summarizePayload(payload, nowValue) {
+    if (payload && payload.schemaVersion === 1 && payload.schedule) {
+      sourceContract.validateResponse(payload, payload.schedule.grade.label, nowValue || new Date());
+      const source = payload.schedule;
+      const termItems = sortCatalogItemsForSelection(source.catalog.filter(item => item.period === 'term'));
+      const vacationItems = sortCatalogItemsForSelection(source.catalog.filter(item => item.period === 'vacation'));
+      const all = termItems.concat(vacationItems);
+      return {
+        currentGrade: source.grade.sourceLabel, weekCount: source.weeks.length,
+        firstDate: new Date(source.firstDate + 'T00:00:00+08:00'), lastDate: new Date(source.lastDate + 'T00:00:00+08:00'),
+        firstDateKey: source.firstDate, lastDateKey: source.lastDate, termKey: source.termKey,
+        catalogFingerprintVersion: CATALOG_FINGERPRINT_VERSION,
+        catalogFingerprint: makeCatalogFingerprint(source.termKey, source.lastDate, all),
+        updateValues: [source.sourceUpdatedLabel].filter(Boolean), catalog: { all, termItems, vacationItems },
+        sourcePermission: payload
+      };
+    }
     assertPayload(payload);
     const dateRecords = inferDateRecords(payload, nowValue);
     const catalog = extractCatalog(payload);
@@ -787,8 +811,10 @@
     let lastError = null;
     for (let attempt = 1; attempt <= SOURCE_FETCH_MAX_ATTEMPTS; attempt += 1) {
       try {
-        const response = await request(API_URL + '?grade=' + encodeURIComponent(apiGrade), {
-          redirect: 'follow',
+        const response = await request(NORMALIZED_API_ORIGIN
+          ? NORMALIZED_API_ORIGIN + '/v1/schedules/' + (Object.keys(GRADE_API_NAMES).indexOf(gradeName) + 1)
+          : API_URL + '?grade=' + encodeURIComponent(apiGrade), {
+          redirect: NORMALIZED_API_ORIGIN ? 'error' : 'follow',
           cache: 'no-store'
         });
         if (!response.ok) {
@@ -796,12 +822,14 @@
           error.status = Number(response.status) || 0;
           throw error;
         }
-        return assertPayload(await response.json());
+        const payload = await response.json();
+        if (NORMALIZED_API_ORIGIN) return sourceContract.validateResponse(payload, gradeName, new Date());
+        return assertPayload(payload);
       } catch (error) {
         lastError = error;
         const status = Number(error && error.status) || 0;
-        const retryable = !status || status === 302 || status === 404 ||
-          status === 408 || status === 425 || status === 429 || status >= 500;
+        const retryable = !error.code && (!status || status === 302 || status === 404 ||
+          status === 408 || status === 425 || status === 429 || status >= 500);
         if (!retryable || attempt === SOURCE_FETCH_MAX_ATTEMPTS) throw error;
         await new Promise(resolve => setTimeout(
           resolve,
@@ -814,6 +842,9 @@
 
   return {
     API_URL,
+    NORMALIZED_API_ORIGIN,
+    sourceContract,
+    createSourceContract: contractFactory,
     GRADE_API_NAMES,
     CATALOG_FINGERPRINT_VERSION,
     makeAcademicTermKey,

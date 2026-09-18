@@ -448,7 +448,7 @@ async function loadGradeSchedule(gradeName, options) {
   const force = Boolean(options && options.force);
   const cached = state.sourceByGrade.get(gradeName);
 
-  if (cached && !force) {
+  if (cached && !force && !window.TSchoolScheduleData.NORMALIZED_API_ORIGIN) {
     state.sourceSummary = cached.summary;
     seedDefaultSelections(gradeName, cached.summary);
     state.sourceError = null;
@@ -970,7 +970,7 @@ function getSettings() {
 
   return {
     appVersion: '2.0.0-rc.2',
-    sourceApiUrl: window.TSchoolScheduleData.API_URL,
+    sourceApiUrl: window.TSchoolScheduleData.NORMALIZED_API_ORIGIN || window.TSchoolScheduleData.API_URL,
     gradeName: getCurrentGrade(),
     calendarName: getDefaultCalendarName(getCurrentGrade()),
     notificationEmail: elements.notificationEmail.value.trim(),
@@ -1017,6 +1017,26 @@ function updateOutput() {
 }
 
 async function generateOutput() {
+  if (window.TSchoolScheduleData.NORMALIZED_API_ORIGIN) {
+    try {
+      const grade = getCurrentGrade();
+      const payload = await window.TSchoolScheduleData.fetchGradeSchedule(grade);
+      const summary = window.TSchoolScheduleData.summarizePayload(payload, new Date());
+      if (getCurrentGrade() !== grade) return false;
+      if (!state.sourceSummary || summary.catalogFingerprint !== state.sourceSummary.catalogFingerprint) {
+        await loadGradeSchedule(grade, { force: true });
+        throw new Error('課表選項已變更，請確認選擇後重新產生設定碼');
+      }
+      state.sourceSummary = summary;
+      state.sourceError = null;
+    } catch (error) {
+      state.sourceError = error;
+      state.generatedCodeReady = false;
+      renderSourceStatus();
+      updateGeneratedCodeAvailability(false);
+      return false;
+    }
+  }
   const ready = Boolean(state.sourceSummary && !state.sourceLoading && !state.sourceError);
   if (!ready) {
     updateGeneratedCodeAvailability(false);

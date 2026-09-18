@@ -8,7 +8,7 @@
 
 ## 專案概覽
 
-本專案提供免建置、無外部執行階段依賴的靜態設定產生器，產生由使用者自行部署的 Google Apps Script `Code.gs`。產生的程式會讀取 T-SCHOOL 課程與活動規劃表、同步選定事件至專用 Google Calendar，並在綁定的 Google Sheet 中提供設定側欄。
+本專案提供免建置、無外部執行階段依賴的靜態設定產生器，產生由使用者自行部署的 Google Apps Script `Code.gs`。產生的程式會讀取 T-SCHOOL 課表、同步選定事件至使用者自有 Google Calendar，並在綁定的 Google Docs 中提供設定側欄；課表 Sheet 與 Sheet 控制臺已停止使用，課程大綱 Sheets 保留為獨立補充來源
 
 ## 重要路徑
 

@@ -38,7 +38,8 @@ require(path.join(root, 'code-template.js'));
 
 const sidebarHtml = global.TSCHOOL_SIDEBAR_HTML;
 const setupDialogHtml = global.TSCHOOL_SETUP_DIALOG_HTML;
-const configuratorHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+// The public index is currently an outage notice; exercise the retained installer.
+const configuratorHtml = fs.readFileSync(path.join(root, 'configurator.html'), 'utf8');
 const configuratorAppSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const configuratorStylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
 const packageManifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -7349,13 +7350,16 @@ const wholeTitleSettings = Object.assign({}, managedDeletionSettings, {
   selectedTitles: ['整門刪除測試', '保留課程'],
   excludedTitles: []
 });
-const wholeTitleFirst = Object.assign({}, makeBatchFixtureEvent(40), {
+const wholeTitleFutureIndex = Math.max(40, Math.ceil(
+  (Date.now() - Date.parse('2026-08-01T08:25:00+08:00')) / (24 * 60 * 60 * 1000)
+) + 14);
+const wholeTitleFirst = Object.assign({}, makeBatchFixtureEvent(wholeTitleFutureIndex), {
   originalTitle: '整門刪除測試'
 });
-const wholeTitleSecond = Object.assign({}, makeBatchFixtureEvent(41), {
+const wholeTitleSecond = Object.assign({}, makeBatchFixtureEvent(wholeTitleFutureIndex + 1), {
   originalTitle: '整門刪除測試'
 });
-const retainedTitleItem = Object.assign({}, makeBatchFixtureEvent(42), {
+const retainedTitleItem = Object.assign({}, makeBatchFixtureEvent(wholeTitleFutureIndex + 2), {
   originalTitle: '保留課程'
 });
 const wholeTitlePast = Object.assign({}, makeBatchFixtureEvent(0), {

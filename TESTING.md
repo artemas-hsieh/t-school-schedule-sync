@@ -76,6 +76,10 @@ node scripts/generate-google-docs-control-panel.js \
 
 ## 解析變更
 
+正規化來源另執行 `node tests/normalized-source-test.js`，以既有430筆 fixture 重播三個年級識別，驗證事件內容、occurrence key、完整課表與目錄指紋一致，以及來源暫停時零 Calendar 寫入；此重播不是三年級即時來源驗證
+
+此測試另以 Calendar mock 模擬第一筆新增完成後來源進入待審核，確認後續寫入停止、已提交狀態與完整批次存檔保留、暫停不消耗錯誤重試次數，以及重新讀取有效來源後可接回已建立事件；同內容的私人事件不接管、不修改
+
 修改資料取得、正規化、行程目錄、期間分組或顯示排序時：
 
 - 測試高一、高二、高三資料。

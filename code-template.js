@@ -872,8 +872,14 @@ function buildHighLoadTestSettings_(source) {
     const notificationHours = [6];
     const notifyHour = 6;
     const sourceApiUrl = String(settings.sourceApiUrl || '').trim();
+    const sourceData = window.TSchoolScheduleData;
+    const normalizedOrigin = sourceData && sourceData.NORMALIZED_API_ORIGIN || '';
+    const normalizedSource = Boolean(normalizedOrigin && sourceApiUrl === normalizedOrigin);
+    if (normalizedOrigin && (!/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?$/.test(normalizedOrigin) || normalizedOrigin.includes('..'))) {
+      throw new Error('Normalized source origin must be a fixed HTTPS origin');
+    }
     const emailTemplateManifestUrl = String(settings.emailTemplateManifestUrl || '').trim();
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(sourceApiUrl)) {
+    if (normalizedOrigin ? !normalizedSource : sourceApiUrl !== sourceData.API_URL) {
       throw new Error('Generic Code.gs generation requires the published Apps Script /exec sourceApiUrl.');
     }
     if (!/^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[0-9a-f]{40}\/notification-email-templates\.json$/.test(emailTemplateManifestUrl)) {
@@ -958,6 +964,10 @@ const SCHEDULE_SYNC_WINDOW_HALF_MINUTES = 60;
 const TIME_TRIGGER_NEAR_MINUTE_TOLERANCE = 15;
 const INSTANT_NOTIFICATION_SUMMARY_HOUR = 6;
 const SOURCE_API_URL = ${formatString(sourceApiUrl)};
+const NORMALIZED_SOURCE_ENABLED = ${normalizedSource};
+const NORMALIZED_SOURCE_CONTRACT = (${sourceData.createSourceContract.toString()})();
+let normalizedSourceRuntimePermission_ = null;
+let normalizedSourcePermissionCheckedAt_ = 0;
 const SOURCE_FETCH_MAX_ATTEMPTS = 3;
 const SOURCE_FETCH_RETRY_DELAY_MS = 750;
 const EMAIL_TEMPLATE_MANIFEST_URL = ${formatString(emailTemplateManifestUrl)};
@@ -3450,6 +3460,7 @@ function syncSchedule_(options) {
       writeSyncProgress_(15, '正在取得最新課表（可能需等待 0–10 分鐘）', 'running');
     }
     const source = loadSourceContext_(settings.gradeName);
+    assertNormalizedCalendarWritesAllowed_(source);
     settings = applyTermTransitionIfNeeded_(settings, source, false);
     assertTermTransitionCalendarWritesAllowed_(settings);
     settings = registerNewTitles_(settings, source);
@@ -3566,6 +3577,7 @@ function syncSchedule_(options) {
 }
 
 function recoverDeletedManagedEvents_(calendar, oldState, desiredEvents, settings, source, todayKey) {
+  assertNormalizedCalendarWritesAllowed_(source);
   const state = oldState || {};
   const plan = buildSyncPlan_(state, desiredEvents || [], todayKey);
   const pairs = (plan.exact || []).concat(plan.moved || []);
@@ -3872,6 +3884,7 @@ function createSyncJob_(settings, source, desiredEvents, input, plan, oldState, 
 }
 
 function runSyncJobBatch_(job, calendar, oldState, desiredEvents, settings, todayKey) {
+  assertNormalizedCalendarWritesAllowed_(null, true);
   const startedAt = Date.now();
   let lastProgressReportedAt = startedAt;
   const batchOperationLimit = job.firstSetup && Number(job.processedOperations) === 0
@@ -4040,6 +4053,7 @@ function countPendingSyncOperations_(plan, settings, forceCalendarCheck, forcePr
 }
 
 function applySyncOperation_(operation, state, calendar, settings, recovering, stats, changes, job) {
+  assertNormalizedCalendarWritesAllowed_(null, Boolean(operation && (operation.type === 'delete' || operation.type === 'migration_delete')));
   if (operation.type === 'migration_delete') {
     const oldCalendar = CalendarApp.getCalendarById(job.migrationFromId);
     if (oldCalendar &&
@@ -4304,6 +4318,23 @@ function finalizeSyncJob_(job, settings, source, state, calendar) {
 
 function handleSyncJobFailure_(job, error) {
   const message = userFacingError_(error);
+  if (error && error.sourcePaused) {
+    error.syncFailureHandled = true;
+    if (job && job.jobId) {
+      job.lastError = message;
+      job.runId = '';
+      job.runStartedAt = '';
+      job.updatedAt = new Date().toISOString();
+      job.status = 'retry_pending';
+      job.nextAttemptAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      saveSyncJob_(job);
+      ensureOneTimeTrigger_(SYNC_CONTINUATION_HANDLER, 30 * 60 * 1000);
+      writeSyncJobProgress_(job, message, 'retry_pending');
+      return Object.assign(buildSyncJobResult_(job, true), { sourcePaused: true, warning: message });
+    }
+    writeFailedSyncStatus_(message);
+    return null;
+  }
   const actionRequired = String(error && error.message || error).indexOf('[ACTION_REQUIRED]') === 0;
   if (!job || !job.jobId) {
     writeFailedSyncStatus_(message);
@@ -5227,6 +5258,7 @@ function assertSafeDeletionPlan_(plan, oldState, reason, deletionApproved) {
 }
 
 function applySyncPlan_(calendar, oldState, plan, settings, options) {
+  assertNormalizedCalendarWritesAllowed_(null, true);
   const newState = Object.assign({}, plan.oldPast);
   const changes = [];
   const totalOperations = plan.exact.length + plan.moved.length + plan.additions.length + plan.deletions.length;
@@ -5304,6 +5336,7 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
   });
 
   plan.deletions.forEach(item => {
+    assertNormalizedCalendarWritesAllowed_(null, true);
     if (deleteCalendarEvent_(calendar, item.calendarEventId, item.stateKey)) {
       deleted += 1;
       changes.push({ type: '取消', oldItem: item });
@@ -5315,6 +5348,7 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
 }
 
 function createCalendarEvent_(calendar, item, stateKey, settings) {
+  assertNormalizedCalendarWritesAllowed_(null, true);
   getManagedEventOwnerToken_();
   const options = {
     location: buildEventLocation_(item),
@@ -5349,6 +5383,7 @@ function getCalendarEventOrNull_(calendar, eventId) {
 }
 
 function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
+  assertNormalizedCalendarWritesAllowed_();
   const matches = findManagedCalendarEventsByStateKey_(calendar, item, stateKey, settings);
   if (matches.length > 1) {
     throw new Error(
@@ -5357,6 +5392,7 @@ function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
     );
   }
   if (matches.length === 1) {
+    assertNormalizedCalendarWritesAllowed_(null, true);
     const event = matches[0];
     try {
       const title = buildEventTitle_(item, settings);
@@ -5387,6 +5423,7 @@ function findManagedCalendarEventsByStateKey_(calendar, item, stateKey, settings
 }
 
 function updateCalendarEvent_(calendar, eventId, item, stateKey, settings, expectedOldStateKey, options) {
+  assertNormalizedCalendarWritesAllowed_(null, true);
   const event = getCalendarEventOrNull_(calendar, eventId);
 
   if (!event) {
@@ -5427,6 +5464,7 @@ function updateCalendarEvent_(calendar, eventId, item, stateKey, settings, expec
 }
 
 function updateCalendarOutlineFields_(calendar, eventId, item, stateKey, settings, expectedOldStateKey, options) {
+  assertNormalizedCalendarWritesAllowed_(null, true);
   const event = getCalendarEventOrNull_(calendar, eventId);
   if (!event) {
     return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
@@ -5454,6 +5492,7 @@ function updateCalendarOutlineFields_(calendar, eventId, item, stateKey, setting
 }
 
 function migrateCalendarEventMetadata_(calendar, eventId, item, stateKey, settings, expectedOldStateKey) {
+  assertNormalizedCalendarWritesAllowed_(null, true);
   const event = getCalendarEventOrNull_(calendar, eventId);
   if (!event) {
     return createCalendarEventIdempotent_(calendar, item, stateKey, settings).getId();
@@ -7547,6 +7586,8 @@ function loadSourceContext_(gradeName) {
 
 function resetScheduleSourceRuntimeCache_() {
   scheduleSourceRuntimeCache_ = Object.create(null);
+  normalizedSourceRuntimePermission_ = null;
+  normalizedSourcePermissionCheckedAt_ = 0;
 }
 
 function scheduleBusinessNow_() {
@@ -7560,8 +7601,10 @@ function fetchSchedulePayload_(gradeName) {
   for (let attempt = 1; attempt <= SOURCE_FETCH_MAX_ATTEMPTS; attempt += 1) {
     try {
       const response = UrlFetchApp.fetch(
-        SOURCE_API_URL + '?grade=' + encodeURIComponent(apiGrade),
-        { followRedirects: true, muteHttpExceptions: true }
+        NORMALIZED_SOURCE_ENABLED
+          ? SOURCE_API_URL + '/v1/schedules/' + (['高一', '高二', '高三'].indexOf(gradeName) + 1)
+          : SOURCE_API_URL + '?grade=' + encodeURIComponent(apiGrade),
+        { followRedirects: !NORMALIZED_SOURCE_ENABLED, muteHttpExceptions: true }
       );
       const code = response.getResponseCode();
       if (code !== 200) {
@@ -7572,13 +7615,14 @@ function fetchSchedulePayload_(gradeName) {
       let payload;
       try { payload = JSON.parse(response.getContentText('UTF-8')); }
       catch (error) { throw new Error('課表來源不是有效的 JSON。'); }
-      assertSourcePayload_(payload, apiGrade);
+      if (NORMALIZED_SOURCE_ENABLED) NORMALIZED_SOURCE_CONTRACT.validateResponse(payload, gradeName, scheduleBusinessNow_());
+      else assertSourcePayload_(payload, apiGrade);
       return payload;
     } catch (error) {
       lastError = error;
       const code = Number(error && error.httpStatus) || 0;
-      const retryable = !code || code === 302 || code === 404 ||
-        code === 408 || code === 425 || code === 429 || code >= 500;
+      const retryable = !error.code && (!code || code === 302 || code === 404 ||
+        code === 408 || code === 425 || code === 429 || code >= 500);
       if (!retryable || attempt === SOURCE_FETCH_MAX_ATTEMPTS) throw error;
       Utilities.sleep(SOURCE_FETCH_RETRY_DELAY_MS * attempt);
     }
@@ -7594,6 +7638,7 @@ function assertSourcePayload_(payload, expectedGrade) {
 }
 
 function parseSchedulePayload_(payload, gradeName, now) {
+  if (payload && payload.schemaVersion === 1 && payload.schedule) return parseNormalizedSchedulePayload_(payload, gradeName, now);
   const datedHeaders = inferHeaderDates_(payload, now);
   const dateLookup = {};
   datedHeaders.forEach(item => { dateLookup[item.rowIndex + '|' + item.dayIndex] = item.dateKey; });
@@ -7719,6 +7764,56 @@ function parseSchedulePayload_(payload, gradeName, now) {
     },
     events: normalizedEvents
   };
+}
+
+function parseNormalizedSchedulePayload_(payload, gradeName, now) {
+  NORMALIZED_SOURCE_CONTRACT.validateResponse(payload, gradeName, now);
+  normalizedSourceRuntimePermission_ = payload;
+  const s = payload.schedule;
+  const events = mergeAdjacentScheduleEvents_(s.events.map(e => {
+    const start = makeTaipeiDate_(e.date, e.allDay ? '00:00' : e.startTime);
+    const day = new Date(e.date + 'T12:00:00+08:00').getUTCDay();
+    return {
+      originalTitle: e.title, isAllDay: e.allDay, weekNum: e.weekNum,
+      weekday: WEEKDAY_LABELS[(day + 6) % 7], dateKey: e.date,
+      periodStart: e.periodStart, periodEnd: e.periodEnd,
+      startTime: e.startTime || '', endTime: e.endTime || '', start,
+      end: e.allDay ? new Date(start.getTime() + 86400000) : makeTaipeiDate_(e.date, e.endTime),
+      location: e.location, sourceUpdatedLabel: e.sourceUpdatedLabel
+    };
+  }));
+  const catalogAll = sortCatalogItemsByPeriod_(s.catalog.map(c => ({ title: c.title, period: c.period })));
+  const catalogFingerprint = makeSetupCatalogFingerprint_(s.termKey, s.lastDate, catalogAll);
+  const sourceEventRows = sortCanonicalRows_(events.map(e => [e.originalTitle, Boolean(e.isAllDay), e.dateKey, e.periodStart, e.periodEnd, e.location || '']));
+  return {
+    gradeName, firstDateKey: s.firstDate, lastDateKey: s.lastDate, termKey: s.termKey,
+    catalogFingerprintVersion: SETUP_CATALOG_FINGERPRINT_VERSION, catalogFingerprint,
+    scheduleFingerprint: hashText_(JSON.stringify(['schedule', SCHEDULE_FINGERPRINT_VERSION, s.termKey, s.lastDate, makeCatalogFingerprintRows_(catalogAll), sourceEventRows])),
+    sourceUpdatedLabel: s.sourceUpdatedLabel, sourceStale: false,
+    sourcePermission: payload,
+    catalog: { all: catalogAll, termItems: catalogAll.filter(c => c.period === 'term'), vacationItems: catalogAll.filter(c => c.period === 'vacation') },
+    events
+  };
+}
+
+function assertNormalizedCalendarWritesAllowed_(source, refresh) {
+  if (!NORMALIZED_SOURCE_ENABLED) return;
+  const permission = source && source.sourcePermission || normalizedSourceRuntimePermission_;
+  NORMALIZED_SOURCE_CONTRACT.assertPermission(permission, scheduleBusinessNow_());
+  if (refresh || !normalizedSourcePermissionCheckedAt_ || Date.now() - normalizedSourcePermissionCheckedAt_ >= 30000) {
+    const response = UrlFetchApp.fetch(SOURCE_API_URL + '/v1/status', { followRedirects: false, muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) throw normalizedSourcePausedError_('無法確認課表同步許可，已保留既有日曆事件');
+    const current = JSON.parse(response.getContentText('UTF-8'));
+    NORMALIZED_SOURCE_CONTRACT.assertPermission(current, scheduleBusinessNow_(), permission.snapshotId);
+    if (current.revision !== permission.revision) throw normalizedSourcePausedError_('課表發布版本已變更，請稍後重新同步');
+    normalizedSourcePermissionCheckedAt_ = Date.now();
+  }
+}
+
+function normalizedSourcePausedError_(message) {
+  const error = new Error(message);
+  error.sourcePaused = true;
+  return error;
 }
 
 function getVacationWeekNumbersFromPayload_(payload) {
