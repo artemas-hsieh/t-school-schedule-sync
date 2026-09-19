@@ -5,6 +5,9 @@
   'use strict';
 
   const COURSE_INDEX_ID = '1sEUQ4NuT7CEbxaiXl9pY8nmZaE6iJe7SPYmYbiqDArk';
+  const HOLIDAY_URL = 'https://data.ntpc.gov.tw/api/datasets/308dcd75-6434-45bc-a95f-584da4fed251/csv/file';
+  const CROSS_SCHOOL_DAYS = { '週四跨校選修': 4, '週五跨校選修': 5 };
+  let holidayCsvRuntime = null;
   const GRADES = { '高一': '一年級', '高二': '二年級', '高三': '三年級' };
   const PERIODS = [
     ['08:25', '09:15'], ['09:15', '10:05'], ['10:15', '11:05'], ['11:05', '11:55'],
@@ -259,6 +262,78 @@
     return m ? +m[1] * 2 + +m[2] : -1;
   }
 
+  function parseNationalHolidays(csv, firstDate, lastDate) {
+    const rows = parseCsv(csv), labels = (rows.shift() || []).map(compact);
+    const fields = ['date', 'year', 'name', 'isholiday', 'holidaycategory', 'description'];
+    if (fields.some(field => !labels.includes(field))) fail('國定假日來源欄位不完整，已保留既有行程');
+    const byDate = new Map(), holidays = new Set();
+    for (const row of rows) {
+      if (!row.some(value => text(value))) continue;
+      const item = Object.fromEntries(fields.map(field => [field, text(row[labels.indexOf(field)])]));
+      if (!/^\d{8}$/.test(item.date) || !/^(?:是|否)$/.test(item.isholiday) || item.year !== item.date.slice(0, 4)) fail('國定假日來源資料無法辨識');
+      const day = item.date.slice(0, 4) + '-' + item.date.slice(4, 6) + '-' + item.date.slice(6);
+      const parsed = new Date(day + 'T00:00:00Z');
+      if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) fail('國定假日來源日期無效');
+      if (byDate.has(day) && JSON.stringify(byDate.get(day)) !== JSON.stringify(item)) fail('國定假日來源有重複衝突日期');
+      byDate.set(day, item);
+      // 軍人節等「特定節日」不適用全校；勞動節自 2026 年起適用全國各機關學校
+      const national = item.holidaycategory === '放假之紀念日及節日' || item.holidaycategory === '補假' ||
+        (item.holidaycategory === '特定節日' && /全國各機關學校/.test(item.description));
+      if (item.isholiday === '是' && national) holidays.add(day);
+    }
+    // 此資料集只列假日及特殊工作日；完整年度須包含元旦及每個週末
+    // 未公布的新年度與截斷下載不能被視為「沒有國定假日」
+    for (let year = +firstDate.slice(0, 4); year <= +lastDate.slice(0, 4); year += 1) {
+      if (!holidays.has(year + '-01-01')) fail(year + ' 年國定假日尚未完整公布或無法讀取');
+      for (let time = Date.UTC(year, 0, 1); time < Date.UTC(year + 1, 0, 1); time += 86400000) {
+        const date = new Date(time);
+        if ([0, 6].includes(date.getUTCDay()) && !byDate.has(date.toISOString().slice(0, 10))) fail(year + ' 年國定假日資料不完整');
+      }
+    }
+    return holidays;
+  }
+
+  function loadNationalHolidays(firstDate, lastDate) {
+    if (holidayCsvRuntime) return parseNationalHolidays(holidayCsvRuntime, firstDate, lastDate);
+    let cache = null;
+    try {
+      cache = CacheService.getScriptCache();
+      const cached = cache.get('TSCHOOL_NATIONAL_HOLIDAYS_V1');
+      if (cached) {
+        const result = parseNationalHolidays(cached, firstDate, lastDate);
+        holidayCsvRuntime = cached;
+        return result;
+      }
+    } catch (error) { /* Cache failure or an older year range requires a fresh read. */ }
+    const response = UrlFetchApp.fetch(HOLIDAY_URL, { followRedirects: false, muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) fail('國定假日來源暫時無法讀取，已保留既有行程');
+    const csv = response.getContentText('UTF-8');
+    if (csv.length > 512 * 1024) fail('國定假日來源超過可處理範圍');
+    const result = parseNationalHolidays(csv, firstDate, lastDate);
+    holidayCsvRuntime = csv;
+    try { if (cache) cache.put('TSCHOOL_NATIONAL_HOLIDAYS_V1', csv, 3600); } catch (error) { /* Optional cache. */ }
+    return result;
+  }
+
+  function buildCrossSchoolEvents(titles, firstDate, lastDate, holidays) {
+    const events = [];
+    for (let time = Date.parse(firstDate + 'T00:00:00Z'); time <= Date.parse(lastDate + 'T00:00:00Z'); time += 86400000) {
+      const date = new Date(time), day = date.toISOString().slice(0, 10);
+      if (holidays.has(day)) continue;
+      for (const title of titles) {
+        if (CROSS_SCHOOL_DAYS[title] !== date.getUTCDay()) continue;
+        events.push({ originalTitle: title, isAllDay: false, dateKey: day,
+          periodStart: 3, periodEnd: 4, startTime: PERIODS[2][0], endTime: PERIODS[3][1],
+          start: new Date(day + 'T' + PERIODS[2][0] + ':00+08:00'),
+          end: new Date(day + 'T' + PERIODS[3][1] + ':00+08:00'),
+          weekday: '日一二三四五六'[date.getUTCDay()], weekNum: 0, location: '',
+          sourceUpdatedLabel: '', courseOutline: { classroom: '', topic: '', content: '' },
+          outlineHash: '', outlineIdentityHash: '', sourceRow: 0 });
+      }
+    }
+    return events;
+  }
+
   // Installed Apps Script adapter. These globals are only used inside Apps Script;
   // the website uses parseCatalog/catalogUrl and never requests private outlines.
   function loadSource(grade, settings, now) {
@@ -355,6 +430,17 @@
     const storeKey = 'TSCHOOL_SHEET_COURSES_' + hashText_(key);
     const previous = readChunkedJson_(storeKey, []);
     const previousTitles = Array.isArray(previous) ? previous : previous.titles || [];
+    const crossTitles = Array.from(new Set(list.map(item => item.title).concat(previousTitles)))
+      .filter(title => Object.prototype.hasOwnProperty.call(CROSS_SCHOOL_DAYS, title) && !titles.has(title));
+    if (crossTitles.length) {
+      const outlineDates = events.map(event => event.dateKey).sort();
+      if (!outlineDates.length) fail('缺少可判定跨校選修起訖的課綱日期');
+      const first = outlineDates[0], last = outlineDates[outlineDates.length - 1];
+      const holidays = loadNationalHolidays(first, last);
+      events.push(...buildCrossSchoolEvents(crossTitles, first, last, holidays));
+      crossTitles.forEach(title => titles.add(title));
+      provenance.push(['cross-school-weekly-v1', first, last, crossTitles.slice().sort()]);
+    }
     const missing = previousTitles.filter(title => !titles.has(title));
     if (missing.length) fail('當期課綱缺少先前讀取的課程分頁：' + missing.join('、'));
     const lastEnd = Math.max(...events.map(event => event.end.getTime()));
@@ -377,5 +463,5 @@
     };
   }
 
-  return { COURSE_INDEX_ID, GRADES, parseCsv, parseCatalog, catalogUrl, headers, expandMerges, dateKey, dates, periods, parseOutline, termKey, termOrder, loadSource };
+  return { COURSE_INDEX_ID, GRADES, HOLIDAY_URL, parseCsv, parseCatalog, catalogUrl, headers, expandMerges, dateKey, dates, periods, parseOutline, termKey, termOrder, parseNationalHolidays, buildCrossSchoolEvents, loadSource };
 });

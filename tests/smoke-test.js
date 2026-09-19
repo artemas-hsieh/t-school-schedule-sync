@@ -5628,6 +5628,26 @@ assert.match(
   /href="https:\/\/docs\.google\.com\/document\/d\/test\/edit"/,
   '核准的 Google Docs 連結應保留'
 );
+// Opening/importing the bound document stores its canonical link for triggers.
+const activeDocumentAppForLinkTest = context.DocumentApp;
+const scriptIdForLinkTest = context.ScriptApp.getScriptId;
+context.DocumentApp = { getActiveDocument: () => ({ getId: () => 'student-copy', getUrl: () => { throw new Error('No URL'); } }) };
+assert.equal(context.getControlPanelUrl_(), 'https://docs.google.com/document/d/student-copy/edit');
+context.DocumentApp = { getActiveDocument: () => null };
+assert.equal(context.getControlPanelUrl_(), 'https://docs.google.com/document/d/student-copy/edit', '背景觸發器沒有 active document 時應使用同一副本保存的網址');
+context.sendEmail_({ notificationEmail: 'test@example.com' }, 'sync_failure', '背景同步測試', '測試訊息', { message: '測試訊息', controlUrl: '' });
+const backgroundLinkEmail = sentEmailMessages.pop();
+assert.match(backgroundLinkEmail.htmlBody, /<a href="https:\/\/docs\.google\.com\/document\/d\/student-copy\/edit"[^>]*style="[^"]*background:#a63c2f[^"]*"[^>]*>開啟行程同步控制臺<\/a>/);
+assert.match(backgroundLinkEmail.body, /開啟行程同步控制臺：https:\/\/docs\.google\.com\/document\/d\/student-copy\/edit/);
+context.ScriptApp.getScriptId = () => 'different-copy';
+assert.equal(context.getControlPanelUrl_(), '', '從母版複製的舊網址不得跨副本沿用');
+context.sendEmail_({ notificationEmail: 'test@example.com' }, 'sync_failure', '尚未綁定副本', '測試訊息', {});
+const unboundEmail = sentEmailMessages.pop();
+assert.equal(unboundEmail.htmlBody, undefined, '網址缺漏時寄純文字，不顯示無法點擊的假按鈕');
+assert.match(unboundEmail.body, /請從 Google 雲端硬碟開啟/);
+context.ScriptApp.getScriptId = scriptIdForLinkTest;
+context.DocumentApp = activeDocumentAppForLinkTest;
+assert.equal(context.getControlPanelUrl_(), 'https://docs.google.com/document/d/control-panel/edit', '開啟目前副本後應重新綁定正確網址');
 const emailTemplateCacheReadsAfterFirstRender = emailTemplateCacheReadCount;
 const emailTemplateFetchesAfterFirstRender = emailTemplateFetchCount;
 assert.match(
@@ -5822,7 +5842,8 @@ assert.equal(
   sentEmailMessages.at(-1).body,
   '第一批事件同步完成！如果行程較多，系統會在背景分批繼續同步\n' +
     '後續則會根據你的設定自動更新事件\n\n' +
-    '行程同步控制臺｜T-SCHOOL Schedule Sync'
+    '行程同步控制臺｜T-SCHOOL Schedule Sync\n' +
+    '開啟行程同步控制臺：https://docs.google.com/document/d/control-panel/edit'
 );
 assert.match(sentEmailMessages.at(-1).htmlBody, /行程同步設定完成/);
 assert.match(
@@ -5999,7 +6020,7 @@ assert.match(
 );
 assert.match(
   sentEmailMessages.at(-1).body,
-  /\n\n我的高二行程控制臺$/
+  /\n\n我的高二行程控制臺\n開啟行程同步控制臺：https:\/\/docs\.google\.com\/document\/d\/control-panel\/edit$/
 );
 assert.match(
   sentEmailMessages.at(-1).htmlBody,

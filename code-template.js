@@ -1131,14 +1131,33 @@ function getControlPanelUi_() {
 }
 
 function getControlPanelUrl_() {
+  let activeUrl = '';
   try {
     const document = DocumentApp.getActiveDocument();
-    return document && typeof document.getUrl === 'function'
-      ? String(document.getUrl() || '')
-      : '';
-  } catch (error) {
-    return '';
-  }
+    const id = document && typeof document.getId === 'function' ? String(document.getId() || '') : '';
+    const url = !id && document && typeof document.getUrl === 'function' ? String(document.getUrl() || '') : '';
+    const match = url.match(/^https:\\/\\/docs\\.google\\.com\\/document\\/(?:u\\/\\d+\\/)?d\\/([A-Za-z0-9_-]+)(?:[/?#]|$)/);
+    const documentId = /^[A-Za-z0-9_-]+$/.test(id) ? id : match && match[1];
+    if (documentId) activeUrl = 'https://docs.google.com/document/d/' + documentId + '/edit';
+  } catch (error) { /* A background trigger may not have an active document. */ }
+  try {
+    const scriptId = ScriptApp.getScriptId();
+    if (!scriptId) return activeUrl;
+    const properties = PropertiesService.getScriptProperties();
+    const saved = properties.getProperty('TSCHOOL_CONTROL_PANEL_LINK');
+    if (activeUrl) {
+      const value = JSON.stringify({ scriptId, url: activeUrl });
+      if (saved !== value) properties.setProperty('TSCHOOL_CONTROL_PANEL_LINK', value);
+      return activeUrl;
+    }
+    const binding = saved ? JSON.parse(saved) : null;
+    // A copied template must never link back to the original owner's document.
+    if (binding && binding.scriptId === scriptId &&
+        /^https:\\/\\/docs\\.google\\.com\\/document\\/d\\/[A-Za-z0-9_-]+\\/edit$/.test(binding.url)) {
+      return binding.url;
+    }
+  } catch (error) { /* Link persistence must not interrupt the actual operation. */ }
+  return activeUrl;
 }
 
 function getControlPanelName_() {
@@ -1164,6 +1183,7 @@ function assertSetupImported_(settings) {
 }
 
 function onOpen() {
+  getControlPanelUrl_();
   const ui = getControlPanelUi_();
   const settings = loadSettings_();
   const menu = ui
@@ -1215,6 +1235,7 @@ function showSetupImportDialog() {
 }
 
 function getSettingsUiData() {
+  getControlPanelUrl_();
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const observedSettings = loadSettings_();
     assertSetupImported_(observedSettings);
@@ -1255,6 +1276,7 @@ function previewSetupCodeForUi(code) {
 }
 
 function importSetupCodeFromUi(code, confirmUnverifiedAccount) {
+  getControlPanelUrl_();
   const beforeImport = loadSettings_();
   if (beforeImport.setupComplete) {
     throw new Error('首次同步已完成，不能再匯入設定碼。');
@@ -9156,8 +9178,10 @@ function sendEmail_(settings, templateKind, subject, body, templateData) {
     Object.assign({}, baseData, templateData || {})
   );
   cleanTemplateData.controlPanelName = baseData.controlPanelName;
+  cleanTemplateData.controlUrl = baseData.controlUrl;
   const plainBody = stripNotificationSentencePeriods_(body || '');
-  const plainFooter = cleanTemplateData.controlPanelName;
+  const plainFooter = cleanTemplateData.controlPanelName +
+    (baseData.controlUrl ? '\\n開啟行程同步控制臺：' + baseData.controlUrl : '\\n請從 Google 雲端硬碟開啟行程同步控制臺');
   const message = {
     to: recipient,
     subject: formattedSubject,
@@ -9217,6 +9241,11 @@ function buildEmailHtmlSafe_(templateKind, subject, templateData) {
     if (!manifest) return '';
     const notification = manifest.notifications[templateKind];
     if (!notification) return '';
+    if (notification.content.indexOf('{{controlUrl}}') !== -1 &&
+        !isAllowedEmailLink_(templateData && templateData.controlUrl)) {
+      // Do not display an apparent button whose href would be stripped.
+      return '';
+    }
     const values = Object.assign({
       subject,
       summary: '',

@@ -153,6 +153,49 @@ const migrated = ctx.registerNewTitles_({ ...settings, selectedTitles: ['全校�
 assert.equal(migrated.selectedTitles.length, 0, '更新來源不會重新勾選使用者原先未選的必修');
 assert.equal(migrated.outlineSourceMigrated, true);
 
+// Public government fixture includes national holidays, observed days and
+// special-population holidays; only the first two cancel cross-school courses.
+const holidayCsv = fs.readFileSync(require('node:path').join(__dirname, 'fixtures/national-holidays-2026-2027.csv'), 'utf8');
+const holidays = parser.parseNationalHolidays(holidayCsv, '2026-08-24', '2027-01-08');
+for (const day of ['2026-09-25', '2026-10-09', '2026-12-25', '2027-01-01', '2026-05-01']) assert.ok(holidays.has(day));
+assert.equal(holidays.has('2026-09-03'), false, '軍人節不取消一般學生跨校選修');
+assert.throws(() => parser.parseNationalHolidays(holidayCsv, '2028-01-01', '2028-06-01'), /尚未完整/);
+assert.throws(() => parser.parseNationalHolidays(holidayCsv.split('\n').slice(0, 20).join('\n'), '2026-09-01', '2026-10-01'), /不完整/);
+const crossEvents = parser.buildCrossSchoolEvents(['週四跨校選修', '週五跨校選修'], '2026-08-31', '2027-01-08', holidays);
+assert.ok(crossEvents.some(event => event.dateKey === '2026-09-03'));
+assert.ok(crossEvents.every(event => [4, 5].includes(new Date(event.start).getUTCDay()) && event.periodStart === 3 && event.periodEnd === 4 && !holidays.has(event.dateKey)));
+assert.ok(crossEvents.every(event => event.dateKey >= '2026-08-31' && event.dateKey <= '2027-01-08'));
+assert.equal(crossEvents[0].start.toISOString(), '2026-09-03T02:15:00.000Z');
+assert.equal(crossEvents[0].end.toISOString(), '2026-09-03T03:55:00.000Z');
+
+// Exercise import using the real adapter, without a corresponding outline tab.
+stores.clear(); nextGrade = false; nextEnabled = false;
+currentSet.key = '115-1-high2'; currentSet.validFrom = range.validFrom; currentSet.validUntil = range.validUntil;
+currentRows = [headers, lesson('2026/8/31'), lesson('2027/1/8', '12')];
+const readValuesBeforeCross = ctx.readSheetsDisplayValues_;
+ctx.readSheetsDisplayValues_ = (id, titles) => id !== parser.COURSE_INDEX_ID ? readValuesBeforeCross(id, titles) : Object.fromEntries(titles.map(title => [title, [['課程名稱', '課程類別'], ['測試課程', '必修'], ['週四跨校選修', '跨校選修'], ['週五跨校選修', '跨校選修']]]));
+let holidayFetches = 0;
+ctx.UrlFetchApp = { fetch(url) { assert.equal(url, parser.HOLIDAY_URL); holidayFetches++; return { getResponseCode: () => 200, getContentText: () => holidayCsv }; } };
+const crossSource = sourceApi.loadSource('高二', settings, beforeEnd);
+assert.equal(holidayFetches, 1);
+assert.equal(crossSource.catalog.all.length, 3);
+assert.equal(crossSource.events.filter(event => event.originalTitle.includes('跨校')).length, crossEvents.length);
+assert.equal(crossSource.catalog.all.find(item => item.title === '週四跨校選修').defaultSelected, false);
+ctx.loadSourceContext_ = () => crossSource;
+const crossPreview = ctx.buildSetupImportPreview_('', {}, { payload: { ...importPayload, gradeName: '高二', selectedTitles: ['週四跨校選修'] }, codeHash: 'cross-code' });
+assert.equal(crossPreview.selectedTitles.join(','), '週四跨校選修');
+assert.equal(crossSource.events.some(event => event.originalTitle.includes('跨校') && event.dateKey === '2026-10-09'), false);
+nextSet.key = '115-2-high2'; nextSet.validFrom = '2027-02-11'; nextSet.validUntil = '2027-08-01';
+nextRows = [headers, lesson('2027/2/15')]; nextEnabled = true;
+assert.equal(sourceApi.loadSource('高二', settings, new Date('2027-01-08T10:06:00+08:00')).termKey, settings.termKey, '最後一天跨校選修尚未結束時，不能提前切換學期');
+assert.equal(sourceApi.loadSource('高二', settings, new Date('2027-01-08T11:55:00+08:00')).termKey, '二年級|2026-2');
+// A separate execution must fail closed on download errors and an unpublished year.
+const newSourceApi = () => vm.runInContext('(' + create.toString() + ')()', ctx);
+ctx.UrlFetchApp.fetch = () => ({ getResponseCode: () => 503 });
+assert.throws(() => newSourceApi().loadSource('高二', settings, beforeEnd), /假日來源暫時/);
+ctx.UrlFetchApp.fetch = () => ({ getResponseCode: () => 200, getContentText: () => '<html>error</html>' });
+assert.throws(() => newSourceApi().loadSource('高二', settings, beforeEnd));
+
 // A complete source contains only course events. Normal managed-event planning
 // removes old future activities, retains past events, and cannot see private events.
 const past = { originalTitle: '全校活動', dateKey: '2026-09-17', start: '2026-09-17T00:00:00Z', end: '2026-09-17T01:00:00Z' };
