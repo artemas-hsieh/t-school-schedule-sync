@@ -28,9 +28,13 @@ jobs:
         run: |
           node --check app.js
           node --check schedule-data.js
+          node --check sheet-source.js
           node --check sidebar-template.js
           node --check code-template.js
           node --check tests/smoke-test.js
 
       - name: Run smoke test
         run: node tests/smoke-test.js
+
+      - name: Test outline Sheets source
+        run: node tests/sheet-source-test.js

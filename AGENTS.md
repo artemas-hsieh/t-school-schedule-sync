@@ -8,7 +8,7 @@
 
 ## 專案概覽
 
-本專案提供免建置、無外部執行階段依賴的靜態設定產生器，產生由使用者自行部署的 Google Apps Script `Code.gs`。產生的程式會讀取 T-SCHOOL 課表、同步選定事件至使用者自有 Google Calendar，並在綁定的 Google Docs 中提供設定側欄；課表 Sheet 與 Sheet 控制臺已停止使用，課程大綱 Sheets 保留為獨立補充來源
+本專案提供免建置、無外部執行階段依賴的靜態設定產生器，產生由使用者自行部署的 Google Apps Script `Code.gs`。產生的程式會讀取 T-SCHOOL 課表、同步選定事件至使用者自有 Google Calendar，並在綁定的 Google Docs 中提供設定側欄；課表 Sheet 與 Sheet 控制臺已停止使用，課程目錄由公開課程索引提供，課程大綱 Sheets 是日期、節次、地點及內容的唯一同步來源
 
 ## 重要路徑
 
@@ -34,7 +34,7 @@
 - 公開設定產生器必須維持靜態、免建置、無外部執行階段依賴；架構變更須由使用者明確同意。
 - 在沒有更高優先級的新需求或設計規格時，以根目錄公開設定器的目前實作作為 UI 行為與視覺基準。
 - 保留既有資料解析、Calendar 安全規則、產生的 Apps Script 行為、設定遷移與公開 Apps Script 函式；除非任務明確要求並規劃相容性處理。
-- 使用正式 Apps Script `/exec` 課表端點；不得保存重新導向後的 `script.googleusercontent.com` 網址、權杖或 `user_content_key`。實際端點以程式碼中的正式設定為準。
+- 網站唯讀載入公開課程索引；Apps Script 透過 Sheets v4 唯讀服務讀取課綱來源索引與啟用的課綱，不得恢復舊課表 API 或本機擷取來源；不得保存權杖、登入網址或 `user_content_key`。
 - 產生 Apps Script 時，使用者提供的值必須安全序列化；不得將使用者字串直接串接成可執行程式碼。
 - 優先維持 Calendar 配額安全、可復原性與資料保護，不得為追求速度削弱安全機制。
 - 繁體中文 UI 文案應簡潔、以行動為導向，且不假設使用者具有程式背景。

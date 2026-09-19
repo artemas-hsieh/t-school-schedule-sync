@@ -422,7 +422,7 @@ function updateCourseSearchAction() {
   elements.courseSearchSubmit?.classList.toggle('is-cancel', isSearching);
   elements.courseSearchSubmit?.setAttribute(
     'aria-label',
-    isSearching ? '取消搜尋' : '搜尋課程與活動'
+    isSearching ? '取消搜尋' : '搜尋課程'
   );
 
   if (elements.courseSearchSubmit) {
@@ -505,7 +505,7 @@ function announceGradeReady(gradeName) {
 function renderSourceStatus() {
   if (state.sourceLoading) {
     elements.sourceStatus.dataset.state = 'loading';
-    elements.sourceStatusTitle.textContent = '正在讀取課表';
+    elements.sourceStatusTitle.textContent = '正在讀取課程列表';
     elements.sourceStatusDetail.textContent = '若等待過久，可重新讀取';
     elements.sourceRefresh.disabled = !getCurrentGrade();
     return;
@@ -515,7 +515,7 @@ function renderSourceStatus() {
 
   if (state.sourceError) {
     elements.sourceStatus.dataset.state = 'error';
-    elements.sourceStatusTitle.textContent = '目前無法讀取課表';
+    elements.sourceStatusTitle.textContent = '目前無法讀取課程列表';
     elements.sourceStatusDetail.textContent = state.sourceError.message || '請稍後重新嘗試';
     return;
   }
@@ -523,14 +523,14 @@ function renderSourceStatus() {
   if (!state.sourceSummary) {
     elements.sourceStatus.dataset.state = 'idle';
     elements.sourceStatusTitle.textContent = '請先選擇年級';
-    elements.sourceStatusDetail.textContent = '系統將整理出對應的課程與活動給你選擇';
+    elements.sourceStatusDetail.textContent = '系統將整理出對應的課程給你選擇';
     elements.sourceRefresh.disabled = true;
     return;
   }
 
   elements.sourceStatus.dataset.state = 'success';
-  elements.sourceStatusTitle.textContent = `${getCurrentGrade()}課表可用`;
-  elements.sourceStatusDetail.textContent = '系統將整理出對應的課程與活動給你選擇';
+  elements.sourceStatusTitle.textContent = `${getCurrentGrade()}課程列表可用`;
+  elements.sourceStatusDetail.textContent = '系統將整理出對應的課程給你選擇';
 }
 
 function setupValidation() {
@@ -818,7 +818,7 @@ function seedDefaultSelections(gradeName, summary) {
   const isDefaultSelectedTitle = window.TSchoolScheduleData?.isDefaultSelectedTitle;
   const defaults = typeof isDefaultSelectedTitle === 'function'
     ? (summary.catalog.all || [])
-      .filter(item => isDefaultSelectedTitle(item.title))
+      .filter(item => isDefaultSelectedTitle(item))
       .map(item => item.title)
     : [];
 
@@ -858,7 +858,7 @@ function handleCourseSelectionChange(event) {
 
 function renderCourses() {
   if (state.sourceLoading) {
-    elements.courseList.innerHTML = '<div class="course-loading" aria-live="polite"><span class="loading-track" aria-hidden="true"></span><p>正在整理課程與活動…</p></div>';
+    elements.courseList.innerHTML = '<div class="course-loading" aria-live="polite"><span class="loading-track" aria-hidden="true"></span><p>正在整理課程…</p></div>';
     renderSelectionCounts();
     return;
   }
@@ -870,7 +870,7 @@ function renderCourses() {
   }
 
   if (!state.sourceSummary) {
-    elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前的課程與活動</p>';
+    elements.courseList.innerHTML = '<p class="empty-course-list">選擇年級後會顯示目前的課程</p>';
     renderSelectionCounts();
     return;
   }
@@ -891,14 +891,14 @@ function renderCourses() {
 
   if (termItems.length > 0) {
     sections.push(renderCourseSection(
-      hasVacationItems ? '學期間課程與活動' : '',
+      hasVacationItems ? '學期間課程' : '',
       termItems.map(renderScheduleItemCard).join('')
     ));
   }
 
   if (vacationItems.length > 0) {
     sections.push(renderCourseSection(
-      '寒暑假期間課程與活動',
+      '寒暑假期間課程',
       vacationItems.map(renderScheduleItemCard).join('')
     ));
   }
@@ -970,6 +970,7 @@ function getSettings() {
 
   return {
     appVersion: '2.0.0-rc.2',
+    sourceKind: summary && summary.sourceKind || '',
     sourceApiUrl: window.TSchoolScheduleData.NORMALIZED_API_ORIGIN || window.TSchoolScheduleData.API_URL,
     gradeName: getCurrentGrade(),
     calendarName: getDefaultCalendarName(getCurrentGrade()),
@@ -1017,7 +1018,7 @@ function updateOutput() {
 }
 
 async function generateOutput() {
-  if (window.TSchoolScheduleData.NORMALIZED_API_ORIGIN) {
+  if (state.sourceSummary?.sourceKind === 'course-index' || window.TSchoolScheduleData.NORMALIZED_API_ORIGIN) {
     try {
       const grade = getCurrentGrade();
       const payload = await window.TSchoolScheduleData.fetchGradeSchedule(grade);
@@ -1363,23 +1364,7 @@ function initHeroMetadata() {
     renderWeekNumber(state.sourceSummary?.firstDate);
   });
 
-  if (!scheduleWeek || !window.TSchoolScheduleData?.fetchGradeSchedule) {
-    return;
-  }
 
-  const fetchSpeculativeHeroSchedule = () => {
-    window.TSchoolScheduleData
-      .fetchGradeSchedule('高一')
-      .then(payload => window.TSchoolScheduleData.summarizePayload(payload, new Date()))
-      .then(summary => renderWeekNumber(summary.firstDate))
-      .catch(() => {});
-  };
-
-  if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(fetchSpeculativeHeroSchedule);
-  } else {
-    setTimeout(fetchSpeculativeHeroSchedule, 1000);
-  }
 }
 
 function initFooterReturn() {
@@ -2261,7 +2246,7 @@ function initStepJourney() {
     }
 
     if (completedStep === 2 && !getSelectedTitles().size) {
-      showToast('請至少選擇一項課程或活動');
+      showToast('請至少選擇一項課程');
       return;
     }
 

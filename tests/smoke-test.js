@@ -582,7 +582,7 @@ assert.equal(
   '每筆待確認事件應使用與狀態框相同間距規格的獨立珊瑚色小卡'
 );
 assert.equal(sidebarHtml.includes('刪除單一事件'), true);
-assert.equal(sidebarHtml.includes('刪除整門課程 / 活動'), true);
+assert.equal(sidebarHtml.includes('刪除整門課程'), true);
 assert.equal(sidebarHtml.includes('刪除整門課程／活動'), false);
 assert.equal(
   sidebarHtml.includes('這一筆受管理行程移至日曆垃圾桶'),
@@ -592,7 +592,7 @@ assert.equal(
 assert.equal(
   sidebarHtml.includes('今天以後的所有受管理行程移至日曆垃圾桶'),
   true,
-  '刪除整門課程 / 活動仍須顯示二次確認'
+  '刪除整門課程仍須顯示二次確認'
 );
 assert.equal(sidebarHtml.includes('data-delete-managed-occurrence'), true);
 assert.equal(sidebarHtml.includes('data-delete-managed-title'), true);
@@ -739,22 +739,22 @@ assert.equal(
   sidebarHtml.includes('data-state="attention" role="status" aria-live="polite">待首次同步</p>'),
   true
 );
-['待首次同步', '需檢查狀態', '待重新選擇課程與活動', '狀態正常'].forEach(statusLabel => {
+['待首次同步', '需檢查狀態', '待重新選擇課程', '狀態正常'].forEach(statusLabel => {
   assert.equal(sidebarHtml.includes(statusLabel), true);
 });
 assert.equal(sidebarHtml.includes('同步功能正常'), false);
 assert.equal(sidebarHtml.includes("? '同步正常'"), false);
 assert.equal(sidebarHtml.includes('需要檢查同步狀態'), false);
 assert.equal(sidebarHtml.includes('尚未完成第一次同步'), false);
-assert.equal(sidebarHtml.includes('<h2>課程與活動</h2>'), true);
+assert.equal(sidebarHtml.includes('<h2>課程</h2>'), true);
 ['<h2>設定日曆</h2>', '<h2>選年級</h2>', '<h2>選課程和活動</h2>', '<h2>行程</h2>'].forEach(
   obsoleteHeading => {
     assert.equal(sidebarHtml.includes(obsoleteHeading), false);
   }
 );
 assert.equal(sidebarHtml.includes('輸入課程、活動名稱或班別等'), true);
-assert.equal(sidebarHtml.includes('學期間課程與活動'), true);
-assert.equal(sidebarHtml.includes('寒暑假期間課程與活動'), true);
+assert.equal(sidebarHtml.includes('學期間課程'), true);
+assert.equal(sidebarHtml.includes('寒暑假期間課程'), true);
 assert.equal(sidebarHtml.includes("renderCourseGroup('學期間課程'"), false);
 assert.equal(sidebarHtml.includes("renderCourseGroup('學期間活動'"), false);
 assert.equal(sidebarHtml.includes('<span>收通知的 Email</span>'), true);
@@ -806,7 +806,7 @@ assert.equal(sidebarHtml.includes('id="include-activities"'), false);
 assert.equal(configuratorHtml.includes('id="high-load-test-banner"'), false);
 [
   ['1', '選年級'],
-  ['2', '選課程與活動'],
+  ['2', '選課程'],
   ['3', '設定通知偏好'],
   ['4', '檢查設定'],
   ['5', '變出控制臺']
@@ -1015,7 +1015,7 @@ assert.equal(
 );
 assert.equal(emailTemplateManifestText.includes('>開啟控制臺試算表</a>'), false);
 assert.equal(emailTemplateManifestText.includes('>前往重新選課</a>'), false);
-assert.equal(emailTemplateManifestText.includes('>檢查課程與活動</a>'), false);
+assert.equal(emailTemplateManifestText.includes('>檢查課程</a>'), false);
 assert.equal(/<(script|iframe)\b/i.test(emailTemplateManifestText), false);
 assert.equal(emailTemplateManifestText.includes('。'), false);
 assert.equal(/border-left\s*:/i.test(emailTemplateManifestText), false);
@@ -1057,17 +1057,17 @@ assert.equal(
 assert.equal(emailTemplateManifestText.includes('課表異動'), false);
 assert.equal(configuratorAppSource.includes('HIGH_LOAD_TEST_QUERY_PARAMETER'), false);
 assert.equal(
-  configuratorAppSource.includes("'寒暑假期間課程與活動'"),
+  configuratorAppSource.includes("'寒暑假期間課程'"),
   true,
   '有寒暑假資料時應顯示獨立的行程區段'
 );
 assert.equal(
-  configuratorAppSource.includes("hasVacationItems ? '學期間課程與活動' : ''"),
+  configuratorAppSource.includes("hasVacationItems ? '學期間課程' : ''"),
   true,
   '只有單一期間清單時，網站不應額外顯示泛稱「行程」h3'
 );
 assert.equal(
-  sidebarHtml.includes("hasVacationItems ? '學期間課程與活動' : ''"),
+  sidebarHtml.includes("hasVacationItems ? '學期間課程' : ''"),
   true,
   '只有單一期間清單時，控制臺不應額外顯示泛稱「行程」h3'
 );
@@ -1075,7 +1075,7 @@ assert.equal(configuratorHtml.includes('<p id="course-count">已選 0 項</p>'),
 assert.equal(configuratorHtml.includes('已選 0 項行程'), false);
 assert.equal(configuratorAppSource.includes('function seedDefaultSelections('), true);
 assert.equal(
-  configuratorAppSource.includes('.filter(item => isDefaultSelectedTitle(item.title))'),
+  configuratorAppSource.includes('.filter(item => isDefaultSelectedTitle(item))'),
   true,
   '設定網站應只在來源首次載入時加入明確的預設勾選項目'
 );
@@ -1440,8 +1440,8 @@ assert.match(
 );
 assert.match(
   configuratorAppSource,
-  /function initHeroMetadata\(\)[\s\S]*?renderWeekNumber\(getKnownAcademicTermStart\(now\)\)[\s\S]*?fetchGradeSchedule\('高一'\)[\s\S]*?renderWeekNumber\(summary\.firstDate\)/,
-  'Hero 應先用已知開學日計算週次，再由正式課表起日更新'
+  /function initHeroMetadata\(\)[\s\S]*?renderWeekNumber\(getKnownAcademicTermStart\(now\)\)/,
+  'Hero 使用已知開學日，不額外讀取沒有日期的課程目錄'
 );
 assert.equal(
   /data-hero-schedule-week>第\s*[…⋯–-]/.test(configuratorHtml),
@@ -1647,7 +1647,7 @@ const courseSelectionChangeSource = configuratorAppSource.slice(
 assert.equal(
   courseSelectionChangeSource.includes('renderCourses()'),
   false,
-  '勾選單一課程或活動時不得重建整份課程清單'
+  '勾選單一課程時不得重建整份課程清單'
 );
 assert.equal(
   courseSelectionChangeSource.includes('renderSelectionCounts()'),
@@ -1937,7 +1937,7 @@ const naturalAdvancedCatalog = [
   { title: '其他課程', period: 'term' },
   { title: '備註｜開放吉林六樓階梯教室自習。', period: 'term' }
 ];
-assert.equal(scheduleData.isCourseSelectionHidden('自然進階(二)'), true);
+assert.equal(scheduleData.isCourseSelectionHidden('自然進階(二)'), false);
 assert.equal(scheduleData.isCourseSelectionHidden('自然進階(二)_化學'), false);
 assert.equal(scheduleData.isCourseSelectionHidden('備註｜開放吉林六樓階梯教室自習。'), true);
 assert.equal(
@@ -2063,7 +2063,7 @@ assert.match(
   '回饋邀請只能出現在首次同步已安全保存且仍需背景續跑時'
 );
 assert.equal(
-  generatedCode.includes('項課程或活動沒有可讀取的課綱資料，對應欄位會留空'),
+  generatedCode.includes('項課程沒有可讀取的課綱資料，對應欄位會留空'),
   false,
   '第一次同步完成通知不應顯示課綱缺漏項目數'
 );
@@ -2214,7 +2214,7 @@ assert.match(
   /function saveSettingsAndSyncFromUi\(input\)[\s\S]*?catch \(error\) \{[\s\S]*?notifySyncFailureUnlessActionRequired_[\s\S]*?\}\s*return buildSyncUiResponse_\(/,
   '同步失敗通知的 catch 邊界必須排除同步完成後的 UI 重載'
 );
-['同步狀態', '日曆', '年級', '課程與活動', '通知'].forEach(heading => {
+['同步狀態', '日曆', '年級', '課程', '通知'].forEach(heading => {
   assert.equal(
     generatedCode.includes(`<h2>${heading}</h2>`),
     true,
@@ -2819,11 +2819,11 @@ const naturalAdvancedUiModel = context.buildSourceUiModel_({
   catalogFingerprint: 'catalog',
   scheduleFingerprint: 'schedule'
 }, '高三');
-assert.equal(naturalAdvancedUiModel.itemCount, 4);
+assert.equal(naturalAdvancedUiModel.itemCount, 5);
 assert.equal(
   Array.from(naturalAdvancedUiModel.catalog.all, item => item.title).includes('自然進階(二)'),
-  false,
-  '控制臺課程選擇介面不得顯示自然進階共同事件'
+  true,
+  '課綱模式應允許直接選取自然進階分頁'
 );
 assert.equal(
   Array.from(naturalAdvancedUiModel.catalog.all, item => item.title).some(title => title.indexOf('備註｜') === 0),
@@ -2920,52 +2920,9 @@ assert.throws(
   '母版漏裝 Sheets v4 進階服務時應顯示可操作的修正方式'
 );
 
-let scheduleFetchStatus = 200;
-let scheduleFetchBody = JSON.stringify(vacationCatalogPayload);
-let scheduleFetchCallCount = 0;
-context.UrlFetchApp = {
-  fetch(url, options) {
-    scheduleFetchCallCount += 1;
-    assert.equal(
-      url,
-      scheduleData.API_URL + '?grade=' + encodeURIComponent('一年級'),
-      'Apps Script 應只向正式課表端點要求指定年級'
-    );
-    assert.equal(options.followRedirects, true);
-    assert.equal(options.muteHttpExceptions, true);
-    const responseStatus = Array.isArray(scheduleFetchStatus)
-      ? scheduleFetchStatus.shift()
-      : scheduleFetchStatus;
-    return {
-      getResponseCode() {
-        return responseStatus;
-      },
-      getContentText(encoding) {
-        assert.equal(encoding, 'UTF-8');
-        return scheduleFetchBody;
-      }
-    };
-  }
-};
-assert.equal(context.fetchSchedulePayload_('高一').currentGrade, '一年級');
-assert.equal(scheduleFetchCallCount, 1);
-scheduleFetchStatus = [302, 404, 200];
-assert.equal(
-  context.fetchSchedulePayload_('高一').currentGrade,
-  '一年級',
-  '正式 /exec 短暫回傳 302 或 404 時應重新要求同一正式網址'
-);
-assert.equal(scheduleFetchCallCount, 4);
-scheduleFetchStatus = 503;
-assert.throws(() => context.fetchSchedulePayload_('高一'), /HTTP 503/);
-assert.equal(scheduleFetchCallCount, 7, '暫時性 5xx 應有界重試三次');
-scheduleFetchStatus = 200;
-scheduleFetchBody = '{not-json';
-assert.throws(() => context.fetchSchedulePayload_('高一'), /不是有效的 JSON/);
-scheduleFetchBody = JSON.stringify(Object.assign({}, vacationCatalogPayload, {
-  currentGrade: '二年級'
-}));
-assert.throws(() => context.fetchSchedulePayload_('高一'), /錯誤的年級/);
+// Public timetable HTTP fetching was replaced by authenticated outline reads.
+// End-to-end Sheets source mocks and failure protection live in sheet-source-test.js.
+assert.doesNotMatch(context.fetchSchedulePayload_.toString(), /UrlFetchApp/);
 
 const originalFetchSchedulePayload = context.fetchSchedulePayload_;
 const originalParseSchedulePayload = context.parseSchedulePayload_;
@@ -5242,7 +5199,7 @@ assert.equal(
   '無法可靠重建舊預設時應沿用既有新學期流程要求重新選擇'
 );
 assert.equal(migratedWithoutReliableCatalog.autoSyncEnabled, false);
-assert.match(migratedWithoutReliableCatalog.pausedReason, /重新選擇課程與活動/);
+assert.match(migratedWithoutReliableCatalog.pausedReason, /重新選擇課程/);
 context.clearChunkedStore_('TSCHOOL_SETTINGS');
 context.clearChunkedStore_('TSCHOOL_SOURCE_UI_CACHE');
 assert.equal(initialGeneratedSettings.notificationPreset, 'standard');
@@ -7408,7 +7365,7 @@ assert.equal(Object.keys(context.loadSyncState_()).length, 2);
 assert.equal(wholeTitleCalendar.activeEvents().length, 3);
 assert.equal(wholeTitleCalendar.activeEvents().some(event =>
   event.getStartTime().toISOString() === wholeTitlePast.start.toISOString()
-), true, '刪除整門課程或活動時仍要保留過去行程');
+), true, '刪除整門課程時仍要保留過去行程');
 assert.equal(wholeTitleCalendar.activeEvents().some(event =>
   event.getId() === wholeTitleUserEvent.getId()
 ), true);
@@ -7789,9 +7746,9 @@ const newTermSource = {
   events: [],
   catalog: {
     all: [
-      { title: '新學期課程', period: 'term' },
-      { title: '全校開學活動', period: 'term' },
-      { title: '第一次模擬考', period: 'term' }
+      { title: '新學期課程', period: 'term', category: '必修' },
+      { title: '選修課程甲', period: 'term', category: '學科選修' },
+      { title: '選修課程乙', period: 'term', category: '多元選修' }
     ]
   }
 };
@@ -7846,7 +7803,7 @@ const transitionedSettings = settingsBeforeTermTransition;
 assert.equal(transitionedSettings.pendingTermKey, newTermSource.termKey);
 assert.deepEqual(
   Array.from(transitionedSettings.selectedTitles),
-  ['全校開學活動', '第一次模擬考']
+  ['新學期課程']
 );
 assert.equal(transitionedSettings.autoSyncEnabled, false);
 assert.equal(transitionedSettings.autoSyncEnabledBeforeTermTransition, true);
@@ -7857,19 +7814,19 @@ assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition);
 assert.equal(context.loadSourceObservation_().termCandidate, null);
 assert.throws(
   () => context.assertTermTransitionCalendarWritesAllowed_(transitionedSettings),
-  /先重新選擇課程與活動/,
+  /先重新選擇課程/,
   '新學期已確認但尚未重新選課時，Calendar 寫入守門不得放行'
 );
 context.deliverTermTransitionNotice_(transitionedSettings, newTermSource);
 assert.equal(sentOutlineFailureEmails, emailsBeforeTermTransition + 1);
-assert.match(sentEmailSubjects.at(-1), /需要重新選擇課程與活動/);
+assert.match(sentEmailSubjects.at(-1), /需要重新選擇課程/);
 assert.match(
   sentEmailMessages.at(-1).body,
-  /已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程與活動/
+  /已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程/
 );
 assert.match(
   sentEmailMessages.at(-1).htmlBody,
-  /在行程同步控制臺確認新學期就讀年級、重新選擇課程與活動/
+  /在行程同步控制臺確認新學期就讀年級、重新選擇課程/
 );
 assert.match(sentEmailMessages.at(-1).body, /完成新學期同步前/);
 assert.match(sentEmailMessages.at(-1).body, /確認新學期就讀年級/);
@@ -7884,7 +7841,7 @@ context.clearChunkedStore_('TSCHOOL_NOTIFICATION_QUEUE');
 context.queueNotification_({
   key: 'legacy-term-transition',
   templateKind: 'term_transition',
-  subject: '需要重新選擇課程與活動',
+  subject: '需要重新選擇課程',
   body: '舊版排程通知',
   templateData: {}
 });
@@ -8554,15 +8511,8 @@ context.refreshAutoSyncTriggers_({
 });
 assert.equal(
   projectTriggers.filter(trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily').length,
-  1,
-  '高二應建立一個獨立的每日課綱更新觸發器'
-);
-assert.equal(
-  projectTriggers.find(
-    trigger => trigger.getHandlerFunction() === 'refreshCourseOutlinesDaily'
-  ).schedule.hour,
-  1,
-  '課綱更新應安排在最早固定同步時段 03:00 的約兩小時前'
+  0,
+  '課綱內容與時段由主同步一起讀取，不再建立額外的每日補充工作'
 );
 context.refreshAutoSyncTriggers_({
   gradeName: '高二',
@@ -8697,7 +8647,7 @@ context.saveSettings_(Object.assign({}, settingsBeforePendingTermOutline, {
 }));
 const pendingTermOutlineResult = context.runCourseOutlineRefreshAttempt_(1, 'manual');
 assert.equal(pendingTermOutlineResult.skipped, true);
-assert.match(pendingTermOutlineResult.message, /先重新選擇課程與活動/);
+assert.match(pendingTermOutlineResult.message, /先重新選擇課程/);
 context.saveSettings_(settingsBeforePendingTermOutline);
 
 const settingsBeforeOutlineStartupFailure = context.loadSettings_();
@@ -8779,7 +8729,7 @@ context.handleCourseOutlineRefreshFailure_(
 outlineFailureState = context.loadCourseOutlineState_();
 assert.equal(outlineFailureState.status, 'failed');
 assert.equal(sentOutlineFailureEmails, 1, '超過三項的課綱在第二次失敗後應寄信一次');
-assert.match(sentEmailMessages.at(-1).body, /有 4 項課程或活動/);
+assert.match(sentEmailMessages.at(-1).body, /有 4 項課程/);
 assert.match(sentEmailMessages.at(-1).subject, /部分課綱無法更新/);
 assert.match(sentEmailMessages.at(-1).htmlBody, /課綱更新失敗/);
 assert.notEqual(outlineFailureState.failureNotifiedAt, '');
@@ -8825,7 +8775,7 @@ context.handleCourseOutlineRefreshFailure_(
 assert.equal(
   sentOutlineFailureEmails,
   1,
-  '無法讀取的課程或活動不超過三項時不得寄送課綱錯誤提醒'
+  '無法讀取的課程不超過三項時不得寄送課綱錯誤提醒'
 );
 assert.equal(context.loadCourseOutlineState_().notificationPending, false);
 

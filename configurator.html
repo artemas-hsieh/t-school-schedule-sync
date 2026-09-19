@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f4f7f2">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src https://docs.google.com https://*.googleusercontent.com; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
   <title>T-SCHOOL Schedule Sync</title>
   <style>
     html,
@@ -16,7 +16,7 @@
   </style>
   <link rel="stylesheet" href="assets/fonts/noto-sans-tc/wght.css">
   <link rel="stylesheet" href="assets/fonts/material-symbols-outlined/material-symbols.css">
-  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260908-source-01">
+  <link id="app-stylesheet" rel="stylesheet" href="styles.css?v=20260919-outline-01">
   <script>
     (function () {
       document.documentElement.classList.add('has-js');
@@ -48,7 +48,7 @@
       <nav class="stage-menu-panel" id="stage-menu-panel" aria-label="設定階段" hidden>
         <ol>
           <li><button type="button" data-step-target="1"><span>01</span>選年級</button></li>
-          <li><button type="button" data-step-target="2"><span>02</span>選課程與活動</button></li>
+          <li><button type="button" data-step-target="2"><span>02</span>選課程</button></li>
           <li><button type="button" data-step-target="3"><span>03</span>設定通知偏好</button></li>
           <li><button type="button" data-step-target="4"><span>04</span>檢查設定</button></li>
           <li><button type="button" data-step-target="5"><span>05</span>變出控制臺</button></li>
@@ -139,9 +139,9 @@
               <span class="source-status-indicator" aria-hidden="true"></span>
               <span class="source-status-copy">
                 <strong id="source-status-title">請先選擇年級</strong>
-                <span id="source-status-detail">系統將整理出對應的課程與活動給你選擇</span>
+                <span id="source-status-detail">系統將整理出對應的課程給你選擇</span>
               </span>
-              <button type="button" class="icon-button source-refresh" id="source-refresh" aria-label="重新讀取課表" data-cursor-label="重新讀取" title="重新讀取課表" disabled>
+              <button type="button" class="icon-button source-refresh" id="source-refresh" aria-label="重新讀取課程列表" data-cursor-label="重新讀取" title="重新讀取課程列表" disabled>
                 <img src="assets/icon-refresh-cw.svg" alt="">
               </button>
             </div>
@@ -163,16 +163,16 @@
           <div class="step-card course-step-card">
             <header class="step-heading step-heading-component">
               <div>
-                <h2 id="step-2-title">選課程與活動</h2>
+                <h2 id="step-2-title">選課程</h2>
                 <p id="course-count">已選 0 項</p>
               </div>
               <span class="step-position" aria-label="步驟 2，共 5 步">步驟 2/5</span>
             </header>
 
             <div class="search-control" role="search">
-              <label class="visually-hidden" for="course-search">搜尋課程與活動</label>
+              <label class="visually-hidden" for="course-search">搜尋課程</label>
               <input id="course-search" type="search" placeholder="輸入課程、活動名稱或班別等">
-              <button type="button" class="icon-button search-submit" id="course-search-submit" aria-label="搜尋課程與活動" data-cursor-label="搜尋">
+              <button type="button" class="icon-button search-submit" id="course-search-submit" aria-label="搜尋課程" data-cursor-label="搜尋">
                 <img src="assets/icon-search.svg" alt="" id="course-search-icon">
               </button>
             </div>
@@ -180,7 +180,7 @@
 
           </div>
           <div class="step-completion">
-            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="確認課程與活動" aria-keyshortcuts="Enter" aria-pressed="false" disabled>選好了 ↵</button>
+            <button type="button" class="step-complete-button" data-complete-step="2" data-cursor-label="確認課程" aria-keyshortcuts="Enter" aria-pressed="false" disabled>選好了 ↵</button>
           </div>
         </section>
 
@@ -302,6 +302,7 @@
       var coreDependencies = [
         'vendor/lenis-1.3.25.min.js',
         'source-contract.js',
+        'sheet-source.js',
         'schedule-data.js',
         'setup-code.js',
         'app.js'

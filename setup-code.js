@@ -83,6 +83,7 @@
       instantNotificationsEnabled: input.instantNotificationsEnabled !== false,
       notificationHours: normalizeHours(input.notificationHours)
     };
+    if (input.sourceKind === 'course-index') payload.sourceKind = 'course-index';
     const sourceSnapshot = makeSourceSnapshot(input.setupSourceSnapshot);
     if (sourceSnapshot) payload.sourceSnapshot = sourceSnapshot;
     return payload;

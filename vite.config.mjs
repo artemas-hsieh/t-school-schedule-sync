@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 
 const PRODUCTION_CONNECT_SRC =
-  "connect-src https://script.google.com https://script.googleusercontent.com";
+  "connect-src https://docs.google.com https://*.googleusercontent.com";
 const DEVELOPMENT_CONNECT_SRC =
-  "connect-src 'self' ws: https://script.google.com https://script.googleusercontent.com";
+  "connect-src 'self' ws: https://docs.google.com https://*.googleusercontent.com";
 
 export default defineConfig(({ command }) => ({
   plugins: command === 'serve'

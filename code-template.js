@@ -966,6 +966,7 @@ const INSTANT_NOTIFICATION_SUMMARY_HOUR = 6;
 const SOURCE_API_URL = ${formatString(sourceApiUrl)};
 const NORMALIZED_SOURCE_ENABLED = ${normalizedSource};
 const NORMALIZED_SOURCE_CONTRACT = (${sourceData.createSourceContract.toString()})();
+const SHEET_SCHEDULE_SOURCE = (${sourceData.createSheetSource.toString()})();
 let normalizedSourceRuntimePermission_ = null;
 let normalizedSourcePermissionCheckedAt_ = 0;
 const SOURCE_FETCH_MAX_ATTEMPTS = 3;
@@ -1600,6 +1601,7 @@ function calculateTitleSimilarity_(left, right) {
 // This rule controls initial selection and list placement only. It does not
 // assign a course/activity type or affect event parsing.
 function isDefaultSelectedTitle_(value) {
+  if (value && typeof value === 'object') return value.category === '必修';
   const title = normalizeTitle_(value);
   return isScheduleNoteTitle_(title) ||
     /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|開學|始業式|結業式|休業式|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
@@ -1805,8 +1807,9 @@ function sortCatalogItemsBySimilarity_(catalogItems) {
 
 function sortCatalogItemsForSelection_(catalogItems) {
   const items = Array.isArray(catalogItems) ? catalogItems : [];
-  const regularItems = items.filter(item => !isDefaultSelectedTitle_(item && item.title));
-  const defaultSelectedItems = items.filter(item => isDefaultSelectedTitle_(item && item.title));
+  const isDefault = item => isDefaultSelectedTitle_(item && Object.prototype.hasOwnProperty.call(item, 'category') ? item : item && item.title);
+  const regularItems = items.filter(item => !isDefault(item));
+  const defaultSelectedItems = items.filter(item => isDefault(item));
   return sortCatalogItemsBySimilarity_(regularItems)
     .concat(sortCatalogItemsBySimilarity_(defaultSelectedItems));
 }
@@ -1932,7 +1935,9 @@ function normalizeSetupSourceContext_(source, gradeName) {
       throw new Error('設定碼的課表摘要無法辨識，請回網站重新產生。');
     }
     seen[key] = true;
-    return { title, period };
+    return Object.prototype.hasOwnProperty.call(item, 'category')
+      ? { title, period, category: String(item.category || ''), defaultSelected: item.category === '必修' }
+      : { title, period };
   }));
   if (sourceFingerprintVersion === SETUP_CATALOG_FINGERPRINT_VERSION) {
     const expected = makeSetupCatalogFingerprint_(source.termKey, source.lastDateKey, catalogAll);
@@ -1961,6 +1966,7 @@ function normalizeSetupSourceContext_(source, gradeName) {
     throw new Error('設定碼的課表摘要版本無法辨識，請回網站重新產生。');
   }
   const normalized = {
+    sourceKind: source.sourceKind || '',
     gradeName: String(source.gradeName || gradeName || ''),
     firstDateKey: String(source.firstDateKey || ''),
     lastDateKey: String(source.lastDateKey || ''),
@@ -2004,6 +2010,10 @@ function setupPayloadCatalogMatchesSource_(payload, source) {
   const supplied = getSetupPayloadCatalogFingerprint_(payload);
   const version = Number(payload && payload.catalogFingerprintVersion) || 0;
   if (!supplied) return false;
+  if (payload.sourceKind === 'course-index') {
+    return version === SETUP_CATALOG_FINGERPRINT_VERSION &&
+      supplied === makeSetupCatalogFingerprint_('', '', source.catalog.all);
+  }
   if (version === SETUP_CATALOG_FINGERPRINT_VERSION) {
     return Number(source.catalogFingerprintVersion) === version &&
       supplied === source.catalogFingerprint;
@@ -2041,7 +2051,7 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
   if (!GRADE_API_NAMES[payload.gradeName]) {
     throw new Error('設定碼的年級無法辨識，請回網站重新產生。');
   }
-  if (!String(payload.termKey || '').trim() || !getSetupPayloadCatalogFingerprint_(payload)) {
+  if ((!String(payload.termKey || '').trim() && payload.sourceKind !== 'course-index') || !getSetupPayloadCatalogFingerprint_(payload)) {
     throw new Error('設定碼缺少課表版本，請回網站重新產生。');
   }
   if (typeof payload.instantNotificationsEnabled !== 'boolean' ||
@@ -2071,6 +2081,9 @@ function buildSetupImportPreview_(code, previous, decodedSetup) {
     if (!current) missingItems.push(String(title));
     return current;
   }).filter(Boolean), source.catalog.all);
+  if (payload.sourceKind === 'course-index' && missingItems.length) {
+    throw new Error('[ACTION_REQUIRED] 課程索引與當期課綱分頁不一致：' + missingItems.join('、') + '；請確認課程索引已更新為可設定的學期');
+  }
   const sourceChanged = Boolean(
     missingItems.length ||
     !setupPayloadCatalogMatchesSource_(payload, source)
@@ -2125,6 +2138,7 @@ function getSelectedTitlesFromSetupPayload_(payload, source) {
 }
 
 function buildSetupSourceContextFromPayload_(payload) {
+  if (payload.sourceKind === 'course-index') return null;
   if (!Object.prototype.hasOwnProperty.call(payload || {}, 'sourceSnapshot')) return null;
   const snapshot = payload && payload.sourceSnapshot;
   const items = snapshot && Array.isArray(snapshot.items) ? snapshot.items : [];
@@ -2424,6 +2438,10 @@ function prepareFirstSyncCourseOutlinesFromUi(input) {
       }
       const gradeName = sanitizeGrade_(input && input.gradeName);
       const source = loadSourceContext_(gradeName);
+      if (source.sourceKind === 'outline-sheets') {
+        return { prepared: true, skipped: false, elapsedMs: Date.now() - startedAt,
+          message: '課綱已讀取，首次同步會再次確認最新內容' };
+      }
       const settings = sanitizeSettingsInput_(input || {}, previous, source);
       const desiredEvents = getDesiredCourseOutlineEvents_(settings, source, scheduleBusinessNow_());
       const sourceSets = getRelevantCourseOutlineSourceSets_(settings.gradeName, desiredEvents);
@@ -2698,7 +2716,7 @@ function deleteRestoredManagedTitleFromUi(reviewId) {
     saveSettings_(settings);
     writeChunkedJson_(SYNC_STATE_STORE, state);
     saveManagedEventDeletionState_(deletionState);
-    updateManagedDeletionStatus_(state, '已刪除整門課程或活動的受管理事件。');
+    updateManagedDeletionStatus_(state, '已刪除整門課程的受管理事件。');
     response = {
       message: '已刪除「' + review.originalTitle + '」的 ' + targetKeys.length + ' 筆受管理事件，並從同步選擇移除'
     };
@@ -2923,13 +2941,16 @@ function makeAutoSyncTriggerSettingsSignature_(settings) {
 function assertFirstSetupTermStillCurrent_(settings, source) {
   if (settings && !settings.setupComplete && settings.termKey && source && source.termKey &&
       !termKeysMatch_(settings.termKey, source.termKey)) {
-    throw new Error('課表已進入不同學期，請回設定網站重新選擇課程與活動並產生新的設定碼。');
+    throw new Error('課表已進入不同學期，請回設定網站重新選擇課程並產生新的設定碼。');
   }
 }
 
 function sanitizeSettingsInput_(input, previous, source) {
   const value = input || {};
   const gradeName = sanitizeGrade_(value.gradeName);
+  if (source.sourceKind === 'outline-sheets' && source.gradeName !== gradeName) {
+    throw new Error('請將新學期就讀年級改為' + source.gradeName + '並確認選課');
+  }
   const gradeChanged = previous.gradeName !== gradeName;
   const selectedTitles = uniqueStrings_(Array.isArray(value.selectedTitles) ? value.selectedTitles : []);
   const sourceTitles = source.catalog.all.map(item => item.title);
@@ -2950,11 +2971,11 @@ function sanitizeSettingsInput_(input, previous, source) {
 
   if (cleanSelected.length === 0) {
     throw new Error(previous.pendingTermKey
-      ? '新學期必須重新選擇至少一項課程或活動後才能儲存。'
-      : '請至少選擇一項課程或活動後再儲存。');
+      ? '新學期必須重新選擇至少一項課程後才能儲存。'
+      : '請至少選擇一項課程後再儲存。');
   }
   if (previous.pendingTermKey && value.termGradeConfirmed !== true) {
-    throw new Error('請先確認新學期就讀年級，再儲存課程與活動選擇。');
+    throw new Error('請先確認新學期就讀年級，再儲存課程選擇。');
   }
 
   const calendarId = String(value.calendarId || '').trim();
@@ -4614,13 +4635,17 @@ function assertTermTransitionCalendarWritesAllowed_(settings) {
     throw new Error('[ACTION_REQUIRED] 正在確認課表是否已轉入新學期，期間不會改動日曆。');
   }
   if (settings && settings.pendingTermKey) {
-    throw new Error('[ACTION_REQUIRED] 已確認進入新學期，請先重新選擇課程與活動。');
+    throw new Error('[ACTION_REQUIRED] 已確認進入新學期，請先重新選擇課程。');
   }
 }
 
 function applyTermTransitionIfNeeded_(settings, source, quiet) {
   if (!settings.setupComplete || !settings.termKey) {
     return settings;
+  }
+  if (source.sourceKind === 'outline-sheets' && !termKeysMatch_(settings.termKey, source.termKey) &&
+      (!source.complete || !source.transitionEligible)) {
+    throw new Error('[ACTION_REQUIRED] 尚未確認當前年級所有課程已結束，已保留既有行程');
   }
 
   const observation = loadSourceObservation_();
@@ -4645,7 +4670,7 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
       Logger.log('舊版學期通知佇列暫時無法遷移：' + userFacingError_(migrationError));
     }
     if (!quiet) {
-      throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟控制臺介面並重新選擇課程與活動。');
+      throw new Error('[ACTION_REQUIRED] 偵測到新學期，請先開啟控制臺介面並重新選擇課程。');
     }
     return settings;
   }
@@ -4687,7 +4712,7 @@ function applyTermTransitionIfNeeded_(settings, source, quiet) {
   if (Number.isFinite(dueAt) && now.getTime() >= dueAt) {
     settings = confirmTermTransition_(settings, source, observation);
     if (!quiet) {
-      throw new Error('[ACTION_REQUIRED] 已確認進入新學期，請先開啟控制臺介面並重新選擇課程與活動。');
+      throw new Error('[ACTION_REQUIRED] 已確認進入新學期，請先開啟控制臺介面並重新選擇課程。');
     }
   } else {
     ensureOneTimeTrigger_(
@@ -4731,12 +4756,12 @@ function confirmTermTransition_(settings, source, observation) {
     settings.autoSyncEnabledBeforeTermTransition = Boolean(settings.autoSyncEnabled);
   }
   settings.selectedTitles = source.catalog.all
-    .filter(item => isDefaultSelectedTitle_(item.title))
+    .filter(item => isDefaultSelectedTitle_(item))
     .map(item => item.title);
   settings.pendingTitles = [];
   settings.pendingTermKey = normalizeTermKey_(source.termKey);
   settings.autoSyncEnabled = false;
-  settings.pausedReason = '偵測到新學期，請重新選擇課程與活動。';
+  settings.pausedReason = '偵測到新學期，請重新選擇課程。';
   settings.termTransitionNoticeAttempts = 0;
   settings.termTransitionNoticeScheduledFor = '';
   settings.termTransitionNoticeSentAt = '';
@@ -4827,13 +4852,13 @@ function buildTermTransitionNotice_(settings, source) {
     ? source.firstDateKey + (source.lastDateKey ? '–' + source.lastDateKey : '')
     : '新學期';
   return {
-    subject: '需要重新選擇課程與活動',
+    subject: '需要重新選擇課程',
     dateRange,
     body:
       '系統偵測到 ' + dateRange + ' 的新學期行程\\n\\n' +
-      '已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程與活動\\n' +
+      '已進入新學期，為避免把上學期的選擇直接套到新學期，請重新選擇課程\\n' +
       '完成新學期同步前，系統不會改動現有日曆事件\\n' +
-      '請在控制臺確認新學期就讀年級、重新選擇課程與活動，並在同步前檢查新增、調整、取消與未變更的預覽結果'
+      '請在控制臺確認新學期就讀年級、重新選擇課程，並在同步前檢查新增、調整、取消與未變更的預覽結果'
   };
 }
 
@@ -4973,6 +4998,21 @@ function retryTermTransitionNotice() {
 }
 
 function registerNewTitles_(settings, source) {
+  if (source.sourceKind === 'outline-sheets') {
+    const titles = source.catalog.all.map(item => item.title);
+    // Map the former split science choices to the actual outline tab once.
+    if (!settings.outlineSourceMigrated && settings.selectedTitles.some(isNaturalAdvancedVariantTitle_) &&
+        titles.indexOf(NATURAL_ADVANCED_BASE_TITLE) !== -1) {
+      settings.selectedTitles.push(NATURAL_ADVANCED_BASE_TITLE);
+    }
+    const titleByKey = new Map(titles.map(title => [normalizeTitle_(title), title]));
+    settings.selectedTitles = uniqueStrings_(settings.selectedTitles.map(title => titleByKey.get(normalizeTitle_(title)) || '').filter(Boolean));
+    settings.knownTitles = titles;
+    settings.pendingTitles = [];
+    settings.outlineSourceMigrated = true;
+    saveSettings_(settings);
+    return settings;
+  }
   if (!settings.setupComplete) {
     return settings;
   }
@@ -5105,7 +5145,7 @@ function shouldIncludeEvent_(event, settings) {
     return true;
   }
 
-  if (isCourseSelectionHidden_(event.originalTitle) &&
+  if (normalizeTitle_(event.originalTitle) === normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE) &&
       settings.selectedTitles.some(isNaturalAdvancedVariantTitle_)) {
     return true;
   }
@@ -6616,6 +6656,7 @@ function makeCourseOutlineIdentityHash_(outline) {
 }
 
 function enrichEventsWithCourseOutlines_(events, settings, source) {
+  if (source && source.sourceKind === 'outline-sheets') return events || [];
   const desiredEvents = events || [];
   const sourceSets = getRelevantCourseOutlineSourceSets_(settings.gradeName, desiredEvents);
   if (!sourceSets.length) return desiredEvents;
@@ -7098,6 +7139,12 @@ function saveCourseOutlineState_(state) {
 }
 
 function buildCourseOutlineUiStatus_(settings, source, sourceIndexOverride) {
+  if (source && source.sourceKind === 'outline-sheets') {
+    return { enabled: true, configured: true, state: 'idle', indexSource: 'live',
+      indexWarning: (source.sourceWarnings || []).join('；'), lastError: '',
+      sourceSetLabels: ['課綱直接同步'], matchedRecordCount: (source.events || []).length,
+      unavailableItemCount: 0, lastSuccessLabel: source.initialSetupSnapshot ? '' : formatDateTime_(scheduleBusinessNow_()) };
+  }
   const sourceIndex = sourceIndexOverride || loadCourseOutlineSourceIndex_();
   const configuredSets = getConfiguredCourseOutlineSourceSetsFromIndex_(
     settings.gradeName,
@@ -7204,6 +7251,7 @@ function hasFreshCourseOutlineSnapshot_(settings, source) {
 }
 
 function scheduleCourseOutlineRefreshIfNeeded_(settings, source, options) {
+  if (source && source.sourceKind === 'outline-sheets') return false;
   const activeSettings = settings || loadSettings_();
   const allowWhenAutoSyncDisabled = Boolean(
     options && options.allowWhenAutoSyncDisabled
@@ -7295,7 +7343,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
       return { ok: true, skipped: true, message: '完成第一次同步後，系統才會更新課綱資料。' };
     }
     if (settings.pendingTermKey || loadSourceObservation_().termCandidate) {
-      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程與活動再更新課綱資料。' };
+      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程再更新課綱資料。' };
     }
     if (!settings.autoSyncEnabled &&
         !canRunCourseOutlineRefreshWhileAutoSyncDisabled_(reason, existingState)) {
@@ -7310,7 +7358,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
     const source = loadSourceContext_(settings.gradeName);
     if (settings.termKey && !termKeysMatch_(source.termKey, settings.termKey)) {
       finishCourseOutlineRefreshRun_(run, null);
-      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程與活動再更新課綱資料。' };
+      return { ok: true, skipped: true, message: '偵測到新學期，請先重新選擇課程再更新課綱資料。' };
     }
     const desiredEvents = getDesiredCourseOutlineEvents_(
       settings,
@@ -7332,7 +7380,7 @@ function runCourseOutlineRefreshAttempt_(attempt, reason) {
         COURSE_OUTLINE_FAILURE_NOTIFICATION_ITEM_THRESHOLD) {
       const partialError = new Error(
         '有 ' + snapshot.diagnostics.unavailableItemCount +
-        ' 項課程或活動的課綱無法正常讀取；其餘可用課綱已更新。'
+        ' 項課程的課綱無法正常讀取；其餘可用課綱已更新。'
       );
       partialError.courseOutlineUnavailableItemCount = snapshot.diagnostics.unavailableItemCount;
       throw partialError;
@@ -7546,7 +7594,7 @@ function sendCourseOutlineFailureNotification_(incidentId) {
       'course_outline_failure',
       '部分課綱無法更新',
       '有 ' + Number(state.unavailableItemCount || 0) +
-      ' 項課程或活動的課綱已嘗試兩次仍無法正常讀取。\\n\\n錯誤：' +
+      ' 項課程的課綱已嘗試兩次仍無法正常讀取。\\n\\n錯誤：' +
       (state.lastError || '未知錯誤') +
       '\\n最後成功課綱：' + lastSuccess +
       '\\n\\n其他可讀取的課綱仍會正常同步；沒有資料的欄位會留空。',
@@ -7596,38 +7644,10 @@ ${highLoadBusinessNowCode}
 }
 
 function fetchSchedulePayload_(gradeName) {
-  const apiGrade = GRADE_API_NAMES[sanitizeGrade_(gradeName)];
-  let lastError = null;
-  for (let attempt = 1; attempt <= SOURCE_FETCH_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      const response = UrlFetchApp.fetch(
-        NORMALIZED_SOURCE_ENABLED
-          ? SOURCE_API_URL + '/v1/schedules/' + (['高一', '高二', '高三'].indexOf(gradeName) + 1)
-          : SOURCE_API_URL + '?grade=' + encodeURIComponent(apiGrade),
-        { followRedirects: !NORMALIZED_SOURCE_ENABLED, muteHttpExceptions: true }
-      );
-      const code = response.getResponseCode();
-      if (code !== 200) {
-        const httpError = new Error('課表來源回應失敗（HTTP ' + code + '）。');
-        httpError.httpStatus = code;
-        throw httpError;
-      }
-      let payload;
-      try { payload = JSON.parse(response.getContentText('UTF-8')); }
-      catch (error) { throw new Error('課表來源不是有效的 JSON。'); }
-      if (NORMALIZED_SOURCE_ENABLED) NORMALIZED_SOURCE_CONTRACT.validateResponse(payload, gradeName, scheduleBusinessNow_());
-      else assertSourcePayload_(payload, apiGrade);
-      return payload;
-    } catch (error) {
-      lastError = error;
-      const code = Number(error && error.httpStatus) || 0;
-      const retryable = !error.code && (!code || code === 302 || code === 404 ||
-        code === 408 || code === 425 || code === 429 || code >= 500);
-      if (!retryable || attempt === SOURCE_FETCH_MAX_ATTEMPTS) throw error;
-      Utilities.sleep(SOURCE_FETCH_RETRY_DELAY_MS * attempt);
-    }
-  }
-  throw lastError || new Error('目前無法讀取課表來源。');
+  return {
+    sourceKind: 'outline-sheets',
+    source: SHEET_SCHEDULE_SOURCE.loadSource(sanitizeGrade_(gradeName), loadSettings_(), scheduleBusinessNow_())
+  };
 }
 
 function assertSourcePayload_(payload, expectedGrade) {
@@ -7638,6 +7658,7 @@ function assertSourcePayload_(payload, expectedGrade) {
 }
 
 function parseSchedulePayload_(payload, gradeName, now) {
+  if (payload && payload.sourceKind === 'outline-sheets') return payload.source;
   if (payload && payload.schemaVersion === 1 && payload.schedule) return parseNormalizedSchedulePayload_(payload, gradeName, now);
   const datedHeaders = inferHeaderDates_(payload, now);
   const dateLookup = {};
@@ -8086,7 +8107,7 @@ function loadSettings_() {
       settings.pendingTermKey = settings.pendingTermKey || settings.termKey;
       settings.pendingTitles = [];
       settings.autoSyncEnabled = false;
-      settings.pausedReason = '版本更新後，請重新選擇課程與活動。';
+      settings.pausedReason = '版本更新後，請重新選擇課程。';
     }
   } else {
     settings.selectedTitles = uniqueStrings_(settings.selectedTitles || []);
@@ -8412,7 +8433,7 @@ function setupAutoSyncTriggers() {
     const settings = loadSettings_();
     assertSetupImported_(settings);
     if (settings.pendingTermKey || loadSourceObservation_().termCandidate) {
-      throw new Error('已偵測到新學期，請先在控制臺重新選擇課程與活動，再啟用自動同步。');
+      throw new Error('已偵測到新學期，請先在控制臺重新選擇課程，再啟用自動同步。');
     }
     settings.autoSyncEnabled = true;
     saveSettings_(settings);
@@ -8459,17 +8480,8 @@ function refreshAutoSyncTriggers_(settings) {
       .inTimezone(TIMEZONE)
       .create();
   });
-  if (getConfiguredCourseOutlineSourceSets_(settings.gradeName).length) {
-    const outlineHour = getCourseOutlineDailyRefreshHour_(settings);
-    ScriptApp.newTrigger(COURSE_OUTLINE_DAILY_HANDLER)
-      .timeBased()
-      .atHour(outlineHour)
-      .everyDays(1)
-      .inTimezone(TIMEZONE)
-      .create();
-  } else {
-    deleteCourseOutlineMaintenanceTriggers_();
-  }
+  // Main schedule sync now reads outline content and times together.
+  deleteCourseOutlineMaintenanceTriggers_();
 }
 
 function getScheduleSyncTriggerTime_(anchorHour) {
@@ -8609,7 +8621,7 @@ function toggleAutoSyncFromMenu() {
     assertSetupImported_(settings);
     if (!settings.autoSyncEnabled &&
         (settings.pendingTermKey || loadSourceObservation_().termCandidate)) {
-      throw new Error('已偵測到新學期，請先在控制臺重新選擇課程與活動，再啟用自動同步。');
+      throw new Error('已偵測到新學期，請先在控制臺重新選擇課程，再啟用自動同步。');
     }
     settings.autoSyncEnabled = !settings.autoSyncEnabled;
     settings.pausedReason = settings.autoSyncEnabled ? '' : '由使用者關閉。';
@@ -9596,8 +9608,7 @@ function normalizeTitle_(value) {
 }
 
 function isCourseSelectionHidden_(value) {
-  return normalizeTitle_(value) === normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE) ||
-    isScheduleNoteTitle_(value);
+  return isScheduleNoteTitle_(value);
 }
 
 function isScheduleNoteTitle_(value) {
@@ -9621,6 +9632,10 @@ function isNaturalAdvancedVariantTitle_(value) {
 }
 
 function applyCourseSelectionRules_(selectedTitles, catalogItems) {
+  if ((catalogItems || []).some(item => item && Object.prototype.hasOwnProperty.call(item, 'category'))) {
+    const selected = new Set(selectedTitles || []);
+    return catalogItems.filter(item => selected.has(item.title)).map(item => item.title);
+  }
   const selectedKeys = uniqueStrings_(selectedTitles || []).map(normalizeTitle_);
   const baseKey = normalizeTitle_(NATURAL_ADVANCED_BASE_TITLE);
   const variantSelected = selectedKeys.some(key =>

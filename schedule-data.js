@@ -1,7 +1,9 @@
 (function (root, factory) {
   const contractFactory = typeof module === 'object' && module.exports
     ? require('./source-contract.js') : root.TSchoolSourceContractFactory;
-  const api = factory(contractFactory);
+  const sheetFactory = typeof module === 'object' && module.exports
+    ? require('./sheet-source.js') : root.TSchoolSheetSourceFactory;
+  const api = factory(contractFactory, sheetFactory);
 
   if (typeof module === 'object' && module.exports) {
     module.exports = api;
@@ -10,13 +12,14 @@
   if (root) {
     root.TSchoolScheduleData = api;
   }
-})(typeof window !== 'undefined' ? window : globalThis, function (contractFactory) {
+})(typeof window !== 'undefined' ? window : globalThis, function (contractFactory, sheetFactory) {
   'use strict';
 
   const API_URL = 'https://script.google.com/macros/s/AKfycbxoTgVMnLevp0OPZQEFOYscUrXD1iMagasz2WPArXpkG-w6jRygVMS8kOwcywhnQW_i/exec';
   // Set only during the verified production cutover; never from installer input.
   const NORMALIZED_API_ORIGIN = '';
   const sourceContract = contractFactory();
+  const sheetSource = sheetFactory();
   const GRADE_API_NAMES = {
     '高一': '一年級',
     '高二': '二年級',
@@ -88,11 +91,14 @@
   }
 
   function isCourseSelectionHidden(value) {
-    return normalizeTitle(value) === normalizeTitle(NATURAL_ADVANCED_BASE_TITLE) ||
-      isScheduleNoteTitle(value);
+    return isScheduleNoteTitle(value);
   }
 
   function applyCourseSelectionRules(selectedTitles, catalogItems) {
+    if ((catalogItems || []).some(item => item && Object.prototype.hasOwnProperty.call(item, 'category'))) {
+      const selected = new Set(selectedTitles || []);
+      return catalogItems.filter(item => selected.has(item.title)).map(item => item.title);
+    }
     const selectedKeys = new Set((selectedTitles || []).map(normalizeTitle).filter(Boolean));
     const baseKey = normalizeTitle(NATURAL_ADVANCED_BASE_TITLE);
     const variantKeys = NATURAL_ADVANCED_VARIANT_TITLES.map(normalizeTitle);
@@ -110,6 +116,7 @@
   // This is a presentation default, not a course/activity classifier. It only
   // decides which titles are initially checked and placed after the opt-in list.
   function isDefaultSelectedTitle(value) {
+    if (value && typeof value === 'object') return value.category === '必修';
     const title = normalizeTitle(value);
 
     return isScheduleNoteTitle(title) ||
@@ -505,8 +512,9 @@
 
   function sortCatalogItemsForSelection(catalogItems) {
     const items = Array.isArray(catalogItems) ? catalogItems : [];
-    const regularItems = items.filter(item => !isDefaultSelectedTitle(item && item.title));
-    const defaultSelectedItems = items.filter(item => isDefaultSelectedTitle(item && item.title));
+    const isDefault = item => isDefaultSelectedTitle(item && Object.prototype.hasOwnProperty.call(item, 'category') ? item : item && item.title);
+    const regularItems = items.filter(item => !isDefault(item));
+    const defaultSelectedItems = items.filter(item => isDefault(item));
 
     return sortCatalogItemsBySimilarity(regularItems)
       .concat(sortCatalogItemsBySimilarity(defaultSelectedItems));
@@ -740,6 +748,16 @@
   }
 
   function summarizePayload(payload, nowValue) {
+    if (payload && payload.sourceKind === 'course-index') {
+      const all = sortCatalogItemsForSelection(payload.catalog);
+      return {
+        sourceKind: 'course-index', currentGrade: GRADE_API_NAMES[payload.gradeName],
+        weekCount: 0, firstDate: null, lastDate: null, firstDateKey: '', lastDateKey: '',
+        termKey: '', catalogFingerprintVersion: CATALOG_FINGERPRINT_VERSION,
+        catalogFingerprint: makeCatalogFingerprint('', '', all), updateValues: [],
+        catalog: { all, termItems: all, vacationItems: [] }
+      };
+    }
     if (payload && payload.schemaVersion === 1 && payload.schedule) {
       sourceContract.validateResponse(payload, payload.schedule.grade.label, nowValue || new Date());
       const source = payload.schedule;
@@ -811,20 +829,16 @@
     let lastError = null;
     for (let attempt = 1; attempt <= SOURCE_FETCH_MAX_ATTEMPTS; attempt += 1) {
       try {
-        const response = await request(NORMALIZED_API_ORIGIN
-          ? NORMALIZED_API_ORIGIN + '/v1/schedules/' + (Object.keys(GRADE_API_NAMES).indexOf(gradeName) + 1)
-          : API_URL + '?grade=' + encodeURIComponent(apiGrade), {
-          redirect: NORMALIZED_API_ORIGIN ? 'error' : 'follow',
-          cache: 'no-store'
+        const response = await request(sheetSource.catalogUrl(gradeName), {
+          redirect: 'follow', cache: 'no-store', credentials: 'omit'
         });
         if (!response.ok) {
           const error = new Error('課表來源回應失敗（HTTP ' + response.status + '）。');
           error.status = Number(response.status) || 0;
           throw error;
         }
-        const payload = await response.json();
-        if (NORMALIZED_API_ORIGIN) return sourceContract.validateResponse(payload, gradeName, new Date());
-        return assertPayload(payload);
+        return { sourceKind: 'course-index', gradeName,
+          catalog: sheetSource.parseCatalog(sheetSource.parseCsv(await response.text())) };
       } catch (error) {
         lastError = error;
         const status = Number(error && error.status) || 0;
@@ -845,6 +859,8 @@
     NORMALIZED_API_ORIGIN,
     sourceContract,
     createSourceContract: contractFactory,
+    createSheetSource: sheetFactory,
+    sheetSource,
     GRADE_API_NAMES,
     CATALOG_FINGERPRINT_VERSION,
     makeAcademicTermKey,

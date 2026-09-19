@@ -549,7 +549,7 @@
     <section class="term-transition" id="term-transition" role="alert" aria-live="assertive" tabindex="-1" hidden>
       <div>
         <h2 id="term-transition-title">請完成新學期設定</h2>
-        <p id="term-transition-message">確認新學期年級 → 選擇課程與活動 → 完成選擇並同步</p>
+        <p id="term-transition-message">確認新學期年級 → 選擇課程 → 完成選擇並同步</p>
         <p id="term-transition-outline-message" hidden></p>
         <button type="button" id="term-transition-action">前往確認年級</button>
       </div>
@@ -619,10 +619,10 @@
       </section>
 
       <section class="section" id="course-section">
-        <div class="section-head"><h2>課程與活動</h2><span id="course-count">已選 0 項</span></div>
+        <div class="section-head"><h2>課程</h2><span id="course-count">已選 0 項</span></div>
         <div class="course-toolbar">
-          <input type="search" id="course-search" placeholder="輸入課程、活動名稱或班別等" aria-label="搜尋課程與活動">
-          <button type="button" class="icon-button" id="course-search-action" aria-label="搜尋課程與活動">⌕</button>
+          <input type="search" id="course-search" placeholder="輸入課程、活動名稱或班別等" aria-label="搜尋課程">
+          <button type="button" class="icon-button" id="course-search-action" aria-label="搜尋課程">⌕</button>
         </div>
         <div class="course-list-shell" id="course-list-shell" data-can-scroll-up="false" data-can-scroll-down="false">
           <div class="course-list" id="course-list"></div>
@@ -701,11 +701,11 @@
       function normalize(value) { return String(value || '').replace(/\s+/g, '').toLowerCase(); }
       function isCourseSelectionHidden(value) {
         var title = normalize(value);
-        return title === normalize(NATURAL_ADVANCED_BASE_TITLE) ||
-          title.indexOf(normalize(SCHEDULE_NOTE_TITLE_PREFIX)) === 0;
+        return title.indexOf(normalize(SCHEDULE_NOTE_TITLE_PREFIX)) === 0;
       }
       function defaultCalendarName(gradeName) { return (gradeName || '高一') + '行程｜T-SCHOOL Schedule Sync'; }
       function isDefaultSelectedTitle(value) {
+        if (value && typeof value === 'object') return value.category === '必修';
         var title = normalize(value);
         return title.indexOf(normalize(SCHEDULE_NOTE_TITLE_PREFIX)) === 0 ||
           /全校|學習分享會|補假|補課|放假|節假日|國定假日|模擬考|模考|開學|始業式|結業式|休業式|春節|元旦|端午節|中秋節|清明節|兒童節|國慶日|和平紀念日|開國紀念日|勞動節|光復節|教師節|行憲紀念日/.test(title);
@@ -713,7 +713,7 @@
       function seedDefaultSelections(source) {
         var catalog = source && source.catalog || {};
         (catalog.all || []).forEach(function (item) {
-          if (isDefaultSelectedTitle(item.title)) selectedTitles.add(item.title);
+          if (isDefaultSelectedTitle(item)) selectedTitles.add(item.title);
         });
       }
       function setSyncMenuOpen(open, focusFirstItem) {
@@ -1031,7 +1031,7 @@
         byId('top-status').textContent = verifyingTerm
           ? '正在確認新學期課表'
           : (needsTermSelection
-          ? '待重新選擇課程與活動'
+          ? '待重新選擇課程'
           : (sourceUnavailable
             ? '課表來源暫時離線'
           : (hasManagedDeletionReviews
@@ -1065,7 +1065,7 @@
         byId('term-transition-message').textContent =
           verifying
             ? '系統會觀察 30 分鐘。期間不會改動日曆、清空選擇或寄送新學期提醒'
-            : '確認新學期年級 → 選擇課程與活動 → 完成選擇並同步';
+            : '確認新學期年級 → 選擇課程 → 完成選擇並同步';
         var outlineMessage = byId('term-transition-outline-message');
         if (verifying) {
           outlineMessage.hidden = !transition.verificationDueAt;
@@ -1080,11 +1080,11 @@
         outlineMessage.hidden = !indexWarning && !missingCurrentOutline &&
           !transition.noticeFailed && !noticeScheduled;
         outlineMessage.textContent = transition.noticeFailed
-          ? '提醒信暫時無法寄出，但這裡會持續保留重新選擇課程與活動的提示'
+          ? '提醒信暫時無法寄出，但這裡會持續保留重新選擇課程的提示'
           : (indexWarning
             ? indexWarning
             : (missingCurrentOutline
-              ? '這學期的課綱尚未加入中央索引；可先同步基本行程。上架後，自動同步或下一次手動同步會補入課綱'
+              ? '這學期尚無完整可讀的課綱，請確認中央索引與來源權限後再同步'
               : (noticeScheduled
                 ? '新學期提醒預計於 ' +
                   new Date(transition.noticeScheduledFor).toLocaleString('zh-TW') + ' 寄出'
@@ -1293,10 +1293,10 @@
           .filter(function (item) { return normalize(item.title).indexOf(query) !== -1; });
         var sections = [];
         if (termItems.length) {
-          sections.push(renderCourseGroup(hasVacationItems ? '學期間課程與活動' : '', termItems));
+          sections.push(renderCourseGroup(hasVacationItems ? '學期間課程' : '', termItems));
         }
         if (vacationItems.length) {
-          sections.push(renderCourseGroup('寒暑假期間課程與活動', vacationItems));
+          sections.push(renderCourseGroup('寒暑假期間課程', vacationItems));
         }
         byId('course-list').innerHTML = sections.join('') || '<p class="empty">找不到符合條件的項目，請調整搜尋文字</p>';
         var selectedCount = (catalog.all || []).filter(function (item) {
@@ -1338,7 +1338,7 @@
         var isSearching = Boolean(byId('course-search').value);
         var action = byId('course-search-action');
         action.textContent = isSearching ? '×' : '⌕';
-        action.setAttribute('aria-label', isSearching ? '取消搜尋' : '搜尋課程與活動');
+        action.setAttribute('aria-label', isSearching ? '取消搜尋' : '搜尋課程');
       }
 
       function renderPending(items) {
@@ -1360,7 +1360,7 @@
             '<p class="managed-deletion-meta">' + escapeHtml(meta.join(' · ')) + '</p>' +
             '<div class="managed-deletion-actions">' +
               '<button type="button" data-delete-managed-occurrence="' + escapeHtml(item.id) + '">刪除單一事件</button>' +
-              '<button type="button" data-delete-managed-title="' + escapeHtml(item.id) + '">刪除整門課程 / 活動</button>' +
+              '<button type="button" data-delete-managed-title="' + escapeHtml(item.id) + '">刪除整門課程</button>' +
             '</div></article>';
         }).join('');
       }
@@ -1721,7 +1721,7 @@
         if (deleteWholeTitle && !window.confirm(
           '這會將「' + review.originalTitle + '」今天以後的所有受管理行程移至日曆垃圾桶，並從同步選擇移除。同日曆中的私人事件不會受影響。是否繼續？'
         )) return;
-        setBusy(true, deleteWholeTitle ? '正在刪除整門課程或活動…' : '正在刪除單一事件…');
+        setBusy(true, deleteWholeTitle ? '正在刪除整門課程…' : '正在刪除單一事件…');
         try {
           if (!await flushPendingAutoSave()) throw new Error('最新設定尚未儲存，已取消這次操作');
           var result = await server(
