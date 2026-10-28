@@ -4068,7 +4068,10 @@ function prepareSyncOperations_(plan, state, settings, job) {
       forceToken: job.forceCalendarCheck ? pair.newKey : ''
     });
   });
-  plan.additions.forEach(item => {
+  // Outline Sheets are read one course tab at a time, so their natural order
+  // groups a whole semester by course. Build new Calendar events in schedule
+  // order instead, ensuring every batch fills the nearest dates first.
+  plan.additions.slice().sort(compareScheduleEventsForSync_).forEach(item => {
     operations.push({
       type: 'create',
       newKey: makeOccurrenceKey_(item),
@@ -4085,6 +4088,23 @@ function prepareSyncOperations_(plan, state, settings, job) {
     });
   });
   return { state, operations };
+}
+
+function compareScheduleEventsForSync_(left, right) {
+  const leftStart = new Date(left && left.start).getTime();
+  const rightStart = new Date(right && right.start).getTime();
+  if (leftStart !== rightStart) return leftStart - rightStart;
+
+  const leftEnd = new Date(left && left.end).getTime();
+  const rightEnd = new Date(right && right.end).getTime();
+  if (leftEnd !== rightEnd) return leftEnd - rightEnd;
+
+  const titleOrder = compareCanonicalStrings_(
+    normalizeTitle_(left && left.originalTitle),
+    normalizeTitle_(right && right.originalTitle)
+  );
+  if (titleOrder) return titleOrder;
+  return compareCanonicalStrings_(makeOccurrenceKey_(left), makeOccurrenceKey_(right));
 }
 
 function countPendingSyncOperations_(plan, settings, forceCalendarCheck, forceProcessedKeys) {
@@ -5387,7 +5407,7 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
     reportProgress_('正在更新日曆事件…');
   });
 
-  plan.additions.forEach(item => {
+  plan.additions.slice().sort(compareScheduleEventsForSync_).forEach(item => {
     const key = makeOccurrenceKey_(item);
     const signature = makeEventSignature_(item, settings);
     const event = createCalendarEvent_(calendar, item, key, settings);

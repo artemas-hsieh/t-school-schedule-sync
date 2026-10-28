@@ -6983,6 +6983,64 @@ assert.equal(
   '使用者在誤刪確認中移除整項備註活動後，後續同步不得再加回'
 );
 const batchDesired = Array.from({ length: 422 }, (_, index) => makeBatchFixtureEvent(index));
+
+// Source rows arrive grouped by course tab. The first batch must still create
+// the nearest 40 occurrences across all courses, rather than completing one
+// course's whole semester before moving to the next course.
+const chronologicalTitles = ['週四跨校選修', '週五跨校選修', '物理複習與解題'];
+const courseGroupedDesired = chronologicalTitles.flatMap((title, titleIndex) =>
+  Array.from({ length: 20 }, (_, courseIndex) => Object.assign(
+    {},
+    makeBatchFixtureEvent(courseIndex * chronologicalTitles.length + titleIndex),
+    { originalTitle: title }
+  ))
+);
+const sameDayLaterEvent = Object.assign({}, makeBatchFixtureEvent(0), {
+  originalTitle: '同日較晚課程',
+  periodStart: 5,
+  periodEnd: 5,
+  startTime: '13:25',
+  endTime: '14:15',
+  start: new Date('2026-08-01T13:25:00+08:00'),
+  end: new Date('2026-08-01T14:15:00+08:00')
+});
+assert.deepEqual(
+  [sameDayLaterEvent, courseGroupedDesired[0]]
+    .sort(context.compareScheduleEventsForSync_)
+    .map(event => event.originalTitle),
+  [courseGroupedDesired[0].originalTitle, '同日較晚課程'],
+  '同一天的新增事件應依開始時間由早到晚建立'
+);
+const chronologicalCalendar = createMockCalendar('chronological-first-batch');
+const chronologicalJob = makeSyncJobForTest(courseGroupedDesired.length, false);
+const chronologicalFirstBatch = context.runSyncJobBatch_(
+  chronologicalJob,
+  chronologicalCalendar,
+  {},
+  courseGroupedDesired,
+  batchSettings,
+  '2026-08-01'
+);
+assert.equal(chronologicalFirstBatch.completedOperations, 40);
+assert.equal(chronologicalFirstBatch.pending, true);
+const chronologicalCreated = chronologicalCalendar.activeEvents();
+assert.deepEqual(
+  chronologicalCreated.map(event => event.getStartTime().toISOString()),
+  chronologicalCreated.map(event => event.getStartTime().toISOString()).slice().sort(),
+  '首次同步的新增事件必須依開始日期與時間由近到遠建立'
+);
+assert.deepEqual(
+  chronologicalCreated.map(event => event.getStartTime().toISOString()),
+  courseGroupedDesired.slice().sort(context.compareScheduleEventsForSync_)
+    .slice(0, 40).map(event => event.start.toISOString()),
+  '第一批應涵蓋所有課程中距今最近的 40 筆事件'
+);
+assert.deepEqual(
+  Array.from(new Set(chronologicalCreated.map(event => event.getTitle().replace(/ \[.*$/, '')))).sort(),
+  chronologicalTitles.slice().sort(),
+  '跨校選修與物理課不得因來源分頁順序延後到整學期尾端批次'
+);
+
 const batchCalendar = createMockCalendar();
 let batchState = {};
 let batchJob = makeSyncJobForTest(batchDesired.length, false);
