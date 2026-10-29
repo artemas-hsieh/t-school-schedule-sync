@@ -273,3 +273,14 @@ npm run preview:schedule-adjustment-email
 - 因環境、fixture 或外部服務限制而未完成的驗證。
 
 不得在測試未執行、被跳過或結果不完整時宣稱「所有測試通過」。
+
+## 事件時區
+
+```bash
+node tests/calendar-timezone-test.js
+node tests/normalized-source-test.js
+```
+
+檢查事件起訖明確指定 Asia/Taipei、絕對時間不變、全天事件略過、iCalUID 與 API Event ID 區分、來源不唯一及 API 失敗停止寫入、專用日曆時區修復與私人日曆設定保留
+
+雲端另確認新事件及強制修復後的既有事件顯示 GMT+8，並確認中斷續跑不重複建立事件

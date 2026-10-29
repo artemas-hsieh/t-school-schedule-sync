@@ -133,6 +133,7 @@ const calendar={
     return event;
   }
 };
+require('./calendar-timezone-fixture')(batch)(calendar);
 const settings={descriptionPreset:'standard',customDescription:'',reminderMode:'none',reminderMinutes:10};
 const desired=batch.parseSchedulePayload_({...permission,schedule:schedules[0]},'高一',now).events.filter(e=>!e.isAllDay).slice(0,3);
 const existingKey=batch.makeOccurrenceKey_(desired[0]);

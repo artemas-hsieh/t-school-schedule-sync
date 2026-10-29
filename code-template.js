@@ -2820,7 +2820,7 @@ function createDedicatedCalendarForUi(input) {
   assertSetupImported_(settings);
   const gradeName = sanitizeGrade_(input && input.gradeName || settings.gradeName);
   const calendarName = sanitizeCalendarName_(input && input.calendarName, gradeName);
-  const calendar = CalendarApp.createCalendar(calendarName, { selected: true });
+  const calendar = CalendarApp.createCalendar(calendarName, { timeZone: TIMEZONE, selected: true });
   applyNewManagedCalendarPresentation_(calendar);
   const result = {
     message: '已建立專用日曆',
@@ -3251,7 +3251,9 @@ function buildDedicatedCalendarName_(settings) {
 
 function ensureSyncCalendar_(settings) {
   if (settings.calendarId) {
-    return assertOwnedSyncCalendar_(settings.calendarId);
+    const calendar = assertOwnedSyncCalendar_(settings.calendarId);
+    ensureManagedCalendarTimeZone_(calendar);
+    return calendar;
   }
 
   const calendarName = buildDedicatedCalendarName_(settings);
@@ -3263,18 +3265,28 @@ function ensureSyncCalendar_(settings) {
     );
   }
   if (recoverableCalendars.length === 1) {
+    ensureManagedCalendarTimeZone_(recoverableCalendars[0]);
     settings.calendarId = recoverableCalendars[0].getId();
     saveSettings_(settings);
     return recoverableCalendars[0];
   }
 
   const calendar = CalendarApp.createCalendar(calendarName, {
+    timeZone: TIMEZONE,
     selected: true
   });
   applyNewManagedCalendarPresentation_(calendar);
   settings.calendarId = calendar.getId();
   saveSettings_(settings);
   return calendar;
+}
+
+function ensureManagedCalendarTimeZone_(calendar) {
+  // Only change calendars created by this tool, preserving personal calendar settings
+  if (calendar.getDescription() === MANAGED_CALENDAR_DESCRIPTION &&
+      calendar.getTimeZone() !== TIMEZONE) {
+    calendar.setTimeZone(TIMEZONE);
+  }
 }
 
 function applyNewManagedCalendarPresentation_(calendar) {
@@ -4169,7 +4181,7 @@ function applySyncOperation_(operation, state, calendar, settings, recovering, s
     }
   }
 
-  const updateOptions = { recovering };
+  const updateOptions = { recovering, forceCalendarCheck: Boolean(job.forceCalendarCheck) };
   let calendarEventId;
   if (operation.type === 'metadata') {
     calendarEventId = migrateCalendarEventMetadata_(
@@ -5396,7 +5408,7 @@ function applySyncPlan_(calendar, oldState, plan, settings, options) {
       calendarEventId = updateCalendarOutlineFields_(calendar, calendarEventId, pair.newItem, pair.newKey, settings);
       outlineUpdated += 1;
     } else {
-      calendarEventId = updateCalendarEvent_(calendar, calendarEventId, pair.newItem, pair.newKey, settings);
+      calendarEventId = updateCalendarEvent_(calendar, calendarEventId, pair.newItem, pair.newKey, settings, undefined, options);
       updated += 1;
       if (pair.oldItem.stateKey !== pair.newKey) {
         changes.push({ type: '調整', oldItem: pair.oldItem, newItem: pair.newItem });
@@ -5440,9 +5452,40 @@ function createCalendarEvent_(calendar, item, stateKey, settings) {
     ? calendar.createAllDayEvent(buildEventTitle_(item, settings), item.start, options)
     : calendar.createEvent(buildEventTitle_(item, settings), item.start, item.end, options);
   setManagedEventTags_(event, stateKey);
+  applyCalendarEventTimeZone_(calendar, event, item);
   applyEventAvailability_(event, item);
   applyEventReminders_(event, settings);
   return event;
+}
+
+function applyCalendarEventTimeZone_(calendar, event, item) {
+  if (item.isAllDay) return;
+  const baseUrl = 'https://www.googleapis.com/calendar/v3/calendars/' +
+    encodeURIComponent(calendar.getId()) + '/events';
+  const headers = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  // CalendarApp exposes iCalUID, which is different from the Calendar API event ID
+  const lookup = UrlFetchApp.fetch(baseUrl + '?iCalUID=' + encodeURIComponent(event.getId()), {
+    headers, muteHttpExceptions: true, followRedirects: false
+  });
+  if (lookup.getResponseCode() !== 200) {
+    throw new Error('無法讀取事件時區，請稍後重試');
+  }
+  const result = JSON.parse(lookup.getContentText());
+  const matches = (result.items || []).filter(item => item.iCalUID === event.getId() && item.status !== 'cancelled');
+  if (result.nextPageToken || matches.length !== 1 || !matches[0].id) {
+    throw new Error('無法唯一辨識事件，已停止設定時區');
+  }
+  const response = UrlFetchApp.fetch(baseUrl + '/' + encodeURIComponent(matches[0].id), {
+    method: 'patch', headers, contentType: 'application/json',
+    payload: JSON.stringify({
+      start: { dateTime: item.start.toISOString(), timeZone: TIMEZONE },
+      end: { dateTime: item.end.toISOString(), timeZone: TIMEZONE }
+    }),
+    muteHttpExceptions: true, followRedirects: false
+  });
+  if (response.getResponseCode() !== 200) {
+    throw new Error('無法設定事件為臺北時區，請稍後重試');
+  }
 }
 
 function isMissingCalendarEventError_(error) {
@@ -5481,6 +5524,7 @@ function createCalendarEventIdempotent_(calendar, item, stateKey, settings) {
       const location = buildEventLocation_(item);
       const description = buildManagedDescription_(item, stateKey, settings);
       setManagedEventTags_(event, stateKey);
+      applyCalendarEventTimeZone_(calendar, event, item);
       if (event.getTitle() !== title) event.setTitle(title);
       if ((event.getLocation() || '') !== location) event.setLocation(location);
       if ((event.getDescription() || '') !== description) event.setDescription(description);
@@ -5532,7 +5576,9 @@ function updateCalendarEvent_(calendar, eventId, item, stateKey, settings, expec
     if (item.isAllDay) {
       if (formatDateKey_(event.getAllDayStartDate()) !== item.dateKey) event.setAllDayDate(item.start);
     } else if (event.getStartTime().getTime() !== item.start.getTime() || event.getEndTime().getTime() !== item.end.getTime()) {
-      event.setTime(item.start, item.end);
+      applyCalendarEventTimeZone_(calendar, event, item);
+    } else if (!item.isAllDay && options && options.forceCalendarCheck) {
+      applyCalendarEventTimeZone_(calendar, event, item);
     }
     if ((event.getLocation() || '') !== location) event.setLocation(location);
     setManagedEventTags_(event, stateKey);

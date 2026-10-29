@@ -2240,12 +2240,12 @@ assert.match(
 assert.equal(generatedCode.includes('COURSE_DICTIONARY'), false);
 assert.match(
   generatedCode,
-  /function createDedicatedCalendarForUi\(input\)[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{ selected: true \}\)/,
+  /function createDedicatedCalendarForUi\(input\)[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{ timeZone: TIMEZONE, selected: true \}\)/,
   '控制臺手動建立的專用 Calendar 應預設顯示'
 );
 assert.match(
   generatedCode,
-  /function ensureSyncCalendar_\(settings\)[\s\S]*?const calendarName = buildDedicatedCalendarName_\(settings\);[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{\s*selected: true\s*\}\)/,
+  /function ensureSyncCalendar_\(settings\)[\s\S]*?const calendarName = buildDedicatedCalendarName_\(settings\);[\s\S]*?CalendarApp\.createCalendar\(calendarName, \{\s*timeZone: TIMEZONE,\s*selected: true\s*\}\)/,
   '首次同步自動建立的專用 Calendar 應預設顯示'
 );
 assert.match(
@@ -6672,6 +6672,8 @@ assert.equal(embeddedOutlineIndex.source, 'embedded_fallback');
 assert.equal(embeddedOutlineIndex.setsByGrade['高二'][0].key, '114-2-high2');
 context.resetCourseOutlineSourceIndexRuntimeCache_();
 
+const registerTimeZoneCalendar = require('./calendar-timezone-fixture')(context);
+
 function createMockCalendar(calendarId = 'mock-calendar') {
   let eventCounter = 0;
   const events = new Map();
@@ -6727,7 +6729,7 @@ function createMockCalendar(calendarId = 'mock-calendar') {
     return event;
   }
 
-  return {
+  const calendar = {
     getId() { return calendarId; },
     createEvent(title, start, end, options) {
       return makeEvent(title, start, end, options, false);
@@ -6758,6 +6760,8 @@ function createMockCalendar(calendarId = 'mock-calendar') {
       return Array.from(events.values()).filter(event => !event.deleted);
     }
   };
+  registerTimeZoneCalendar(calendar);
+  return calendar;
 }
 
 function makeBatchFixtureEvent(index) {
