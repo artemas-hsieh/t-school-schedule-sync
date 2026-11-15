@@ -78,7 +78,6 @@ const MOTION_CONFIG = Object.freeze({
   heroTiltMaxY: 8,
   heroTiltEase: 0.1,
   heroTiltShadowTravel: 3,
-  cursorPositionEase: 0.38,
   cursorAngleEase: 0.3,
   // Native macOS pointer tilt; sway values below control movement feedback.
   cursorBaseAngle: -24,
@@ -3821,6 +3820,10 @@ function initKineticCursor() {
     const dy = event.clientY - previousY;
     targetX = event.clientX;
     targetY = event.clientY;
+    currentX = targetX;
+    currentY = targetY;
+    cursor.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+    positionCursorCaption();
 
     if (Math.hypot(dx, dy) > 1.5) {
       targetAngle = clamp(
@@ -3885,8 +3888,6 @@ function initKineticCursor() {
 
   function animate() {
     frameId = 0;
-    currentX += (targetX - currentX) * MOTION_CONFIG.cursorPositionEase;
-    currentY += (targetY - currentY) * MOTION_CONFIG.cursorPositionEase;
     let angleDelta = ((targetAngle - currentAngle + 540) % 360) - 180;
     currentAngle += angleDelta * MOTION_CONFIG.cursorAngleEase;
     cursorVelocity += (targetCursorVelocity - cursorVelocity) * 0.24;
@@ -3905,7 +3906,6 @@ function initKineticCursor() {
 
     angleDelta = ((targetAngle - currentAngle + 540) % 360) - 180;
     const motionPending =
-      Math.hypot(targetX - currentX, targetY - currentY) > 0.08 ||
       Math.abs(angleDelta) > 0.08 ||
       Math.abs(cursorVelocity) > 0.004 ||
       Math.abs(targetCursorVelocity) > 0.004;
