@@ -1805,7 +1805,7 @@ textarea::placeholder {
 }
 
 .journey-step.is-preview {
-  max-height: 250px;
+  max-height: var(--step-preview-height);
   padding-top: 0;
 }
 
@@ -1953,6 +1953,13 @@ textarea::placeholder {
   --connector-fog-rgb: 231, 241, 237;
   /* Increase bleed for a longer blur transition; adjust radii for intensity. */
   --fog-layer-bleed: 56px;
+  --step-preview-height: 250px;
+  --step-preview-mask: linear-gradient(
+    to bottom,
+    #000 0,
+    rgba(0, 0, 0, 0.92) calc(var(--step-preview-height) * 0.44),
+    transparent var(--step-preview-height)
+  );
   --fog-blur-1: 2px;
   --fog-blur-2: 6px;
   --fog-blur-3: 14px;
@@ -3215,8 +3222,8 @@ select,
   max-height: 260px;
   padding-top: var(--space-8);
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.92) 44%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.92) 44%, transparent 100%);
+  -webkit-mask-image: var(--step-preview-mask);
+  mask-image: var(--step-preview-mask);
 }
 
 .journey-step.is-preview .step-card {
@@ -3249,6 +3256,7 @@ select,
 
 .journey-step.is-preview > .progressive-blur {
   display: block;
+  max-height: var(--step-preview-height);
 }
 
 .has-blur-visibility-observer
@@ -3268,7 +3276,7 @@ select,
   height: var(--past-fog-height);
   overflow: hidden;
   background: linear-gradient(
-    to bottom,
+    var(--past-fog-direction),
     rgba(var(--connector-fog-rgb), 0) 0%,
     rgba(var(--connector-fog-rgb), var(--past-fog-opacity)) var(--past-fog-entry-fade-length),
     rgba(var(--connector-fog-rgb), var(--past-fog-opacity)) calc(100% - var(--past-fog-boundary-clear-distance)),
@@ -3277,8 +3285,16 @@ select,
   pointer-events: none;
 }
 
-.journey-step.is-past:has(+ .journey-step.is-current) > .past-progressive-blur {
+.journey-step.is-past:has(+ .journey-step.is-current) > .past-progressive-blur,
+.journey-step.is-current + .journey-step:not(.is-preview) > .past-progressive-blur {
   display: block;
+}
+
+/* Mirror the previous card's focus edge on the next unlocked card. */
+.journey-step.is-current + .journey-step:not(.is-preview) > .past-progressive-blur {
+  --past-fog-direction: to top;
+  top: 0;
+  bottom: auto;
 }
 
 .journey-step.is-transitioning-to-past > .past-progressive-blur,
@@ -3418,12 +3434,13 @@ select,
 }
 
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .journey-step.is-preview::after,
+  .journey-step.is-current + .journey-step::after,
   .journey-step.is-past:has(+ .journey-step.is-current)::after {
     display: none;
   }
 
   .journey-step.is-preview .step-card,
+  .journey-step.is-current + .journey-step .step-card,
   .journey-step.is-past:has(+ .journey-step.is-current) .step-card {
     filter: none;
   }
@@ -3508,6 +3525,9 @@ select,
 
 .step-complete-button:disabled {
   cursor: not-allowed;
+}
+
+.step-complete-button:disabled:not([aria-busy="true"]) {
   opacity: 0.42;
   box-shadow: none;
 }
@@ -3617,7 +3637,7 @@ select,
 }
 
 .journey-step.is-preview {
-  max-height: 250px;
+  max-height: var(--step-preview-height);
   padding-top: 0;
 }
 
@@ -3657,7 +3677,7 @@ select,
   pointer-events: none;
 }
 
-.journey-step:has(+ .journey-step.is-preview) .step-completion::after {
+.journey-step.is-current .step-completion::after {
   position: absolute;
   inset: 50% 0 calc(-1 * var(--space-5));
   z-index: 2;

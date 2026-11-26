@@ -2673,6 +2673,10 @@ function initStepJourney() {
       return false;
     }
 
+    if (direction < 0 && maxUnlockedStep > 1 && !homeEntryScrollActive) {
+      return false;
+    }
+
     const geometry = getHomeEntryScrollGeometry();
     const currentScroll = Number.isFinite(lenis.animatedScroll)
       ? lenis.animatedScroll
